@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         ⏳️待合室タイマー
 // @namespace    http://tampermonkey.net/
-// @version      4.1
-// @description  有効期限を中央下に表示、進捗メーター5px、10分で左端赤、5分で右端赤、3分で下端赤、開始
+// @version      5.00
+// @description  有効期限を中央下に表示
 // @match        https://reserve.tokyodisneyresort.jp/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/machiai.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/main/machiai.js
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/refs/heads/machiai.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/main/refs/heads/machiai.js
 // @grant        none
 // ==/UserScript==
 
