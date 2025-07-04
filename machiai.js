@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ⏳️待合室タイマー
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.1
 // @description  有効期限を中央下に表示、進捗メーター5px、10分で左端赤、5分で右端赤、3分で下端赤、開始
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/machiai.js
@@ -13,7 +13,11 @@
   'use strict';
 
   const duration_min = 15;
-  const uniqueId = `queuePassedLimit_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+  if (document.querySelector('#queuePassedLimit_v1')) {
+    console.log('⏳️既にこのIDのタイマーが起動しています');
+    return;
+  }
 
   const dateFormat = (date, format) => {
     const _fmt = {
@@ -24,7 +28,6 @@
     return format.replace(/hh|mm|ss/g, fmt => _fmt[fmt](date));
   };
 
-  // スクリプト開始時刻をログ出力
   const now = new Date();
   console.log(`⏳️時刻 ${dateFormat(now, 'hh:mm:ss')}`);
 
@@ -43,7 +46,7 @@
   }
 
   const container = document.createElement('div');
-  container.id = uniqueId;
+  container.id = 'queuePassedLimit_v1';
   container.style.cssText = `
     position: fixed !important;
     left: 50% !important;
