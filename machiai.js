@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ⏳️待合室タイマー
 // @namespace    http://tampermonkey.net/
-// @version      5.00
-// @description  有効期限を中央下に表示
+// @version      5.05
+// @description  有効期限を中央下に表示、開始時刻を左下パネル・ログに0.000秒形式で表示
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/refs/heads/machiai.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/main/refs/heads/machiai.js
@@ -15,9 +15,39 @@
   const duration_min = 15;
 
   if (document.querySelector('#queuePassedLimit_v1')) {
-    console.log('⏳️既にこのIDのタイマーが起動しています');
+    console.log('既にこのIDのタイマーが起動しています');
     return;
   }
+
+  // 0.000秒までの時刻フォーマット
+  const dateFormatWithMs = (date) => {
+    const hh = ('0' + date.getHours()).slice(-2);
+    const mm = ('0' + date.getMinutes()).slice(-2);
+    const ss = ('0' + date.getSeconds()).slice(-2);
+    const ms = ('00' + date.getMilliseconds()).slice(-3);
+    return `${hh}:${mm}:${ss}.${ms}`;
+  };
+
+  // 起動時刻ログ＆パネル
+  const now = new Date();
+  const startStr = dateFormatWithMs(now);
+  console.log(`開始 ${startStr}`);
+
+  const startPanel = document.createElement('div');
+  startPanel.style.cssText = `
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    padding: 4px;
+    background-color: rgba(0,0,0,0.4);
+    color: white;
+    font-size: 12px;
+    z-index: 20000;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  `;
+  startPanel.textContent = `開始 ${startStr}`;
+  document.body.appendChild(startPanel);
 
   const dateFormat = (date, format) => {
     const _fmt = {
@@ -27,9 +57,6 @@
     };
     return format.replace(/hh|mm|ss/g, fmt => _fmt[fmt](date));
   };
-
-  const now = new Date();
-  console.log(`⏳️時刻 ${dateFormat(now, 'hh:mm:ss')}`);
 
   const getHMS = (total_sec) => {
     if (total_sec <= 0) return [0, 0, 0];
@@ -199,5 +226,6 @@
   container.addEventListener('click', () => {
     clearInterval(timerId);
     container.remove();
+    startPanel.remove();
   });
 })();
