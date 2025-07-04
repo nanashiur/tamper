@@ -4,6 +4,8 @@
 // @version      3.30
 // @description  Pre-reloads at 10:52:00 and reloads at 10:59:42.4 with random delay (0–500ms).
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
