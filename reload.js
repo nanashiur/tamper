@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ⏰️ 42.4 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      3.32
+// @version      3.33
 // @description  Pre-reloads at 10:52:00 and reloads at 10:59:42.4 with random delay (0–500ms).
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/reload.js
