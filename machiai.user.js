@@ -4,8 +4,8 @@
 // @version      3.7
 // @description  有効期限を中央下に表示、進捗メーター5px、10分で左端赤、5分で右端赤、3分で下端赤、開始時刻ログ
 // @match        https://reserve.tokyodisneyresort.jp/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/machiai
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/machiai
+// @updateURL    https://github.com/nanashiur/tamper/raw/refs/heads/main/machiai.user.js
+// @downloadURL  https://github.com/nanashiur/tamper/raw/refs/heads/main/machiai.user.js
 // @grant        none
 // ==/UserScript==
 
