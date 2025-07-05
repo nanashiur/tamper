@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         ⏰️ 42.4 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      4.10
+// @version      4.11
 // @description  Pre-reloads at 10:52:00 with 0–2000ms delay, reloads at 10:59:42.4 with 0–500ms delay. Shows delay info in a separate panel.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/reload.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/main/reload.js
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
@@ -58,7 +58,7 @@
     elDelay.style.position = 'fixed';
     elDelay.style.top = '90px';
     elDelay.style.right = '0px';
-    elDelay.style.background = 'rgba(128, 0, 128, 0.45)'; // 紫
+    elDelay.style.background = 'rgba(128, 0, 128, 0.45)';
     elDelay.style.color = 'white';
     elDelay.style.padding = '5px 15px';
     elDelay.style.borderRadius = '10px';
@@ -73,7 +73,6 @@
         let now = new Date();
         elClock.textContent = getFormattedTime(now);
 
-        // 準備リロード
         if (
             now.getHours() === 10 &&
             now.getMinutes() === 52 &&
@@ -94,7 +93,6 @@
             }, randomDelay);
         }
 
-        // 本リロード
         if (
             now.getHours() === 10 &&
             now.getMinutes() === 59 &&
