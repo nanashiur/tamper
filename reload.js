@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰️ 42.4 (0-500)
+// @name         ⏰️ 42.4 (0-400)
 // @namespace    http://tampermonkey.net/
-// @version      4.12
-// @description  Pre-reloads at 10:52:00 with 0–2000ms delay, reloads at 10:59:42.4 with 0–500ms delay. Delay info panel appears at reload start.
+// @version      4.13
+// @description  Pre-reloads at 10:52:00 with 0–2000ms delay, reloads at 10:59:42.4 with 0–400ms delay. Delay info panel appears at reload start.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -75,7 +75,6 @@
         let now = new Date();
         elClock.textContent = getFormattedTime(now);
 
-        // 準備リロード
         if (
             now.getHours() === 10 &&
             now.getMinutes() === 52 &&
@@ -96,7 +95,6 @@
             }, randomDelay);
         }
 
-        // 本リロード
         if (
             now.getHours() === 10 &&
             now.getMinutes() === 59 &&
@@ -105,7 +103,7 @@
             !mainReloadDone
         ) {
             mainReloadDone = true;
-            let randomDelay = Math.floor(Math.random() * 501);
+            let randomDelay = Math.floor(Math.random() * 401);  // 0〜400ms
             console.log(`🔄 Main reload scheduled with ${randomDelay} ms delay at: ${getFormattedTime(now)}`);
             setTimeout(() => {
                 createDelayPanel(`Main reload delay: ${randomDelay} ms`);
