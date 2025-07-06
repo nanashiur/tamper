@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ⏰️ 42.4 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      4.11
-// @description  Pre-reloads at 10:52:00 with 0–2000ms delay, reloads at 10:59:42.4 with 0–500ms delay. Shows delay info in a separate panel.
+// @version      4.12
+// @description  Pre-reloads at 10:52:00 with 0–2000ms delay, reloads at 10:59:42.4 with 0–500ms delay. Delay info panel appears at reload start.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -53,26 +53,29 @@
     elStart.textContent = getFormattedTime(scriptStartTime);
     document.body.appendChild(elStart);
 
-    var elDelay = document.createElement('div');
-    elDelay.id = 'customDelayInfo';
-    elDelay.style.position = 'fixed';
-    elDelay.style.top = '90px';
-    elDelay.style.right = '0px';
-    elDelay.style.background = 'rgba(128, 0, 128, 0.45)';
-    elDelay.style.color = 'white';
-    elDelay.style.padding = '5px 15px';
-    elDelay.style.borderRadius = '10px';
-    elDelay.style.fontSize = '20px';
-    elDelay.style.fontFamily = 'monospace';
-    elDelay.style.whiteSpace = 'nowrap';
-    elDelay.style.zIndex = '9999';
-    elDelay.textContent = 'Delay: --- ms';
-    document.body.appendChild(elDelay);
+    function createDelayPanel(text) {
+        var elDelay = document.createElement('div');
+        elDelay.id = 'customDelayInfo';
+        elDelay.style.position = 'fixed';
+        elDelay.style.top = '90px';
+        elDelay.style.right = '0px';
+        elDelay.style.background = 'rgba(128, 0, 128, 0.45)';
+        elDelay.style.color = 'white';
+        elDelay.style.padding = '5px 15px';
+        elDelay.style.borderRadius = '10px';
+        elDelay.style.fontSize = '20px';
+        elDelay.style.fontFamily = 'monospace';
+        elDelay.style.whiteSpace = 'nowrap';
+        elDelay.style.zIndex = '9999';
+        elDelay.textContent = text;
+        document.body.appendChild(elDelay);
+    }
 
     function updateClock() {
         let now = new Date();
         elClock.textContent = getFormattedTime(now);
 
+        // 準備リロード
         if (
             now.getHours() === 10 &&
             now.getMinutes() === 52 &&
@@ -83,8 +86,8 @@
             preReloadDone = true;
             let randomDelay = Math.floor(Math.random() * 2001);
             console.log(`🔄 Pre-reload scheduled with ${randomDelay} ms delay at: ${getFormattedTime(now)}`);
-            elDelay.textContent = `Pre-reload delay: ${randomDelay} ms`;
             setTimeout(() => {
+                createDelayPanel(`Pre-reload delay: ${randomDelay} ms`);
                 let reloadTime = new Date();
                 console.log(`🔄 Pre-reload triggered at: ${getFormattedTime(reloadTime)}`);
                 elStart.textContent = getFormattedTime(reloadTime);
@@ -93,6 +96,7 @@
             }, randomDelay);
         }
 
+        // 本リロード
         if (
             now.getHours() === 10 &&
             now.getMinutes() === 59 &&
@@ -103,8 +107,8 @@
             mainReloadDone = true;
             let randomDelay = Math.floor(Math.random() * 501);
             console.log(`🔄 Main reload scheduled with ${randomDelay} ms delay at: ${getFormattedTime(now)}`);
-            elDelay.textContent = `Main reload delay: ${randomDelay} ms`;
             setTimeout(() => {
+                createDelayPanel(`Main reload delay: ${randomDelay} ms`);
                 let reloadTime = new Date();
                 console.log(`🔄 Main reload triggered at: ${getFormattedTime(reloadTime)}`);
                 elStart.textContent = getFormattedTime(reloadTime);
