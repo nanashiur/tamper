@@ -4,8 +4,8 @@
 // @version      2.2
 // @description  Clicks the blue reservation button, shows time on each check, and stops after 30 minutes.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/machiai.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/machiai.js
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
 // @grant        none
 // ==/UserScript==
 
