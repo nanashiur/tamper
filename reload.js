@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰️ 42.3 (0-400)
+// @name         ⏰️ 42.2 (0-400)
 // @namespace    http://tampermonkey.net/
-// @version      4.14
-// @description  Pre-reloads at 10:52:00 with 0–2000ms delay, reloads at 10:59:42.3 with 0–400ms delay. Delay info panel appears at reload start.
+// @version      4.15
+// @description  Pre-reloads at 10:52:00 with 0–2000ms delay, reloads at 10:59:42.2 with 0–400ms delay. Delay info panel appears at reload start.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -99,7 +99,7 @@
             now.getHours() === 10 &&
             now.getMinutes() === 59 &&
             now.getSeconds() === 42 &&
-            now.getMilliseconds() >= 300 &&
+            now.getMilliseconds() >= 200 &&
             !mainReloadDone
         ) {
             mainReloadDone = true;
