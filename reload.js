@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ⏰️ 42.0 (0-400)
 // @namespace    http://tampermonkey.net/
-// @version      4.16
-// @description  Pre-reloads at 10:52:00 with 0–2000ms delay, reloads at 10:59:42.0 with 0–400ms delay. Delay info panel appears at reload start.
+// @version      4.30
+// @description  Pre-reloads at 10:52:00 and reloads at 10:59:42.0 with random delay (0–400ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -11,110 +11,41 @@
 // ==/UserScript==
 
 (function () {
-    'use strict';
-    var scriptStartTime = new Date();
-    var preReloadDone = false;
-    var mainReloadDone = false;
-
-    function getFormattedTime(date) {
-        return date.toLocaleTimeString() + '.' + String(date.getMilliseconds()).padStart(3, '0');
+  'use strict';
+  const main = { h: 10, m: 59, s: 42, ms: 0, max: 400 }, pre = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
+  let trigMain = false, trigPre = false;
+  const nowStr = () => new Date().toLocaleTimeString() + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+  const make = (id, top, bg) => {
+    const d = document.createElement('div');
+    Object.assign(d.style, {
+      position: 'fixed', top: `${top}px`, right: '0px', background: bg, color: 'white',
+      padding: '5px 15px', borderRadius: '0 0 0 10px', fontSize: '20px',
+      fontFamily: 'monospace', whiteSpace: 'nowrap', zIndex: 9999
+    });
+    d.id = id; d.textContent = id === 'customInfo' ? '10:59:42.000' : nowStr();
+    document.body.appendChild(d); return d;
+  };
+  const elClock = make('customClock', 0, 'rgba(0, 0, 0, 0.6)');
+  const elStart = make('customStart', 45, 'rgba(0, 128, 0, 0.6)');
+  const elInfo = make('customInfo', 90, 'rgba(0, 0, 128, 0.6)');
+  const check = (cfg, triggered, setTrig) => {
+    const d = new Date();
+    if (triggered()) return;
+    if (d.getHours() === cfg.h && d.getMinutes() === cfg.m && d.getSeconds() === cfg.s && d.getMilliseconds() >= cfg.ms) {
+      const delay = Math.floor(Math.random() * (cfg.max + 1));
+      setTrig(true);
+      setTimeout(() => {
+        elStart.style.background = 'rgba(255,0,0,0.75)';
+        elStart.textContent = nowStr();
+        elInfo.style.background = 'rgba(255,165,0,0.75)';
+        elInfo.textContent = `+${delay}ms`;
+        location.reload();
+      }, delay);
     }
-
-    console.log(`⏰️ Script started at: ${getFormattedTime(scriptStartTime)}`);
-
-    var elClock = document.createElement('div');
-    elClock.id = 'customClock';
-    elClock.style.position = 'fixed';
-    elClock.style.top = '0px';
-    elClock.style.right = '0px';
-    elClock.style.background = 'rgba(0, 0, 0, 0.45)';
-    elClock.style.color = 'white';
-    elClock.style.padding = '5px 15px';
-    elClock.style.borderRadius = '10px';
-    elClock.style.fontSize = '20px';
-    elClock.style.fontFamily = 'monospace';
-    elClock.style.whiteSpace = 'nowrap';
-    elClock.style.zIndex = '9999';
-    document.body.appendChild(elClock);
-
-    var elStart = document.createElement('div');
-    elStart.id = 'customStartTime';
-    elStart.style.position = 'fixed';
-    elStart.style.top = '45px';
-    elStart.style.right = '0px';
-    elStart.style.background = 'rgba(0, 128, 0, 0.5)';
-    elStart.style.color = 'white';
-    elStart.style.padding = '5px 15px';
-    elStart.style.borderRadius = '10px';
-    elStart.style.fontSize = '20px';
-    elStart.style.fontFamily = 'monospace';
-    elStart.style.whiteSpace = 'nowrap';
-    elStart.style.zIndex = '9999';
-    elStart.textContent = getFormattedTime(scriptStartTime);
-    document.body.appendChild(elStart);
-
-    function createDelayPanel(text) {
-        var elDelay = document.createElement('div');
-        elDelay.id = 'customDelayInfo';
-        elDelay.style.position = 'fixed';
-        elDelay.style.top = '90px';
-        elDelay.style.right = '0px';
-        elDelay.style.background = 'rgba(128, 0, 128, 0.45)';
-        elDelay.style.color = 'white';
-        elDelay.style.padding = '5px 15px';
-        elDelay.style.borderRadius = '10px';
-        elDelay.style.fontSize = '20px';
-        elDelay.style.fontFamily = 'monospace';
-        elDelay.style.whiteSpace = 'nowrap';
-        elDelay.style.zIndex = '9999';
-        elDelay.textContent = text;
-        document.body.appendChild(elDelay);
-    }
-
-    function updateClock() {
-        let now = new Date();
-        elClock.textContent = getFormattedTime(now);
-
-        if (
-            now.getHours() === 10 &&
-            now.getMinutes() === 52 &&
-            now.getSeconds() === 0 &&
-            now.getMilliseconds() >= 0 &&
-            !preReloadDone
-        ) {
-            preReloadDone = true;
-            let randomDelay = Math.floor(Math.random() * 2001);
-            console.log(`🔄 Pre-reload scheduled with ${randomDelay} ms delay at: ${getFormattedTime(now)}`);
-            setTimeout(() => {
-                createDelayPanel(`Pre-reload delay: ${randomDelay} ms`);
-                let reloadTime = new Date();
-                console.log(`🔄 Pre-reload triggered at: ${getFormattedTime(reloadTime)}`);
-                elStart.textContent = getFormattedTime(reloadTime);
-                elStart.style.background = 'rgba(255, 165, 0, 0.75)';
-                location.reload();
-            }, randomDelay);
-        }
-
-        if (
-            now.getHours() === 10 &&
-            now.getMinutes() === 59 &&
-            now.getSeconds() === 42 &&
-            now.getMilliseconds() >= 0 &&
-            !mainReloadDone
-        ) {
-            mainReloadDone = true;
-            let randomDelay = Math.floor(Math.random() * 401);
-            console.log(`🔄 Main reload scheduled with ${randomDelay} ms delay at: ${getFormattedTime(now)}`);
-            setTimeout(() => {
-                createDelayPanel(`Main reload delay: ${randomDelay} ms`);
-                let reloadTime = new Date();
-                console.log(`🔄 Main reload triggered at: ${getFormattedTime(reloadTime)}`);
-                elStart.textContent = getFormattedTime(reloadTime);
-                elStart.style.background = 'rgba(255, 0, 0, 0.75)';
-                location.reload();
-            }, randomDelay);
-        }
-    }
-
-    setInterval(updateClock, 50);
+  };
+  setInterval(() => {
+    elClock.textContent = nowStr();
+    check(pre, () => trigPre, v => trigPre = v);
+    check(main, () => trigMain, v => trigMain = v);
+  }, 50);
 })();
