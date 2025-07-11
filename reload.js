@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰️ 42.0 (0-400)
+// @name         ⏰️ 41.9 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      4.30
-// @description  Pre-reloads at 10:52:00 and reloads at 10:59:42.0 with random delay (0–400ms). Shows countdown, start time, and delay info.
+// @version      4.33
+// @description  Pre-reloads at 10:52:00 and reloads at 10:59:41.9 with random delay (0–500ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -12,7 +12,7 @@
 
 (function () {
   'use strict';
-  const main = { h: 10, m: 59, s: 42, ms: 0, max: 400 }, pre = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
+  const main = { h: 10, m: 59, s: 41, ms: 900, max: 500 }, pre = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
   let trigMain = false, trigPre = false;
   const nowStr = () => new Date().toLocaleTimeString() + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
   const make = (id, top, bg) => {
@@ -22,7 +22,7 @@
       padding: '5px 15px', borderRadius: '0 0 0 10px', fontSize: '20px',
       fontFamily: 'monospace', whiteSpace: 'nowrap', zIndex: 9999
     });
-    d.id = id; d.textContent = id === 'customInfo' ? '10:59:42.000' : nowStr();
+    d.id = id; d.textContent = id === 'customInfo' ? '10:59:41.900' : nowStr();
     document.body.appendChild(d); return d;
   };
   const elClock = make('customClock', 0, 'rgba(0, 0, 0, 0.6)');
