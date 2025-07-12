@@ -1,11 +1,9 @@
 // ==UserScript==
 // @name         🟦 Auto Click Blue Reservation Button
 // @namespace    http://tampermonkey.net/
-// @version      2.2
-// @description  Clicks the blue reservation button, shows time on each check, and stops after 30 minutes.
+// @version      2.3
+// @description  Clicks the blue reservation button, shows time on each check, and stops after 35 minutes.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
 // @grant        none
 // ==/UserScript==
 
@@ -28,7 +26,7 @@
   el.style.color = 'white';
   el.style.padding = '3px 6px';
   el.style.borderRadius = '6px';
-  el.style.fontSize = '16px';  // ← フォントサイズを16pxに変更
+  el.style.fontSize = '16px';
   el.style.fontFamily = 'monospace';
   el.style.whiteSpace = 'nowrap';
   el.style.display = 'none';
@@ -50,8 +48,8 @@
     if (stopped) return;
 
     const now = Date.now();
-    if (now - startTime >= 1800000) {
-      console.log('🛑 スクリプトは30分経過したため停止しました');
+    if (now - startTime >= 2100000) {  // ← 35分 = 35 × 60 × 1000 = 2100000ms
+      console.log('🛑 スクリプトは35分経過したため停止しました');
       stopped = true;
       return;
     }
