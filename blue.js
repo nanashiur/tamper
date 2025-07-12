@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🟦 Auto Click Blue Reservation Button
 // @namespace    http://tampermonkey.net/
-// @version      2.3
-// @description  Clicks the blue reservation button, shows time on each check, and stops after 35 minutes.
+// @version      2.6
+// @description  Clicks the blue reservation button, shows time on each check, and stops after 35 minutes. Always shows panel with quick flashing border.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @grant        none
 // ==/UserScript==
@@ -29,7 +29,8 @@
   el.style.fontSize = '16px';
   el.style.fontFamily = 'monospace';
   el.style.whiteSpace = 'nowrap';
-  el.style.display = 'none';
+  el.style.display = 'block';
+  el.style.border = 'none';
   shadow.appendChild(el);
 
   function getNowTimeString() {
@@ -37,18 +38,16 @@
     return now.toLocaleTimeString() + '.' + String(now.getMilliseconds()).padStart(3, '0');
   }
 
-  function showTimeDisplay(text, background) {
-    el.textContent = text;
-    el.style.background = background;
-    el.style.display = 'block';
-    setTimeout(() => { el.style.display = 'none'; }, 400);
+  function flashBorder() {
+    el.style.border = '2px solid #0033cc';  // 濃い青
+    setTimeout(() => { el.style.border = 'none'; }, 100); // ← 0.1秒で消す
   }
 
   function clickAndSchedule() {
     if (stopped) return;
 
     const now = Date.now();
-    if (now - startTime >= 2100000) {  // ← 35分 = 35 × 60 × 1000 = 2100000ms
+    if (now - startTime >= 2100000) {
       console.log('🛑 スクリプトは35分経過したため停止しました');
       stopped = true;
       return;
@@ -56,15 +55,18 @@
 
     const button = document.querySelector('.js-reserve.button.next');
     const timeString = getNowTimeString();
+    el.textContent = timeString;
 
     if (button) {
       button.click();
       if (now - startTime < 60000) {
         console.log('🟦 ボタンを押した時刻: ' + timeString);
       }
-      showTimeDisplay(timeString, 'rgba(60, 100, 255, 0.6)');
+      el.style.background = 'rgba(60, 100, 255, 0.6)';
+      flashBorder();
     } else {
-      showTimeDisplay(timeString, 'rgba(128, 0, 255, 0.6)');
+      el.style.background = 'rgba(128, 0, 255, 0.6)';
+      el.style.border = 'none';
     }
 
     const elapsed = (now - startTime) / 1000;
