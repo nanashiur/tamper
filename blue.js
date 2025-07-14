@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🟦 Auto Click Blue Reservation Button
 // @namespace    http://tampermonkey.net/
-// @version      2.6
-// @description  Clicks the blue reservation button, shows time on each check, and stops after 35 minutes. Always shows panel with quick flashing border.
+// @version      2.9
+// @description  Clicks the blue reservation button with toggle. Shows status text and stops after 35 minutes.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @grant        none
 // ==/UserScript==
@@ -11,6 +11,7 @@
   'use strict';
   const startTime = Date.now();
   let stopped = false;
+  let isPaused = false;
 
   const container = document.createElement('div');
   container.style.position = 'fixed';
@@ -31,16 +32,22 @@
   el.style.whiteSpace = 'nowrap';
   el.style.display = 'block';
   el.style.border = 'none';
+  el.textContent = '稼働中';
   shadow.appendChild(el);
 
-  function getNowTimeString() {
-    const now = new Date();
-    return now.toLocaleTimeString() + '.' + String(now.getMilliseconds()).padStart(3, '0');
-  }
+  el.addEventListener('click', () => {
+    if (stopped) return;
+    isPaused = !isPaused;
+    if (isPaused) {
+      el.style.background = 'rgba(0, 0, 0, 0.7)';
+      el.textContent = '停止中';
+      el.style.border = 'none';
+    }
+  });
 
   function flashBorder() {
-    el.style.border = '2px solid #0033cc';  // 濃い青
-    setTimeout(() => { el.style.border = 'none'; }, 100); // ← 0.1秒で消す
+    el.style.border = '2px solid #0033cc';
+    setTimeout(() => { el.style.border = 'none'; }, 100);
   }
 
   function clickAndSchedule() {
@@ -48,25 +55,31 @@
 
     const now = Date.now();
     if (now - startTime >= 2100000) {
-      console.log('🛑 スクリプトは35分経過したため停止しました');
+      console.log('🛑 スクリプトは35分経過したため終了します');
+      el.style.background = 'rgba(0, 0, 0, 0.7)';
+      el.textContent = '終了';
+      el.style.border = 'none';
       stopped = true;
       return;
     }
 
-    const button = document.querySelector('.js-reserve.button.next');
-    const timeString = getNowTimeString();
-    el.textContent = timeString;
-
-    if (button) {
-      button.click();
-      if (now - startTime < 60000) {
-        console.log('🟦 ボタンを押した時刻: ' + timeString);
+    if (!isPaused) {
+      const button = document.querySelector('.js-reserve.button.next');
+      if (button) {
+        button.click();
+        if (now - startTime < 60000) {
+          const timeStr = new Date().toLocaleTimeString() + '.' +
+                          String(new Date().getMilliseconds()).padStart(3, '0');
+          console.log('🟦 ボタンを押した時刻: ' + timeStr);
+        }
+        el.style.background = 'rgba(60, 100, 255, 0.6)';
+        el.textContent = '稼働中';
+        flashBorder();
+      } else {
+        el.style.background = 'rgba(128, 0, 255, 0.6)';
+        el.textContent = '待機中';
+        el.style.border = 'none';
       }
-      el.style.background = 'rgba(60, 100, 255, 0.6)';
-      flashBorder();
-    } else {
-      el.style.background = 'rgba(128, 0, 255, 0.6)';
-      el.style.border = 'none';
     }
 
     const elapsed = (now - startTime) / 1000;
