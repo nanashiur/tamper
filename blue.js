@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🟦 Auto Click Blue Reservation Button
 // @namespace    http://tampermonkey.net/
-// @version      2.9
-// @description  Clicks the blue reservation button with toggle. Shows status text and stops after 35 minutes.
+// @version      3.0
+// @description  Clicks the blue reservation button with toggle. Shows status and stops after 35 minutes.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
