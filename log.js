@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🏨客室ロガー
 // @namespace    http://tampermonkey.net/
-// @version      3.03            // ← 空室発見オーバーレイを復活
+// @version      3.03
 // @description  連続検索 / 空室検索 / 色分けログ / 日付ハイライト / 出力フィルタ
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/log.js
