@@ -1,158 +1,109 @@
 // ==UserScript==
-// @name         📅カレンダー再検索
+// @name         📅カレンダー再検索（最小機能版 v4.3）
 // @namespace    http://tampermonkey.net/
-// @version      3.4
-// @description  スマホ版TDRホテルカレンダーで再検索。◯や数字表示で空室を音通知、通信エラーは時間帯別に自動再検索＋カウントダウン付き
+// @version      4.3
+// @description  月見出しクリックで再検索。通信エラー時は時間帯別に自動再検索（0.1s/1s/30s）。0.1秒時は処理だけ即実行し、オーバーレイは1秒表示。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar.js
 // @grant        none
 // ==/UserScript==
 
-(function () {
+(() => {
   'use strict';
 
-  // ✅ カレンダー再検索実行
-  function executeCalendarReload() {
-    const calendarTable = document.querySelector('.boxCalendar.month table');
-    const calendarSelect = document.getElementById('boxCalendarSelect');
-    if (!calendarTable || !calendarSelect) return;
+  /* -------- 時間帯別待機秒数 -------- */
+  const retryWait = () => {
+    const d = new Date();
+    const h = d.getHours();
+    const m = d.getMinutes();
 
-    const reserveUseDate = document.querySelector('#reserveSearchForm input#reserveUseDate');
-    if (reserveUseDate && reserveUseDate.value === '') {
-      const defaultInput = document.getElementById('vacancySearchMonthDefault');
-      if (defaultInput) defaultInput.value = 'blank';
-    }
+    // 03:00〜04:58 → 30 秒
+    if (h === 3 || (h === 4 && m < 59)) return 30;
 
-    const loadingNow = document.querySelectorAll('.boxCalendar.month table tbody tr td dl dd span.calLoad').length > 0;
-    const nowTime = new Date().toLocaleTimeString();
+    // 10:55〜11:59 → 0.1 秒
+    if ((h === 10 && m >= 55) || h === 11) return 0.1;
 
-    if (!loadingNow) {
-      calendarSelect.dispatchEvent(new Event('change'));
-      console.log(`[再検索実行] ${nowTime}`);
-    } else {
-      console.log(`[スキップ] 読み込み中のため再検索せず（${nowTime}）`);
-    }
-  }
+    // それ以外 → 1 秒
+    return 1;
+  };
 
-  // ✅ 時間帯に応じた待機秒数
-  function getRetryWaitSeconds() {
-    const now = new Date();
-    const hour = now.getHours();
+  /* -------- 共通オーバーレイ生成 -------- */
+  const createOverlay = (text) => {
+    const div = document.createElement('div');
+    Object.assign(div.style, {
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(255,0,0,0.5)',
+      display: 'flex', justifyContent: 'center', alignItems: 'center',
+      color: '#fff', fontSize: '32px'
+    });
+    div.textContent = text;
+    document.body.appendChild(div);
+    return div;
+  };
 
-    if (hour >= 3 && hour < 5) return 30;
-    if (hour === 11) return 1;
-    return 5;
-  }
-
-  // ✅ カウントダウン表示（通信エラー時）
-  function showRetryCountdown(seconds) {
-    playBeep();
-
-    let count = seconds;
-    const countdown = document.createElement('div');
-    countdown.textContent = `${count} 秒後に再検索します`;
-    countdown.style.position = 'fixed';
-    countdown.style.top = '50%';
-    countdown.style.left = '50%';
-    countdown.style.transform = 'translate(-50%, -50%)';
-    countdown.style.background = 'rgba(255, 0, 0, 0.6)';
-    countdown.style.color = 'white';
-    countdown.style.padding = '20px 30px';
-    countdown.style.borderRadius = '12px';
-    countdown.style.fontSize = '18px';
-    countdown.style.zIndex = '9999';
-    document.body.appendChild(countdown);
-
-    const timer = setInterval(() => {
-      count--;
-      if (count > 0) {
-        countdown.textContent = `${count} 秒後に再検索します`;
+  /* -------- カウントダウン（1秒単位） -------- */
+  const showCountdown = (sec) => {
+    const ov = createOverlay(`再検索まで ${sec} 秒`);
+    const t = setInterval(() => {
+      if (--sec > 0) {
+        ov.textContent = `再検索まで ${sec} 秒`;
       } else {
-        clearInterval(timer);
-        document.body.removeChild(countdown);
-        executeCalendarReload();
+        clearInterval(t);
+        ov.remove();
+        triggerReload();
       }
     }, 1000);
-  }
+  };
 
-  // ✅ ビープ音（短く高音）
-  function playBeep() {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+  /* -------- 0.1 秒用の短時間オーバーレイ -------- */
+  const showQuickOverlay = () => {
+    const ov = createOverlay('再検索中…');
+    setTimeout(() => ov.remove(), 1000); // 1秒で消す
+  };
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+  /* -------- カレンダー再検索 -------- */
+  const triggerReload = () => {
+    document.getElementById('boxCalendarSelect')
+      ?.dispatchEvent(new Event('change'));
+  };
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.3);
-  }
+  /* -------- Ajax フック -------- */
+  if (window.$?.lifeobs?.ajax) {
+    const origAjax = $.lifeobs.ajax;
+    $.lifeobs.ajax = (opt) => {
+      if (opt.url.endsWith('/hotel/api/queryHotelPriceStock/')) {
 
-  // ✅ 月の見出しクリック → 再検索
-  const currentMonth = document.querySelector('.boxCalendar.month .selectMonth li p.currentMonth');
-  if (currentMonth) {
-    currentMonth.style.cursor = 'pointer';
-    currentMonth.style.backgroundColor = '#0078d7';
-    currentMonth.style.color = '#fff';
-    currentMonth.style.borderRadius = '6px';
-    currentMonth.style.padding = '2px 6px';
-    currentMonth.addEventListener('click', () => {
-      executeCalendarReload();
-    });
-  }
-
-  // ✅ Ajax通信にフック（空室検出＋エラー処理）
-  if (window.$ && $.lifeobs && $.lifeobs.ajax) {
-    const orig_ajax = $.lifeobs.ajax;
-
-    $.lifeobs.ajax = function (e) {
-      if (e.url.endsWith('/hotel/api/queryHotelPriceStock/')) {
-
-        const originalSuccess = e.success;
-
-        e.success = function (response) {
-          const nowTime = new Date().toLocaleTimeString();
-          let hasVacancy = false;
-
-          if (response && Array.isArray(response.priceStock)) {
-            response.priceStock.forEach((item, idx) => {
-              console.log(`[${idx}] typeof=${typeof item.stockCount}, value=`, item.stockCount);
-            });
-
-            hasVacancy = response.priceStock.some(item => {
-              const count = item.stockCount;
-              if (!count) return false;
-              const s = String(count).trim();
-              return /^[◯○①②③④⑤⑥⑦⑧⑨1-9]$/.test(s);
-            });
-          }
-
-          if (hasVacancy) {
-            console.log(`[空室検出] ${nowTime}`);
-            playBeep();
+        /* ERROR → 再試行スケジュール */
+        const origErr = opt.error;
+        opt.error = (err) => {
+          const wait = retryWait();
+          console.log(`[通信エラー] ${wait}s 後に自動再検索`);
+          if (wait < 1) {
+            showQuickOverlay();                 // 1秒表示
+            setTimeout(triggerReload, wait * 1000); // 0.1秒で実行
           } else {
-            console.log(`[満室] ${nowTime}`);
+            showCountdown(wait);                // 通常カウントダウン
           }
-
-          if (typeof originalSuccess === 'function') {
-            originalSuccess(response);
-          }
-        };
-
-        // 通信エラー処理
-        e.error = function (k) {
-          const nowTime = new Date().toLocaleTimeString();
-          console.log(`[通信エラー] ${nowTime}`);
-          window.RecentDaysPriceStockQuery.prototype.afterSystemErrorOccurred(k);
-          showRetryCountdown(getRetryWaitSeconds());
+          origErr?.(err);
         };
       }
-
-      return orig_ajax(e);
+      return origAjax(opt);
     };
+  }
+
+  /* -------- 月見出し：反転表示＋クリック再検索 -------- */
+  const head = document.querySelector(
+    '.boxCalendar.month .selectMonth li p.currentMonth'
+  );
+  if (head) {
+    Object.assign(head.style, {
+      cursor: 'pointer',
+      background: '#0078d7',
+      color: '#fff',
+      borderRadius: '6px',
+      padding: '2px 6px'
+    });
+    head.addEventListener('click', () => {
+      if (!document.querySelector('span.calLoad')) triggerReload();
+    });
   }
 })();
