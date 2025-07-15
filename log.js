@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🧪TDR客室データテスター (loop + filter + highlight)
+// @name         🏨空室ロガー
 // @namespace    http://tampermonkey.net/
-// @version      1.8.2
-// @description  連続検索・色分けログ・フィルタ・日付ハイライト（反転は日付のみ）
+// @version      3.00
+// @description  連続検索／空室が出るまで検索／色分けログ／日付ハイライト／出力フィルタ
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/log.js
@@ -12,124 +12,154 @@
 (() => {
   'use strict';
 
-  /* ---------- 表示ラベル & スタイル ---------- */
-  const LABEL = { 0: '空室', 1: '満室', 2: '吸収', 3: '販無' };
+  /* ---------- ラベル & 色 ---------- */
+  const LABEL = { 0:'空室', 1:'満室', 2:'吸収', 3:'非売' };
   const STYLE = {
-    0: 'color:red;font-weight:bold',
-    1: 'color:black',
-    2: 'color:blue',
-    3: 'color:green'
+    0:'color:red;font-weight:bold',
+    1:'color:black',
+    2:'color:blue',
+    3:'color:green'
   };
-  const BTN_COLOR = { 1: '#000', 2: 'blue', 3: 'green' };
+  const BTN_COLOR = { 0:'red', 1:'#000', 2:'blue', 3:'green' };
 
-  /* ---------- 反転させる日付 ---------- */
-  const pad = n => String(n).padStart(2, '0');
-  const fmt = d => `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
-
-  const today  = new Date();
-  const plus7  = new Date(today);  plus7.setDate (plus7.getDate () + 7);
-  const plus4M = new Date(today);  plus4M.setMonth(plus4M.getMonth() + 4);
-
-  const SPECIAL = new Set([fmt(today), fmt(plus4M), fmt(plus7)]);
-
-  /* ---------- ヘルパ ---------- */
-  const dateStr = d => `${d.slice(0, 4)}/${d.slice(4, 6)}/${d.slice(6)}`;
-  const nowStr  = () => {
-    const t = new Date();
-    return t.toTimeString().slice(0, 8) + '.' + String(t.getMilliseconds()).padStart(3, '0');
+  /* ---------- 日付ハイライト ---------- */
+  const pad2 = v => String(v).padStart(2,'0');
+  const fmt  = d => `${d.getFullYear()}/${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`;
+  const today = new Date(), plus7 = new Date(today), plus4m = new Date(today);
+  plus7.setDate(today.getDate()+7);
+  plus4m.setMonth(today.getMonth()+4);
+  const HL = {
+    [fmt(today)] :'background:#000;color:#fff',
+    [fmt(plus7)] :'background:#ccc;color:#000',
+    [fmt(plus4m)]:'background:#0078d7;color:#fff'
   };
 
-  /* ---------- 操作用パネル ---------- */
-  const filters   = { 1: true, 2: true, 3: true };
-  let   searching = false;
+  /* ---------- 状態管理 ---------- */
+  // mode: 0 = 手動検索, 1 = 連続検索, 2 = 空室検索
+  let mode = 0;
+  const filters = {0:true,1:true,2:true,3:true};
 
-  const mkBtn = (txt, bg) => Object.assign(document.createElement('div'), {
-    textContent: txt,
-    style: `
-      background:${bg};color:#fff;padding:4px 8px;margin-right:4px;
-      cursor:pointer;border-radius:4px;font-size:12px;user-select:none;text-align:center;
-    `
+  /* ---------- パネル ---------- */
+  const makeBtn = (txt,bg)=>Object.assign(document.createElement('div'),{
+    textContent:txt,
+    style:`background:${bg};color:#fff;padding:4px 8px;margin-right:4px;
+           cursor:pointer;border-radius:4px;font-size:12px;user-select:none;text-align:center;`
   });
 
-  const panel = Object.assign(document.createElement('div'), {
-    style: 'position:fixed;top:4px;left:50%;transform:translateX(-50%);display:flex;z-index:99999'
+  const panel = Object.assign(document.createElement('div'),{
+    style:'position:fixed;top:4px;left:50%;transform:translateX(-50%);display:flex;z-index:99999'
   });
 
-  const btnSearch = mkBtn('検索開始', '#0078d7');
-  btnSearch.onclick = () => {
-    searching = !searching;
-    btnSearch.textContent      = searching ? '検索中' : '検索開始';
-    btnSearch.style.background = searching ? 'red' : '#0078d7';
-    if (searching) triggerSearch();
+  const btnMain = makeBtn('手動検索','#000');
+  const updMain = () => {
+    if(mode===0){ btnMain.textContent='手動検索';  btnMain.style.background='#000';   }
+    if(mode===1){ btnMain.textContent='連続検索';  btnMain.style.background='orange';}
+    if(mode===2){ btnMain.textContent='空室検索';  btnMain.style.background='red';   }
+  };
+  btnMain.onclick = () => {
+    mode = (mode+1)%3;
+    updMain();
+    if(mode!==0) triggerSearch();
   };
 
-  const mkFilterBtn = code => {
-    const b = mkBtn(LABEL[code], BTN_COLOR[code]);
-    b.onclick = () => {
-      filters[code] = !filters[code];
-      b.style.opacity = filters[code] ? '1' : '0.3';
-    };
+  const makeFilter = c=>{
+    const b = makeBtn(LABEL[c], BTN_COLOR[c]);
+    b.onclick = ()=>{ filters[c]=!filters[c]; b.style.opacity = filters[c]?1:0.3; };
     return b;
   };
 
-  panel.append(btnSearch, mkFilterBtn(1), mkFilterBtn(2), mkFilterBtn(3));
+  panel.append(btnMain, makeFilter(0), makeFilter(1), makeFilter(2), makeFilter(3));
   document.body.appendChild(panel);
+  updMain();
 
-  /* ---------- 検索トリガ ---------- */
+  /* ---------- 検索発火 ---------- */
   const triggerSearch = () => {
     const sel = document.getElementById('boxCalendarSelect');
-    if (sel && !document.querySelector('span.calLoad')) {
+    if(sel && !document.querySelector('span.calLoad')){
       sel.dispatchEvent(new Event('change'));
     }
   };
 
+  const timeStr = () => {
+    const d = new Date();
+    return d.toTimeString().slice(0,8)+'.'+String(d.getMilliseconds()).padStart(3,'0');
+  };
+
+  /* ---------- オーバーレイ ---------- */
+  const showVacancyOverlay = dates => {
+    const ov = document.createElement('div');
+    Object.assign(ov.style,{
+      position:'fixed',inset:0,zIndex:999999,
+      display:'flex',justifyContent:'center',alignItems:'center',
+      background:'rgba(255,0,0,0.85)',color:'#fff',
+      fontSize:'48px',fontWeight:'bold'
+    });
+    ov.textContent = `空室: ${dates.join(', ')}`;
+    document.body.appendChild(ov);
+    setTimeout(()=>ov.remove(),500);
+  };
+
   /* ---------- Ajax フック ---------- */
-  if (window.$?.lifeobs?.ajax) {
-    const origAjax = $.lifeobs.ajax;
-    $.lifeobs.ajax = opt => {
-      if (opt.url.endsWith('/hotel/api/queryHotelPriceStock/')) {
-        const origSuccess = opt.success;
-        opt.success = resp => {
-          logStock(resp);
-          origSuccess?.(resp);
-          if (searching) triggerSearch();
+  if(window.$?.lifeobs?.ajax){
+    const orig = $.lifeobs.ajax;
+    $.lifeobs.ajax = opt=>{
+      if(opt.url.endsWith('/hotel/api/queryHotelPriceStock/')){
+        const ok = opt.success;
+        opt.success = resp=>{
+          const found = logStock(resp);
+          ok?.(resp);
+
+          if(mode===1){ triggerSearch(); }
+          else if(mode===2){
+            if(found.vacant){
+              showVacancyOverlay(found.dates);
+              mode = 0; updMain();
+            }else{
+              triggerSearch();
+            }
+          }
         };
       }
-      return origAjax(opt);
+      return orig(opt);
     };
   }
 
-  /* ---------- ログ出力 ---------- */
-  const logStock = resp => {
-    const rows = [];
-    const infos = resp.ecRoomStockInfos ?? {};
-
-    Object.values(infos).forEach(g =>
-      Object.values(g.roomStockInfos ?? {}).forEach(r =>
-        Object.values(r.roomBedStockRangeInfos ?? {}).forEach(b =>
-          (b.roomBedStockRange ?? []).forEach(d => {
-            const st = Number(d.saleStatus);
-            if (st === 0 || filters[st]) {
-              rows.push({
-                date: dateStr(d.useDate),
-                sale: st,
-                remain: d.remainStockNum ?? 0
-              });
-            }
+  /* ---------- ログ ---------- */
+  const dateStr = s=>`${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6)}`;
+  const logStock = resp=>{
+    const rows=[], infos = resp.ecRoomStockInfos ?? {};
+    Object.values(infos).forEach(g=>
+      Object.values(g.roomStockInfos ?? {}).forEach(r=>
+        Object.values(r.roomBedStockRangeInfos ?? {}).forEach(b=>
+          (b.roomBedStockRange ?? []).forEach(d=>{
+            const st = +d.saleStatus, dt = dateStr(d.useDate);
+            if(filters[st]) rows.push({dt,st,rm:d.remainStockNum ?? 0});
           })
         )
       )
     );
+    rows.sort((a,b)=>a.dt.localeCompare(b.dt));
 
-    rows.sort((a, b) => a.date.localeCompare(b.date));
+    let baseYM = '';
+    for(const {dt} of rows){
+      if(dt.endsWith('/01')){ baseYM = dt.slice(0,7); break; }
+    }
+    if(!baseYM && rows.length) baseYM = rows[0].slice(0,7);
 
-    console.group(`📋 客室在庫ログ (${nowStr()})`);
-    rows.forEach(({ date, sale, remain }) => {
-      const dateStyle = SPECIAL.has(date) ? 'background:#000;color:#fff' : '';
-      const saleStyle = STYLE[sale];
-      console.log(`%c${date}%c\t%c${LABEL[sale]}\t${remain}`,
-                  dateStyle, '', saleStyle);
+    const vacDates = [];
+    rows.forEach(({dt,st})=>{
+      const ym = dt.slice(0,7);
+      if(st===0 && ym===baseYM){ vacDates.push(dt); }
+    });
+    const vacancyFound = vacDates.length>0;
+
+    console.group(`📋 客室在庫ログ (${timeStr()})`);
+    rows.forEach(({dt,st,rm})=>{
+      const ds = HL[dt] || '', ss = STYLE[st];
+      console.log(`%c${dt}%c\t%c${LABEL[st]}\t${rm}`, ds,'',ss);
     });
     console.groupEnd();
+
+    return {vacant:vacancyFound, dates:vacDates};
   };
 })();
