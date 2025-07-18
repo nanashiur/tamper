@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ⏰️ 41.9 (0-300)
 // @namespace    http://tampermonkey.net/
-// @version      4.38
+// @version      4.33
 // @description  Pre-reloads at 10:52:00 and reloads at 10:59:41.9 with random delay (0–300ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -20,9 +20,11 @@
     Object.assign(d.style, {
       position: 'fixed', top: `${top}px`, right: '0px', background: bg, color: 'white',
       padding: '3px 15px', fontSize: '20px', fontFamily: 'monospace',
-      whiteSpace: 'nowrap', zIndex: 9999
+      whiteSpace: 'nowrap', zIndex: 9999, borderRadius: '0'
     });
-    d.id = id; d.textContent = text; document.body.appendChild(d); return d;
+    d.id = id; d.textContent = text;
+    d.addEventListener('click', () => { d.style.display = 'none'; });
+    document.body.appendChild(d); return d;
   };
   const elClock = make('customClock', 0, 'rgba(0,0,0,0.6)', nowStr());
   const elStart = make('customStart', 39, 'rgba(0,128,0,0.6)', nowStr());
