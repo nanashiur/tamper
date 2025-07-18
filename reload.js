@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ⏰️ 41.9 (0-300)
 // @namespace    http://tampermonkey.net/
-// @version      4.33
+// @version      4.40
 // @description  Pre-reloads at 10:52:00 and reloads at 10:59:41.9 with random delay (0–300ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
