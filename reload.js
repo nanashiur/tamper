@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰️ 41.9 (0-300)
+// @name         ⏰️ 41.0 (0-300)
 // @namespace    http://tampermonkey.net/
-// @version      4.40
-// @description  Pre-reloads at 10:52:00 and reloads at 10:59:41.9 with random delay (0–300ms). Shows countdown, start time, and delay info.
+// @version      4.41
+// @description  Pre-reloads at 10:52:00 and reloads at 10:59:41.0 with random delay (0–300ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -12,18 +12,18 @@
 
 (function () {
   'use strict';
-  const main = { h: 10, m: 59, s: 41, ms: 900, max: 300 }, pre = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
+  const main = { h: 10, m: 59, s: 41, ms: 0, max: 300 }, pre = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
   let trigMain = false, trigPre = false;
   const nowStr = () => new Date().toLocaleTimeString() + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
   const make = (id, top, bg, text) => {
     const d = document.createElement('div');
     Object.assign(d.style, {
       position: 'fixed', top: `${top}px`, right: '0px', background: bg, color: 'white',
-      padding: '3px 15px', fontSize: '20px', fontFamily: 'monospace',
-      whiteSpace: 'nowrap', zIndex: 9999, borderRadius: '0'
+      padding: '3px 15px', fontSize: '20px',
+      fontFamily: 'monospace', whiteSpace: 'nowrap', zIndex: 9999
     });
     d.id = id; d.textContent = text;
-    d.addEventListener('click', () => { d.style.display = 'none'; });
+    d.addEventListener('click', () => d.style.display = 'none');
     document.body.appendChild(d); return d;
   };
   const elClock = make('customClock', 0, 'rgba(0,0,0,0.6)', nowStr());
