@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         ホテル日付指定検索エラー時のアラート表示
+// @name         検索エラー時のアラート表示
 // @namespace    http://tampermonkey.net/
 // @version      0.2
 // @description  東京ディズニーリゾート予約サイトで空室検索時に発生するエラーを黄色のオーバーレイで通知し、10秒後にトップページへ遷移します
