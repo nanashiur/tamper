@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         検索エラー時のアラート表示
 // @namespace    http://tampermonkey.net/
-// @version      0.2
-// @description  東京ディズニーリゾート予約サイトで空室検索時に発生するエラーを黄色のオーバーレイで通知し、10秒後にトップページへ遷移します
+// @version      0.3
+// @description  空室検索エラー時に黄色のオーバーレイを表示し、10秒後にトップページへ遷移します（エラー判定は元スクリプトと厳密に同一）
 // @match        https://reserve.tokyodisneyresort.jp/hotel/list/*
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/error_alert.js
@@ -11,12 +11,13 @@
 // ==/UserScript==
 
 (function () {
+
   const checkTimeout = 5000;
   const checkInterval = 100;
+
   let startTime = new Date();
   let intervalId;
 
-  // エラー時の黄色オーバーレイ表示＋リダイレクト
   function showYellowOverlay(message) {
     if (document.getElementById('error-overlay')) return;
 
@@ -51,7 +52,7 @@
     }, 10000);
   }
 
-  // ポーリングで定義済みオブジェクトの有無をチェック
+  // インターセプトタイミングを調整中
   intervalId = setInterval(() => {
     const now = new Date();
     if ((now - startTime) > checkTimeout) {
@@ -59,19 +60,20 @@
       return;
     }
     if (typeof HotelPriceStockQuery !== 'undefined') {
-      if (Hotel?.Util?.handleError) {
+      if (Hotel.Util.handleError) {
         const orig_handleError = Hotel.Util.handleError;
         Hotel.Util.handleError = function (data) {
           showYellowOverlay('空室検索でエラーが発生しました\nデータエラー\n\n再検索またはページをリロードしてください');
           return orig_handleError(data);
         }
       }
-      if (window.$?.lifeobs?.ajax) {
+      if ($ && $.lifeobs.ajax) {
         const orig_ajax = $.lifeobs.ajax;
         $.lifeobs.ajax = function (e) {
+          // errorコールバックを定義
           if (e.url.endsWith('/hotel/api/queryHotelPriceStock/') && !('stockQueryType' in (e.data ?? {})) && !(e.error)) {
             e.error = function (xhr, status, error) {
-              if (xhr.readyState === 4) {
+              if (xhr.readyState == 4) {
                 showYellowOverlay(`空室検索でエラーが発生しました\n${xhr.status} ${error}\n\n再検索またはページをリロードしてください`);
               }
             }
@@ -83,11 +85,12 @@
     }
   }, checkInterval);
 
-  // 検索フォームがなければ早期に処理停止
+  // ページ読み込み完了時に対象外ページの場合(混雑ページ等)は即終了する
   window.addEventListener('load', () => {
     if (!document.querySelector('form#reserveSearchForm')) {
       clearInterval(intervalId);
       return;
     }
   });
+
 })();
