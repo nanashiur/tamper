@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         検索エラー時のアラート表示
 // @namespace    http://tampermonkey.net/
-// @version      0.3
-// @description  空室検索エラー時に黄色のオーバーレイを表示し、10秒後にトップページへ遷移します（エラー判定は元スクリプトと厳密に同一）
+// @version      0.4
+// @description  空室検索エラー時に黄色のオーバーレイを表示し、10秒後にトップページへ遷移します（エラー判定は元スクリプトと完全一致）
 // @match        https://reserve.tokyodisneyresort.jp/hotel/list/*
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/error_alert.js
@@ -70,8 +70,8 @@
       if ($ && $.lifeobs.ajax) {
         const orig_ajax = $.lifeobs.ajax;
         $.lifeobs.ajax = function (e) {
-          // errorコールバックを定義
-          if (e.url.endsWith('/hotel/api/queryHotelPriceStock/') && !('stockQueryType' in (e.data ?? {})) && !(e.error)) {
+          // errorコールバックを定義（通信エラー時）
+          if (e.url.endsWith('/hotel/api/queryHotelPriceStock/') && !('stockQueryType' in (e.data ?? {})) && typeof e.error === 'undefined') {
             e.error = function (xhr, status, error) {
               if (xhr.readyState == 4) {
                 showYellowOverlay(`空室検索でエラーが発生しました\n${xhr.status} ${error}\n\n再検索またはページをリロードしてください`);
