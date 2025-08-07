@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🏨客室ロガー
 // @namespace    http://tampermonkey.net/
-// @version      3.04
+// @version      3.05
 // @description  連続検索 / 空室が出るまで検索 / 色分けログ …（以下略）
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/log.js
@@ -26,7 +26,7 @@
   const pad = x => String(x).padStart(2, '0');
   const fmt = d => `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
   const td = new Date(),
-        p7 = new Date(td), 
+        p7 = new Date(td),
         p4 = new Date(td);
   p7.setDate(p7.getDate() + 7);
   p4.setMonth(p4.getMonth() + 4);
@@ -37,7 +37,7 @@
   };
 
   /* ---------- 状態管理 ---------- */
-  let mode = 0;                               // 0=停止,1=連続,2=空室検索
+  let mode = 0;
   const filters = { 0: true, 1: true, 2: true, 3: true };
 
   /* ---------- UI ---------- */
@@ -51,11 +51,11 @@
     style: 'position:fixed;top:4px;left:50%;transform:translateX(-50%);display:flex;z-index:99999'
   });
 
-  const btnMain = makeBtn('手動検索', '#000');
+  const btnMain = makeBtn('手動', '#000');
   const updateMain = () => {
-    if (mode === 0) { btnMain.textContent = '手動検索';  btnMain.style.background = '#000';  }
-    if (mode === 1) { btnMain.textContent = '連続検索';  btnMain.style.background = 'orange';}
-    if (mode === 2) { btnMain.textContent = '空室検索';  btnMain.style.background = 'red';   }
+    if (mode === 0) { btnMain.textContent = '手動';  btnMain.style.background = '#000'; }
+    if (mode === 1) { btnMain.textContent = '連続';  btnMain.style.background = 'orange'; }
+    if (mode === 2) { btnMain.textContent = '空室';  btnMain.style.background = 'hotpink'; }
   };
   btnMain.onclick = () => {
     mode = (mode + 1) % 3;
@@ -103,7 +103,7 @@
             if (found) {
               mode = 0;
               updateMain();
-              showVacancyOverlay();            // （既存のオーバーレイ処理）
+              showVacancyOverlay();
             } else {
               triggerSearch();
             }
@@ -117,7 +117,7 @@
   /* ---------- ログ ---------- */
   function logStock(resp) {
     const rows = [];
-    let minDt = null;                          // 取得した最小日付 → 選択月判定
+    let minDt = null;
 
     const infos = resp.ecRoomStockInfos ?? {};
     Object.values(infos).forEach(g =>
@@ -126,7 +126,7 @@
           (b.roomBedStockRange ?? []).forEach(d => {
             const dt = dateStr(d.useDate);
             const st = +d.saleStatus;
-            if (!minDt || dt < minDt) minDt = dt;   // 最小日を保持
+            if (!minDt || dt < minDt) minDt = dt;
             if (filters[st]) rows.push({ dt, st, rm: d.remainStockNum ?? 0 });
           })
         )
@@ -135,13 +135,12 @@
 
     rows.sort((a, b) => a.dt.localeCompare(b.dt));
 
-    // ----- 選択月（最小日の年月）だけで空室判定 -----
     const baseYM = minDt ? minDt.slice(0, 7) : '';
     let vacancy = false;
 
     console.group(`📋 客室在庫ログ (${tStr()})`);
     rows.forEach(({ dt, st, rm }) => {
-      if (st === 0 && dt.startsWith(baseYM)) vacancy = true;  // 当月分のみ判定
+      if (st === 0 && dt.startsWith(baseYM)) vacancy = true;
       const ds = HL[dt] || '', ss = STYLE[st];
       console.log(`%c${dt}%c\t%c${LABEL[st]}\t${rm}`, ds, '', ss);
     });
@@ -149,7 +148,7 @@
     return vacancy;
   }
 
-  /* ---------- 空室オーバーレイ（既存処理をそのまま） ---------- */
+  /* ---------- 空室オーバーレイ ---------- */
   function showVacancyOverlay() {
     const ov = Object.assign(document.createElement('div'), {
       textContent: '空室発見!',
