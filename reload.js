@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰️ 41.4 (0-300)
+// @name         ⏰️ 41.2 (0-300)
 // @namespace    http://tampermonkey.net/
-// @version      4.45
-// @description  Pre-reloads at 10:52:00 and reloads at 10:59:41.4 with random delay (0–300ms). Shows countdown, start time, and delay info.
+// @version      4.46
+// @description  Pre-reloads at 10:52:00 and reloads at 10:59:41.2 with random delay (0–300ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -12,7 +12,7 @@
 
 (function () {
   'use strict';
-  const main = { h: 10, m: 59, s: 41, ms: 400, max: 300 };
+  const main = { h: 10, m: 59, s: 41, ms: 200, max: 300 };
   const pre = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
   let trigMain = false, trigPre = false;
   const nowStr = () => new Date().toLocaleTimeString() + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
@@ -31,7 +31,7 @@
   };
   const elClock = make('customClock', 0, 'rgba(0,0,0,0.6)', nowStr());
   const elStart = make('customStart', 39, 'rgba(0,128,0,0.6)', nowStr());
-  const elInfo = make('customInfo', 78, 'rgba(0,0,128,0.6)', '10:59:41.430');
+  const elInfo = make('customInfo', 78, 'rgba(0,0,128,0.6)', '10:59:41.230');
 
   const check = (cfg, triggered, setTrig) => {
     const d = new Date();
