@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TDR reserve: HODHMTGD0004N + useDate=20251219 + M17 (+queue sync)
 // @namespace    tdr-fixed-room-date-rank
-// @version      0.3.4
+// @version      0.3.5
 // @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251219・hotelPriceFrameID=M17 を強制。QueueItヘッダも同部屋に同期。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
