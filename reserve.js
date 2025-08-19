@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         TDR reserve: HODHMTGD0004N + useDate=20251219 + M17 (+queue sync)
+// @name         TDR DHMTGD0004 20251220 M19
 // @namespace    tdr-fixed-room-date-rank
-// @version      0.3.5
-// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251219・hotelPriceFrameID=M17 を強制。QueueItヘッダも同部屋に同期。
-// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
+// @version      1.02
+// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251220・hotelPriceFrameID=M19 を強制。QueueItヘッダも同部屋に同期。
+// @match        https://reserve.tokyodisneyresort.jp/*
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @run-at       document-start
 // @inject-into  page
 // @grant        none
@@ -17,9 +17,9 @@
   window.__tdr_fixed_installed = true;
 
   // 固定値
-  const TARGET   = 'HODHMTGD0004N'; // 部屋ID（commodityCD） ← ハバグラ
-  const FIX_DATE = '20251219';      // useDate（YYYYMMDD）← 25/12/19
-  const FIX_PF   = 'M17';           // ランク（hotelPriceFrameID）
+  const TARGET   = 'HODHMTGD0004N'; // 部屋ID（commodityCD）
+  const FIX_DATE = '20251220';      // useDate（YYYYMMDD）
+  const FIX_PF   = 'M19';           // ランク（hotelPriceFrameID）
 
   const SYNC_QUEUE_HEADER = true;   // x-queueit-ajaxpageurl を同部屋に同期
   const INJECT_IF_MISSING = true;   // 未設定なら注入
@@ -36,7 +36,6 @@
     /\/hotel\/reserve\/?$/.test(String(url||'')) &&
     String(m||'GET').toUpperCase() === 'POST';
 
-  // 本文 → 送信可能な形へ
   const toSendableString = (body) => {
     if (body == null) return '';
     if (body instanceof URLSearchParams) return body.toString();
@@ -47,7 +46,6 @@
     try { return String(body); } catch { return body; }
   };
 
-  // 本文を書き換え（常に文字列で返す）
   const rewriteBody = (orig) => {
     const sendable = toSendableString(orig);
     if (sendable !== orig && typeof sendable !== 'string') return orig;
@@ -55,19 +53,16 @@
     if (!txt) return orig;
 
     const p = new URLSearchParams(txt);
-    // 部屋コード一式
     p.set('commodityCD',    PARTS.commodityCD);
     p.set('searchHotelCD',  PARTS.searchHotelCD);
     p.set('roomLetterCD',   PARTS.roomLetterCD);
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
-    // 日付 & ランク
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
 
     return p.toString();
   };
 
-  // QueueIt ヘッダ同期
   const HDR  = 'x-queueit-ajaxpageurl';
   const BASE = 'https://reserve.tokyodisneyresort.jp';
   const isEncoded = (s) => /%[0-9A-F]{2}/i.test(s);
@@ -85,7 +80,6 @@
     }).join(', ');
   };
 
-  // XHR hook
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
   const _set  = XMLHttpRequest.prototype.setRequestHeader;
@@ -114,7 +108,6 @@
     return _send.call(this, body);
   };
 
-  // fetch hook（最小）
   if (window.fetch){
     const _fetch = window.fetch;
     window.fetch = function(input, init){
@@ -139,5 +132,5 @@
     };
   }
 
-  console.log('[tdr-fixed] room=HODHMTGD0004N, date=20251219, rank=M17 (queue sync ON)');
+  console.log('[tdr-fixed] room=HODHMTGD0004N, date=20251220, rank=M19 (queue sync ON)');
 })();
