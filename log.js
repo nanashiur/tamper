@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏨客室ロガー
+// @name         🏨空室在庫ログ
 // @namespace    http://tampermonkey.net/
-// @version      3.05
-// @description  連続検索 / 空室が出るまで検索 / 色分けログ …（以下略）
+// @version      3.08
+// @description  客室在庫をログしながら、空室を検知するとオーバーレイで通知（ログに価格ランク付き）
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/log.js
@@ -12,7 +12,6 @@
 (() => {
   'use strict';
 
-  /* ---------- ラベル & 色 ---------- */
   const LABEL = { 0: '空室', 1: '満室', 2: '吸収', 3: '非売' };
   const STYLE = {
     0: 'color:red;font-weight:bold',
@@ -22,7 +21,6 @@
   };
   const BTN_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
 
-  /* ---------- 日付ハイライト ---------- */
   const pad = x => String(x).padStart(2, '0');
   const fmt = d => `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
   const td = new Date(),
@@ -36,11 +34,9 @@
     [fmt(p4)]: 'background:#0078d7;color:#fff'
   };
 
-  /* ---------- 状態管理 ---------- */
   let mode = 0;
   const filters = { 0: true, 1: true, 2: true, 3: true };
 
-  /* ---------- UI ---------- */
   const makeBtn = (txt, bg) =>
     Object.assign(document.createElement('div'), {
       textContent: txt,
@@ -72,7 +68,6 @@
   panel.append(btnMain, makeFilter(0), makeFilter(1), makeFilter(2), makeFilter(3));
   document.body.appendChild(panel);
 
-  /* ---------- 検索発火 ---------- */
   const triggerSearch = () => {
     const sel = document.getElementById('boxCalendarSelect');
     if (sel && !document.querySelector('span.calLoad')) {
@@ -87,7 +82,6 @@
 
   const dateStr = s => `${s.slice(0, 4)}/${s.slice(4, 6)}/${s.slice(6)}`;
 
-  /* ---------- Ajax フック ---------- */
   if (window.$?.lifeobs?.ajax) {
     const orig = $.lifeobs.ajax;
     $.lifeobs.ajax = opt => {
@@ -114,7 +108,6 @@
     };
   }
 
-  /* ---------- ログ ---------- */
   function logStock(resp) {
     const rows = [];
     let minDt = null;
@@ -126,29 +119,29 @@
           (b.roomBedStockRange ?? []).forEach(d => {
             const dt = dateStr(d.useDate);
             const st = +d.saleStatus;
+            const rank = d.priceFrameID ?? '';
             if (!minDt || dt < minDt) minDt = dt;
-            if (filters[st]) rows.push({ dt, st, rm: d.remainStockNum ?? 0 });
+            if (filters[st]) rows.push({ dt, st, rm: d.remainStockNum ?? 0, rank });
           })
         )
       )
     );
 
     rows.sort((a, b) => a.dt.localeCompare(b.dt));
-
     const baseYM = minDt ? minDt.slice(0, 7) : '';
     let vacancy = false;
 
     console.group(`📋 客室在庫ログ (${tStr()})`);
-    rows.forEach(({ dt, st, rm }) => {
+    rows.forEach(({ dt, st, rm, rank }) => {
       if (st === 0 && dt.startsWith(baseYM)) vacancy = true;
       const ds = HL[dt] || '', ss = STYLE[st];
-      console.log(`%c${dt}%c\t%c${LABEL[st]}\t${rm}`, ds, '', ss);
+      const label = `${LABEL[st]}　${rm}　${rank}`;  // ← 修正ここだけ
+      console.log(`%c${dt}%c\t%c${label}`, ds, '', ss);
     });
     console.groupEnd();
     return vacancy;
   }
 
-  /* ---------- 空室オーバーレイ ---------- */
   function showVacancyOverlay() {
     const ov = Object.assign(document.createElement('div'), {
       textContent: '空室発見!',
