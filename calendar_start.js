@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📅カレンダー開始読込2025/12
 // @namespace    tdr-next-then-december
-// @version      1.3
+// @version      1.4
 // @description  カレンダー表示で自動「次へ」→ #boxCalendarSelect を 2025/12 に設定
 // @match        https://reserve.tokyodisneyresort.jp/hotel/list/*
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
