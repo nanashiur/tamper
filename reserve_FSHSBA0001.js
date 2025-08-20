@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TDR FSHSBA0001 20251220 M25
+// @name         TDR FSHSBA0001 20251221 M24
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.03
-// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20251220・hotelPriceFrameID=M25 を強制。QueueItヘッダも同部屋に同期。
+// @version      1.04
+// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20251221・hotelPriceFrameID=M24 を強制。QueueItヘッダも同部屋に同期。
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_FSHSBA0001.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_FSHSBA0001.js
@@ -18,8 +18,8 @@
 
   // 固定値
   const TARGET   = 'HOFSHSBA0001N'; // 部屋ID（commodityCD）
-  const FIX_DATE = '20251220';      // useDate（YYYYMMDD）
-  const FIX_PF   = 'M25';           // ランク（hotelPriceFrameID）
+  const FIX_DATE = '20251221';      // useDate（YYYYMMDD）
+  const FIX_PF   = 'M24';           // ランク（hotelPriceFrameID）
 
   const SYNC_QUEUE_HEADER = true;   // x-queueit-ajaxpageurl を同部屋に同期
   const INJECT_IF_MISSING = true;   // 未設定なら注入
@@ -132,5 +132,5 @@
     };
   }
 
-  console.log('[tdr-fixed] room=HOFSHSBA0001N, date=20251220, rank=M25 (queue sync ON)');
+  console.log('[tdr-fixed] room=HOFSHSBA0001N, date=20251221, rank=M24 (queue sync ON)');
 })();
