@@ -100,4 +100,37 @@
         body = rewriteBody(body);
         if (SYNC_QUEUE_HEADER && INJECT_IF_MISSING && !(HDR in (this.__hdrs||{}))){
           const loc = location.pathname + location.search;
-          const v = rewriteQueueHeaderValue(isEncoded(l
+          const v = rewriteQueueHeaderValue(isEncoded(loc) ? loc : encodeURIComponent(loc));
+          try { _set.call(this, HDR, v); } catch {}
+        }
+      }
+    }catch{}
+    return _send.call(this, body);
+  };
+
+  if (window.fetch){
+    const _fetch = window.fetch;
+    window.fetch = function(input, init){
+      try{
+        const url = (typeof input==='string') ? input : (input&&input.url);
+        const method = (init&&init.method) || (input&&input.method) || 'GET';
+        if (isReservePost(url, method) && init){
+          if ('body' in init) init = Object.assign({}, init, { body: rewriteBody(init.body) });
+          if (init.headers){
+            const h = new Headers(init.headers);
+            if (h.has(HDR)) h.set(HDR, rewriteQueueHeaderValue(h.get(HDR)));
+            else if (INJECT_IF_MISSING){
+              const loc = location.pathname + location.search;
+              const v = rewriteQueueHeaderValue(isEncoded(loc) ? loc : encodeURIComponent(loc));
+              h.set(HDR, v);
+            }
+            init.headers = h;
+          }
+        }
+      }catch{}
+      return _fetch(input, init);
+    };
+  }
+
+  console.log('[tdr-fixed] room=HOTDHRCU0001N, date=20251221, rank=M23 (queue sync ON)');
+})();
