@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TDR TDHRCU0001 20251220 M26
+// @name         TDR TDHRCU0001 20251221 M23
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.00
-// @description  /hotel/reserve/ のPOSTで 部屋HOTDHRCU0001N・useDate=20251220・hotelPriceFrameID=M26 を強制。QueueItヘッダも同部屋に同期。
+// @version      1.01
+// @description  /hotel/reserve/ のPOSTで 部屋HOTDHRCU0001N・useDate=20251221・hotelPriceFrameID=M23 を強制。QueueItヘッダも同部屋に同期。
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_TDHRCU0001.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_TDHRCU0001.js
@@ -18,8 +18,8 @@
 
   // 固定値
   const TARGET   = 'HOTDHRCU0001N'; // 部屋ID（commodityCD）
-  const FIX_DATE = '20251220';      // useDate（YYYYMMDD）
-  const FIX_PF   = 'M26';           // ランク（hotelPriceFrameID）
+  const FIX_DATE = '20251221';      // useDate（YYYYMMDD）
+  const FIX_PF   = 'M23';           // ランク（hotelPriceFrameID）
 
   const SYNC_QUEUE_HEADER = true;   // x-queueit-ajaxpageurl を同部屋に同期
   const INJECT_IF_MISSING = true;   // 未設定なら注入
@@ -100,37 +100,4 @@
         body = rewriteBody(body);
         if (SYNC_QUEUE_HEADER && INJECT_IF_MISSING && !(HDR in (this.__hdrs||{}))){
           const loc = location.pathname + location.search;
-          const v = rewriteQueueHeaderValue(isEncoded(loc) ? loc : encodeURIComponent(loc));
-          try { _set.call(this, HDR, v); } catch {}
-        }
-      }
-    }catch{}
-    return _send.call(this, body);
-  };
-
-  if (window.fetch){
-    const _fetch = window.fetch;
-    window.fetch = function(input, init){
-      try{
-        const url = (typeof input==='string') ? input : (input&&input.url);
-        const method = (init&&init.method) || (input&&input.method) || 'GET';
-        if (isReservePost(url, method) && init){
-          if ('body' in init) init = Object.assign({}, init, { body: rewriteBody(init.body) });
-          if (init.headers){
-            const h = new Headers(init.headers);
-            if (h.has(HDR)) h.set(HDR, rewriteQueueHeaderValue(h.get(HDR)));
-            else if (INJECT_IF_MISSING){
-              const loc = location.pathname + location.search;
-              const v = rewriteQueueHeaderValue(isEncoded(loc) ? loc : encodeURIComponent(loc));
-              h.set(HDR, v);
-            }
-            init.headers = h;
-          }
-        }
-      }catch{}
-      return _fetch(input, init);
-    };
-  }
-
-  console.log('[tdr-fixed] room=HOTDHRCU0001N, date=20251220, rank=M26 (queue sync ON)');
-})();
+          const v = rewriteQueueHeaderValue(isEncoded(l
