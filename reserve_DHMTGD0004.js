@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TDR DHMTGD0004 20251222 M16
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.04
+// @version      1.05
 // @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251222・hotelPriceFrameID=M16 を強制。QueueItヘッダも同部屋に同期。
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -138,6 +138,32 @@
       return _fetch(input, init);
     };
   }
+
+  // ★ 起動パネル（左上・緑・3行表示：TGD / 1222 / M16）★
+  (function showPanel(){
+    try{
+      const lines = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF];
+      const el = document.createElement('div');
+      el.id = 'tdr-fixed-panel';
+      el.innerHTML = lines.join('<br>');
+      const s = el.style;
+      s.position = 'fixed';
+      s.top = '8px';
+      s.left = '8px';
+      s.zIndex = '2147483647';
+      s.background = '#16a34a';     // 緑
+      s.color = '#fff';
+      s.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", Meiryo, sans-serif';
+      s.fontWeight = '700';
+      s.padding = '6px 8px';
+      s.borderRadius = '6px';
+      s.lineHeight = '1.2';
+      s.boxShadow = '0 2px 8px rgba(0,0,0,.15)';
+      s.pointerEvents = 'none';      // 画面操作に干渉しない
+      const append = () => (document.body || document.documentElement).appendChild(el);
+      (document.readyState === 'loading') ? document.addEventListener('DOMContentLoaded', append, { once:true }) : append();
+    }catch{}
+  })();
 
   console.log('[tdr-fixed] room=HODHMTGD0004N, date=20251222, rank=M16 (queue sync ON)');
 })();
