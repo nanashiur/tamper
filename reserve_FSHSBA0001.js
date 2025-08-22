@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TDR FSHSBA0001 20251222 M24
+// @name         TDR FSHSBA0001 20251223 M24
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.05
-// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20251222・hotelPriceFrameID=M24 を強制。QueueItヘッダも同部屋に同期。
+// @version      1.08
+// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20251223・hotelPriceFrameID=M24 を強制。QueueItヘッダも同部屋に同期。
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_FSHSBA0001.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_FSHSBA0001.js
@@ -18,7 +18,7 @@
 
   // 固定値
   const TARGET   = 'HOFSHSBA0001N'; // 部屋ID（commodityCD）
-  const FIX_DATE = '20251222';      // useDate（YYYYMMDD）
+  const FIX_DATE = '20251223';      // useDate（YYYYMMDD）
   const FIX_PF   = 'M24';           // ランク（hotelPriceFrameID）
 
   const SYNC_QUEUE_HEADER = true;   // x-queueit-ajaxpageurl を同部屋に同期
@@ -36,6 +36,7 @@
     /\/hotel\/reserve\/?$/.test(String(url||'')) &&
     String(m||'GET').toUpperCase() === 'POST';
 
+  // 本文 → 送信可能な形へ
   const toSendableString = (body) => {
     if (body == null) return '';
     if (body instanceof URLSearchParams) return body.toString();
@@ -46,6 +47,7 @@
     try { return String(body); } catch { return body; }
   };
 
+  // 本文を書き換え（常に文字列で返す）
   const rewriteBody = (orig) => {
     const sendable = toSendableString(orig);
     if (sendable !== orig && typeof sendable !== 'string') return orig;
@@ -53,16 +55,19 @@
     if (!txt) return orig;
 
     const p = new URLSearchParams(txt);
+    // 部屋コード一式
     p.set('commodityCD',    PARTS.commodityCD);
     p.set('searchHotelCD',  PARTS.searchHotelCD);
     p.set('roomLetterCD',   PARTS.roomLetterCD);
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
+    // 日付 & ランク
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
 
     return p.toString();
   };
 
+  // QueueIt ヘッダ同期
   const HDR  = 'x-queueit-ajaxpageurl';
   const BASE = 'https://reserve.tokyodisneyresort.jp';
   const isEncoded = (s) => /%[0-9A-F]{2}/i.test(s);
@@ -132,5 +137,32 @@
     };
   }
 
-  console.log('[tdr-fixed] room=HOFSHSBA0001N, date=20251222, rank=M24 (queue sync ON)');
+  // 起動パネル（左上密着・半透明・フォント少し大きめ）— 色を紫に変更
+  (function showPanel(){
+    try{
+      const lines = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF];
+      const el = document.createElement('div');
+      el.id = 'tdr-fixed-panel';
+      el.innerHTML = lines.join('<br>');
+      const s = el.style;
+      s.position = 'fixed';
+      s.top = '0';
+      s.left = '0';
+      s.zIndex = '2147483647';
+      s.background = 'rgba(139, 92, 246, 0.85)'; // 半透明の紫（例: violet-500 相当）
+      s.color = '#fff';
+      s.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", Meiryo, sans-serif';
+      s.fontWeight = '700';
+      s.fontSize = '16px';
+      s.padding = '6px 8px';
+      s.borderRadius = '6px';
+      s.lineHeight = '1.2';
+      s.boxShadow = '0 2px 8px rgba(0,0,0,.15)';
+      s.pointerEvents = 'none';
+      const append = () => (document.body || document.documentElement).appendChild(el);
+      (document.readyState === 'loading') ? document.addEventListener('DOMContentLoaded', append, { once:true }) : append();
+    }catch{}
+  })();
+
+  console.log('[tdr-fixed] room=HOFSHSBA0001N, date=20251223, rank=M24 (queue sync ON)');
 })();
