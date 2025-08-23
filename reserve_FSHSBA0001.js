@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         TDR FSHSBA0001 20251223 M24
+// @name         🦋 FSHSBA0001 20251224 M25
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.08
-// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20251223・hotelPriceFrameID=M24 を強制。QueueItヘッダも同部屋に同期。
-// @match        https://reserve.tokyodisneyresort.jp/*
+// @version      1.10
+// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20251224・hotelPriceFrameID=M25 を強制。QueueItヘッダも同部屋に同期。
+// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_FSHSBA0001.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_FSHSBA0001.js
 // @run-at       document-start
@@ -18,8 +18,8 @@
 
   // 固定値
   const TARGET   = 'HOFSHSBA0001N'; // 部屋ID（commodityCD）
-  const FIX_DATE = '20251223';      // useDate（YYYYMMDD）
-  const FIX_PF   = 'M24';           // ランク（hotelPriceFrameID）
+  const FIX_DATE = '20251224';      // useDate（YYYYMMDD）
+  const FIX_PF   = 'M25';           // ランク（hotelPriceFrameID）
 
   const SYNC_QUEUE_HEADER = true;   // x-queueit-ajaxpageurl を同部屋に同期
   const INJECT_IF_MISSING = true;   // 未設定なら注入
@@ -137,7 +137,7 @@
     };
   }
 
-  // 起動パネル（左上密着・半透明・フォント少し大きめ）— 色を紫に変更
+  // 起動パネル（左上密着・半透明・紫）
   (function showPanel(){
     try{
       const lines = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF];
@@ -149,7 +149,7 @@
       s.top = '0';
       s.left = '0';
       s.zIndex = '2147483647';
-      s.background = 'rgba(139, 92, 246, 0.85)'; // 半透明の紫（例: violet-500 相当）
+      s.background = 'rgba(139, 92, 246, 0.85)'; // 半透明の紫
       s.color = '#fff';
       s.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", Meiryo, sans-serif';
       s.fontWeight = '700';
@@ -164,5 +164,5 @@
     }catch{}
   })();
 
-  console.log('[tdr-fixed] room=HOFSHSBA0001N, date=20251223, rank=M24 (queue sync ON)');
+  console.log('[tdr-fixed] room=HOFSHSBA0001N, date=20251224, rank=M25 (queue sync ON)');
 })();
