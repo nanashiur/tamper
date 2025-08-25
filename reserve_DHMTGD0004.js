@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004 20251225 M18
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.13
-// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251225・hotelPriceFrameID=M18 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル。
+// @version      1.14
+// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251225・hotelPriceFrameID=M18 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,25 +16,24 @@
   if (window.__tdr_fixed_installed) return;
   window.__tdr_fixed_installed = true;
 
-  // --- トグル用フラグ（初期ON） ---
-  let ENABLED = true;
-  // 外から確認したい場合に備えて（任意）
+  // --- トグル用フラグ（初期OFF） ---
+  let ENABLED = false;
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
   // 固定値
-  const TARGET   = 'HODHMTGD0004N'; // 部屋ID（commodityCD）
-  const FIX_DATE = '20251225';      // useDate（YYYYMMDD）
-  const FIX_PF   = 'M18';           // ランク（hotelPriceFrameID）
+  const TARGET   = 'HODHMTGD0004N';
+  const FIX_DATE = '20251225';
+  const FIX_PF   = 'M18';
 
-  const SYNC_QUEUE_HEADER = true;   // x-queueit-ajaxpageurl を同部屋に同期
-  const INJECT_IF_MISSING = true;   // 未設定なら注入
+  const SYNC_QUEUE_HEADER = true;
+  const INJECT_IF_MISSING = true;
 
   // 派生コード
   const PARTS = {
     commodityCD:    TARGET,
-    searchHotelCD:  TARGET.slice(2,5),  // DHM
-    roomLetterCD:   TARGET.slice(5,8),  // TGD
-    roomMaterialCD: TARGET.slice(2,12)  // DHMTGD0004
+    searchHotelCD:  TARGET.slice(2,5),
+    roomLetterCD:   TARGET.slice(5,8),
+    roomMaterialCD: TARGET.slice(2,12)
   };
 
   const isReservePost = (url, m) =>
@@ -60,12 +59,10 @@
     if (!txt) return orig;
 
     const p = new URLSearchParams(txt);
-    // 部屋コード一式
     p.set('commodityCD',    PARTS.commodityCD);
     p.set('searchHotelCD',  PARTS.searchHotelCD);
     p.set('roomLetterCD',   PARTS.roomLetterCD);
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
-    // 日付 & ランク
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
 
@@ -101,14 +98,12 @@
   };
   XMLHttpRequest.prototype.setRequestHeader = function(name, value){
     const key = String(name||''); let val=value;
-    // OFF時はヘッダ書き換えを行わない
     if (ENABLED && key.toLowerCase()===HDR) val = rewriteQueueHeaderValue(value);
     this.__hdrs[key.toLowerCase()] = val;
     return _set.call(this, key, val);
   };
   XMLHttpRequest.prototype.send = function(body){
     try{
-      // OFFなら一切さわらずそのまま送信
       if (ENABLED && isReservePost(this.__u, this.__m)){
         body = rewriteBody(body);
         if (SYNC_QUEUE_HEADER && INJECT_IF_MISSING && !(HDR in (this.__hdrs||{}))){
@@ -146,7 +141,7 @@
     };
   }
 
-  // 起動パネル（左上密着・半透明0.75 / OFF時はさらに薄く、クリックでON/OFF）
+  // 起動パネル（初期OFF・左上密着・半透明0.75 / OFF時はさらに薄く、クリックでON/OFF）
   (function showPanel(){
     try{
       const ON_BG  = 'rgba(22, 163, 74, 0.75)';
@@ -161,7 +156,7 @@
       s.top = '0';
       s.left = '0';
       s.zIndex = '2147483647';
-      s.background = ON_BG;
+      s.background = OFF_BG;         // 初期OFF表示
       s.color = '#fff';
       s.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", Meiryo, sans-serif';
       s.fontWeight = '700';
@@ -170,7 +165,7 @@
       s.borderRadius = '6px';
       s.lineHeight = '1.2';
       s.boxShadow = '0 2px 8px rgba(0,0,0,.15)';
-      s.cursor = 'pointer';     // クリック可能
+      s.cursor = 'pointer';
       s.userSelect = 'none';
       s.pointerEvents = 'auto';
 
@@ -195,5 +190,5 @@
     }catch{}
   })();
 
-  console.log('[tdr-fixed] room=HODHMTGD0004N, date=20251225, rank=M18 (queue sync ON)');
+  console.log('[tdr-fixed] loaded (OFF) room=HODHMTGD0004N, date=20251225, rank=M18');
 })();
