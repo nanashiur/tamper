@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004 20251225 M18
+// @name         🏨 DHMTGD0004 20251231 M28
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.14
-// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251225・hotelPriceFrameID=M18 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。
+// @version      1.16
+// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251231・hotelPriceFrameID=M28 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -20,10 +20,10 @@
   let ENABLED = false;
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
-  // 固定値
+  // 固定値（毎日の置換対象はここだけ）
   const TARGET   = 'HODHMTGD0004N';
-  const FIX_DATE = '20251225';
-  const FIX_PF   = 'M18';
+  const FIX_DATE = '20251231';
+  const FIX_PF   = 'M28';
 
   const SYNC_QUEUE_HEADER = true;
   const INJECT_IF_MISSING = true;
@@ -31,9 +31,9 @@
   // 派生コード
   const PARTS = {
     commodityCD:    TARGET,
-    searchHotelCD:  TARGET.slice(2,5),
-    roomLetterCD:   TARGET.slice(5,8),
-    roomMaterialCD: TARGET.slice(2,12)
+    searchHotelCD:  TARGET.slice(2,5),  // DHM / FSH / TDH など
+    roomLetterCD:   TARGET.slice(5,8),  // TGD
+    roomMaterialCD: TARGET.slice(2,12)  // DHMTGD0004
   };
 
   const isReservePost = (url, m) =>
@@ -59,10 +59,12 @@
     if (!txt) return orig;
 
     const p = new URLSearchParams(txt);
+    // 部屋コード一式
     p.set('commodityCD',    PARTS.commodityCD);
     p.set('searchHotelCD',  PARTS.searchHotelCD);
     p.set('roomLetterCD',   PARTS.roomLetterCD);
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
+    // 日付 & ランク
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
 
@@ -141,11 +143,19 @@
     };
   }
 
-  // 起動パネル（初期OFF・左上密着・半透明0.75 / OFF時はさらに薄く、クリックでON/OFF）
+  // 起動パネル（初期OFF・色はホテルコードで切替：DHM=緑/FSH=ピンク/TDH=オレンジ/その他=黒）
   (function showPanel(){
     try{
-      const ON_BG  = 'rgba(22, 163, 74, 0.75)';
-      const OFF_BG = 'rgba(22, 163, 74, 0.25)'; // かなりの半透明
+      const code = PARTS.searchHotelCD; // 例: 'DHM', 'FSH', 'TDH'
+      // ベース色をRGBで決定
+      const baseRGB = (code === 'DHM') ? [22,163,74]        // 緑
+                    : (code === 'FSH') ? [236,72,153]       // ピンク
+                    : (code === 'TDH') ? [234,88,12]        // オレンジ
+                    : [0,0,0];                              // その他は黒
+      const rgba = (a) => `rgba(${baseRGB[0]}, ${baseRGB[1]}, ${baseRGB[2]}, ${a})`;
+      const ON_BG  = rgba(0.75);
+      const OFF_BG = rgba(0.25);
+
       const lines = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF];
 
       const el = document.createElement('div');
@@ -177,7 +187,7 @@
       el.addEventListener('click', () => {
         ENABLED = !ENABLED;
         applyVisual();
-        console.log(`[tdr-fixed] toggled ${ENABLED ? 'ON' : 'OFF'}`);
+        console.log(`[tdr-fixed] toggled ${ENABLED ? 'ON' : 'OFF'} (code=${code})`);
       });
 
       const append = () => {
@@ -190,5 +200,5 @@
     }catch{}
   })();
 
-  console.log('[tdr-fixed] loaded (OFF) room=HODHMTGD0004N, date=20251225, rank=M18');
+  console.log('[tdr-fixed] loaded (OFF) room=HODHMTGD0004N, date=20251231, rank=M28');
 })();
