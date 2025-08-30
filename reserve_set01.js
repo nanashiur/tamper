@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏰 TDHRCU0001 20251230 M27
+// @name         🏰 TDHRCU0001 20251231 M29
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.17
-// @description  /hotel/reserve/ のPOSTで 部屋HOTDHRCU0001N・useDate=20251230・hotelPriceFrameID=M27 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @version      1.18
+// @description  /hotel/reserve/ のPOSTで 部屋HOTDHRCU0001N・useDate=20251231・hotelPriceFrameID=M29 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set01.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set01.js
@@ -22,8 +22,8 @@
 
   // 固定値（毎日の置換対象はここだけ）
   const TARGET   = 'HOTDHRCU0001N';
-  const FIX_DATE = '20251230';
-  const FIX_PF   = 'M27';
+  const FIX_DATE = '20251231';
+  const FIX_PF   = 'M29';
 
   const SYNC_QUEUE_HEADER = true;
   const INJECT_IF_MISSING = true;
@@ -199,5 +199,5 @@
     }catch{}
   })();
 
-  console.log('[tdr-fixed] loaded (OFF) room=HOTDHRCU0001N, date=20251230, rank=M27');
+  console.log('[tdr-fixed] loaded (OFF) room=HOTDHRCU0001N, date=20251231, rank=M29');
 })();
