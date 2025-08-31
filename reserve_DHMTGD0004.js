@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004 20251231 M28
+// @name         🏨 DHMTGD0004 20260101 M26
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.16
-// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20251231・hotelPriceFrameID=M28 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @version      1.17
+// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20260101・hotelPriceFrameID=M26 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -22,8 +22,8 @@
 
   // 固定値（毎日の置換対象はここだけ）
   const TARGET   = 'HODHMTGD0004N';
-  const FIX_DATE = '20251231';
-  const FIX_PF   = 'M28';
+  const FIX_DATE = '20260101';
+  const FIX_PF   = 'M26';
 
   const SYNC_QUEUE_HEADER = true;
   const INJECT_IF_MISSING = true;
@@ -89,7 +89,6 @@
     }).join(', ');
   };
 
-  // XHR hook
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
   const _set  = XMLHttpRequest.prototype.setRequestHeader;
@@ -147,7 +146,6 @@
   (function showPanel(){
     try{
       const code = PARTS.searchHotelCD; // 例: 'DHM', 'FSH', 'TDH'
-      // ベース色をRGBで決定
       const baseRGB = (code === 'DHM') ? [22,163,74]        // 緑
                     : (code === 'FSH') ? [236,72,153]       // ピンク
                     : (code === 'TDH') ? [234,88,12]        // オレンジ
@@ -200,5 +198,5 @@
     }catch{}
   })();
 
-  console.log('[tdr-fixed] loaded (OFF) room=HODHMTGD0004N, date=20251231, rank=M28');
+  console.log('[tdr-fixed] loaded (OFF) room=HODHMTGD0004N, date=20260101, rank=M26');
 })();
