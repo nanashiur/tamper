@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ⏰️ 40.4 (0-300)
 // @namespace    http://tampermonkey.net/
-// @version      4.59
+// @version      4.61
 // @description  Pre-reloads at 10:52:00 and reloads at 10:59:40.4 with random delay (0–300ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -23,11 +23,11 @@
     Object.assign(d.style, {
       position: 'fixed', right: '0px', top: `${top}px`,
       background: bg, color: 'white',
-      padding: '1px 5px',
-      fontSize: '12px', lineHeight: '12px',
-      height: '14px', boxSizing: 'border-box',   // ← 高さを固定（上下1pxの余白を含む）
+      padding: '3px 10px',                 // 大きめ
+      fontSize: '18px', lineHeight: '18px',
+      height: '24px', boxSizing: 'border-box',
       borderRadius: '0px', whiteSpace: 'nowrap',
-      zIndex: 9999, cursor: 'pointer'
+      zIndex: 99999, cursor: 'pointer'
     });
     d.id = id; d.textContent = txt;
     d.onclick = () => d.remove();
@@ -35,10 +35,10 @@
     return d;
   };
 
-  // 1行の実高14pxに対してトップ位置を 0 / 15 / 30（常に1pxギャップ）
+  // 段間の隙間をゼロに（連続配置）
   const elClock = make('customClock', 0,  'rgba(0,0,0,0.6)', nowStr());
-  const elStart = make('customStart', 15, 'rgba(0,128,0,0.6)', nowStr());
-  const elInfo  = make('customInfo',  30, 'rgba(0,0,128,0.6)', '10:59:40.430');
+  const elStart = make('customStart', 24, 'rgba(0,128,0,0.6)', nowStr());
+  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', '10:59:40.430');
 
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
