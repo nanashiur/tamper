@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰️ 40.5 (0-300)
+// @name         ⏰️ 40.4 (0-300)
 // @namespace    http://tampermonkey.net/
-// @version      4.52
-// @description  Pre-reloads at 10:52:00 and reloads at 10:59:40.5 with random delay (0–300ms). Shows countdown, start time, and delay info.
+// @version      4.59
+// @description  Pre-reloads at 10:52:00 and reloads at 10:59:40.4 with random delay (0–300ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -12,7 +12,7 @@
 
 (function () {
   'use strict';
-  const main = { h: 10, m: 59, s: 40, ms: 500, max: 300 };
+  const main = { h: 10, m: 59, s: 40, ms: 400, max: 300 };
   const pre  = { h: 10, m: 52, s: 0,  ms:   0, max: 2000 };
   let trigMain = false, trigPre = false;
   let reloadEnabled = true;
@@ -21,25 +21,31 @@
   const make = (id, top, bg, txt) => {
     const d = document.createElement('div');
     Object.assign(d.style, {
-      position: 'fixed', top: `${top}px`, right: '0px', background: bg, color: 'white',
-      padding: '3px 15px', borderRadius: '0px', fontSize: '20px',
-      fontFamily: 'monospace', whiteSpace: 'nowrap', zIndex: 9999, cursor: 'pointer'
+      position: 'fixed', right: '0px', top: `${top}px`,
+      background: bg, color: 'white',
+      padding: '1px 5px',
+      fontSize: '12px', lineHeight: '12px',
+      height: '14px', boxSizing: 'border-box',   // ← 高さを固定（上下1pxの余白を含む）
+      borderRadius: '0px', whiteSpace: 'nowrap',
+      zIndex: 9999, cursor: 'pointer'
     });
     d.id = id; d.textContent = txt;
     d.onclick = () => d.remove();
-    document.body.appendChild(d); return d;
+    document.body.appendChild(d);
+    return d;
   };
 
+  // 1行の実高14pxに対してトップ位置を 0 / 15 / 30（常に1pxギャップ）
   const elClock = make('customClock', 0,  'rgba(0,0,0,0.6)', nowStr());
-  const elStart = make('customStart', 39, 'rgba(0,128,0,0.6)', nowStr());
-  const elInfo  = make('customInfo',  78, 'rgba(0,0,128,0.6)', '10:59:40.530');
+  const elStart = make('customStart', 15, 'rgba(0,128,0,0.6)', nowStr());
+  const elInfo  = make('customInfo',  30, 'rgba(0,0,128,0.6)', '10:59:40.430');
 
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
     const op = reloadEnabled ? '1' : '0.2';
     elClock.style.opacity = op;
     elStart.style.opacity = op;
-    elInfo.style.opacity  = op;
+    elInfo .style.opacity = op;
   };
   elClock.onclick = elStart.onclick = elInfo.onclick = toggleReload;
 
