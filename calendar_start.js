@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         📅カレンダー開始読込2025/12
+// @name         📅カレンダー開始読込2026/01
 // @namespace    tdr-next-then-december
-// @version      1.5
-// @description  カレンダー表示で自動「次へ」→ #boxCalendarSelect を 2025/12 に設定
+// @version      1.6
+// @description  カレンダー表示で自動「次へ」→ #boxCalendarSelect を 2026/01 に設定
 // @match        https://reserve.tokyodisneyresort.jp/hotel/list/*
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/calendar_start.js
@@ -15,12 +15,14 @@
   'use strict';
   if (!/\/hotel\/list/.test(location.pathname)) return;
 
-  const TARGET_VALUE = '2025,12';
+  // 2026年1月（value 形式は "YYYY,M"）
+  const TARGET_VALUE = '2026,1';
   const MAX_WAIT_NEXT_MS = 15000;
 
   let armed = false;
   let nextClicked = false;
 
+  // 「次へ」クリック後に #boxCalendarSelect を 2026/01 にする
   document.addEventListener('click', (ev) => {
     const el = ev.target.closest('button, a, [role="button"], input[type="button"], input[type="submit"]');
     if (!el) return;
@@ -34,12 +36,17 @@
       const sel = document.getElementById('boxCalendarSelect');
       if (sel && sel.tagName === 'SELECT' && sel.options.length > 1) {
         const opts = [...sel.options];
-        let target = opts.find(o => (o.value || '').trim() === TARGET_VALUE)
-                 ||  opts.find(o => (o.textContent || '').trim() === '2025/12')
-                 ||  opts.filter(o =>
-                        /,\s*12$/.test((o.value || '').trim()) ||
-                        /\/12$/.test((o.textContent || '').trim())
-                     ).pop();
+        let target =
+          // value 厳密一致（2026,1）
+          opts.find(o => (o.value || '').trim() === TARGET_VALUE)
+          // テキスト厳密一致（2026/01）
+          || opts.find(o => (o.textContent || '').trim() === '2026/01')
+          // フォールバック：末尾が「,1」または「/01（/1）」の最後の項目
+          || opts.filter(o =>
+               /,\s*0?1$/.test((o.value || '').trim()) ||
+               /\/0?1$/.test((o.textContent || '').trim())
+             ).pop();
+
         if (target) {
           sel.value = target.value;
           sel.selectedIndex = opts.indexOf(target);
@@ -47,10 +54,11 @@
         }
         clearInterval(timer);
       }
-      if (Date.now() - t0 > 10000) clearInterval(timer);
-    }, 100);
+      if (Date.now() - t0 > 10000) clearInterval(timer); // 最大10秒
+    }, 100); // 0.1秒間隔
   }, true);
 
+  // 自動で「次へ」を押す（0.1秒待って人間っぽく）
   const visible = el => !!el && el.offsetParent !== null && el.getClientRects().length > 0;
 
   function findNextButton() {
@@ -86,7 +94,7 @@
     const btn = findNextButton();
     if (btn) {
       nextClicked = true;
-      setTimeout(() => clickLikeHuman(btn), 100);
+      setTimeout(() => clickLikeHuman(btn), 100); // 0.1秒待ってクリック
     }
-  }, 100);
+  }, 100); // 0.1秒間隔
 })();
