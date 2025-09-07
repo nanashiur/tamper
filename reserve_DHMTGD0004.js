@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004 20260104 M12
+// @name         🏨 DHMTGD0004 20260108 M12
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.18
-// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20260104・hotelPriceFrameID=M12 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @version      1.19
+// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20260108・hotelPriceFrameID=M12 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -22,7 +22,7 @@
 
   // 固定値（毎日の置換対象はここだけ）
   const TARGET   = 'HODHMTGD0004N';
-  const FIX_DATE = '20260104';
+  const FIX_DATE = '20260108';
   const FIX_PF   = 'M12';
 
   const SYNC_QUEUE_HEADER = true;
@@ -199,5 +199,5 @@
     }catch{}
   })();
 
-  console.log('[tdr-fixed] loaded (OFF) room=HODHMTGD0004N, date=20260104, rank=M12');
+  console.log('[tdr-fixed] loaded (OFF) room=HODHMTGD0004N, date=20260108, rank=M12');
 })();
