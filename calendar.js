@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📅カレンダー再検索
 // @namespace    http://tampermonkey.net/
-// @version      4.4
+// @version      4.6
 // @description  月見出しクリックで再検索。通信エラー時は時間帯別に自動再検索（0.1s / 1s / 30s）。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar.js
@@ -17,9 +17,9 @@
     const d = new Date();
     const h = d.getHours();
     const m = d.getMinutes();
-    if (h === 3 || (h === 4 && m < 59)) return 30;              // 03:00–04:58
-    if ((h === 10 && m >= 55) || h === 11)      return 0.1;     // 10:55–11:59
-    return 1;                                                   // その他
+    if (h === 3 || (h === 4 && m < 59)) return 30;       // 03:00–04:58
+    if ((h === 10 && m >= 55) || h === 11) return 0.1;   // 10:55–11:59
+    return 1;                                            // その他
   };
 
   /* -------- オーバーレイ表示 -------- */
@@ -42,7 +42,9 @@
       if (--sec > 0) {
         ov.textContent = `再検索まで ${sec} 秒`;
       } else {
-        clearInterval(id); ov.remove(); triggerReload();
+        clearInterval(id);
+        ov.remove();
+        triggerReload();
       }
     }, 1000);
   };
@@ -84,7 +86,7 @@
     '.boxCalendar.month .selectMonth li p.currentMonth'
   );
   if (head) {
-    // ※ スタイルは一切変更しません（通常表示のまま）
+    // スタイルは変更せず（通常表示）
     head.addEventListener('click', () => {
       if (!document.querySelector('span.calLoad')) triggerReload();
     });
