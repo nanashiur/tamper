@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🏰 TDHRCU0001 20260203 M18
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.22
+// @version      1.23
 // @description  /hotel/reserve/ のPOSTで 部屋HOTDHRCU0001N・useDate=20260203・hotelPriceFrameID=M18 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set01.js
