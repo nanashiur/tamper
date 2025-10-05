@@ -4,8 +4,8 @@
 // @version      3.09
 // @description  客室在庫をログしながら、空室を検知するとオーバーレイで通知（ログに価格ランク付き）
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/log.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/log.js
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @grant        none
 // ==/UserScript==
 
