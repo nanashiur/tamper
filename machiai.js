@@ -4,8 +4,8 @@
 // @version      6.04
 // @description  左下に開始時刻と有効期限を表示（黒の半透明・フォント12px・スリム表示・残り時間は中央寄せ・5分/10分目盛り復活）
 // @match        https://reserve.tokyodisneyresort.jp/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/machiai.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/machiai.js
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/queue.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/queue.js
 // @grant        none
 // ==/UserScript==
 
