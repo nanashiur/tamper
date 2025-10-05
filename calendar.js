@@ -4,8 +4,8 @@
 // @version      4.6
 // @description  月見出しクリックで再検索。通信エラー時は時間帯別に自動再検索（0.1s / 1s / 30s）。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
-// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar.js
-// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar.js
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_reload.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_reload.js
 // @grant        none
 // ==/UserScript==
 
