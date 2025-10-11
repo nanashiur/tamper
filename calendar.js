@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📅カレンダー再検索
 // @namespace    http://tampermonkey.net/
-// @version      4.6
+// @version      4.7
 // @description  月見出しクリックで再検索。通信エラー時は時間帯別に自動再検索（0.1s / 1s / 30s）。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_reload.js
@@ -81,12 +81,18 @@
     };
   }
 
-  /* -------- 今月見出し：通常表示のまま、クリックで再検索のみ -------- */
+  /* -------- 今月見出し：反転表示＋クリックで再検索 -------- */
   const head = document.querySelector(
     '.boxCalendar.month .selectMonth li p.currentMonth'
   );
   if (head) {
-    // スタイルは変更せず（通常表示）
+    Object.assign(head.style, {
+      cursor:'pointer',
+      background:'#0078d7',
+      color:'#fff',
+      borderRadius:'6px',
+      padding:'2px 6px'
+    });
     head.addEventListener('click', () => {
       if (!document.querySelector('span.calLoad')) triggerReload();
     });
