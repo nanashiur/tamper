@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰️ 40.4 (0-300)
+// @name         ⏰️ 40.2 (0-300)
 // @namespace    http://tampermonkey.net/
-// @version      4.61
-// @description  Pre-reloads at 10:52:00 and reloads at 10:59:40.4 with random delay (0–300ms). Shows countdown, start time, and delay info.
+// @version      4.62
+// @description  Pre-reloads at 10:52:00 and reloads at 10:59:40.2 with random delay (0–300ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -12,7 +12,7 @@
 
 (function () {
   'use strict';
-  const main = { h: 10, m: 59, s: 40, ms: 400, max: 300 };
+  const main = { h: 10, m: 59, s: 40, ms: 200, max: 300 };
   const pre  = { h: 10, m: 52, s: 0,  ms:   0, max: 2000 };
   let trigMain = false, trigPre = false;
   let reloadEnabled = true;
@@ -23,7 +23,7 @@
     Object.assign(d.style, {
       position: 'fixed', right: '0px', top: `${top}px`,
       background: bg, color: 'white',
-      padding: '3px 10px',                 // 大きめ
+      padding: '3px 10px',
       fontSize: '18px', lineHeight: '18px',
       height: '24px', boxSizing: 'border-box',
       borderRadius: '0px', whiteSpace: 'nowrap',
@@ -35,10 +35,9 @@
     return d;
   };
 
-  // 段間の隙間をゼロに（連続配置）
   const elClock = make('customClock', 0,  'rgba(0,0,0,0.6)', nowStr());
   const elStart = make('customStart', 24, 'rgba(0,128,0,0.6)', nowStr());
-  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', '10:59:40.430');
+  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', '10:59:40.230');
 
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
