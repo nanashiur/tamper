@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         🟦 Auto Click Blue Reservation Button
 // @namespace    http://tampermonkey.net/
-// @version      4.1
+// @version      4.2
 // @description  Auto-clicks the blue reservation button with toggle. Auto-pause after 40 s, auto-stop after 35 min.
-// @match        https://reserve.tokyudisneyresort.jp/sp/hotel/list/*
+// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
 // @grant        none
