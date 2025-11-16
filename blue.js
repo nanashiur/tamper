@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🟦 Auto Click Blue Reservation Button
 // @namespace    http://tampermonkey.net/
-// @version      3.7
-// @description  Auto-clicks the blue reservation button with toggle. Auto-pause after 60 s, auto-stop after 35 min.
+// @version      4.0
+// @description  Auto-clicks the blue reservation button with toggle. Skips clicking while network access is in progress. Auto-pause after 40 s, auto-stop after 35 min.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
@@ -14,6 +14,25 @@
   const startTime = Date.now();
   let stopped = false;
   let isPaused = false;
+  let inflight = 0;
+
+  const origFetch = window.fetch;
+  if (origFetch) {
+    window.fetch = function (...args) {
+      inflight++;
+      const p = origFetch.apply(this, args);
+      return p.then(
+        r => { inflight = Math.max(0, inflight - 1); return r; },
+        e => { inflight = Math.max(0, inflight - 1); throw e; }
+      );
+    };
+  }
+  const origSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (...args) {
+    inflight++;
+    this.addEventListener('loadend', () => { inflight = Math.max(0, inflight - 1); }, { once: true });
+    return origSend.apply(this, args);
+  };
 
   const container = document.createElement('div');
   container.style.position = 'fixed';
@@ -57,7 +76,7 @@
     el.style.background = 'rgba(255,140,0,.8)';
     el.textContent = '停止中';
     el.style.border = 'none';
-  }, 60000);
+  }, 40000);
 
   const flash = () => {
     el.style.border = '2px solid #0033cc';
@@ -77,26 +96,25 @@
     }
 
     if (!isPaused) {
-      const btn = document.querySelector('.js-reserve.button.next');
-      if (btn) {
-        btn.click();
+      if (inflight > 0) {
         el.style.background = 'rgba(60,100,255,.6)';
-        el.textContent = '稼働中';
-        flash();
-      } else {
-        el.style.background = 'rgba(128,0,255,.6)';
-        el.textContent = '待機中';
+        el.textContent = '通信中';
         el.style.border = 'none';
+      } else {
+        const btn = document.querySelector('.js-reserve.button.next');
+        if (btn) {
+          btn.click();
+          el.style.background = 'rgba(60,100,255,.6)';
+          el.textContent = '稼働中';
+          flash();
+        } else {
+          el.style.background = 'rgba(128,0,255,.6)';
+          el.textContent = '待機中';
+          el.style.border = 'none';
+        }
       }
     }
 
-    const elapsed = (now - startTime) / 1000;
-    const interval =
-      elapsed < 10 ? 400 :
-      elapsed < 20 ? 1000 :
-      elapsed < 30 ? 1500 :
-      elapsed < 60 ? 2000 : 3000;
-
-    setTimeout(loop, interval);
+    setTimeout(loop, 2000);
   })();
 })();
