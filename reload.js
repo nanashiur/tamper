@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰️ 39.00 (0-700)
+// @name         ⏰️ 39.00 (0-1000)
 // @namespace    http://tampermonkey.net/
-// @version      4.64
-// @description  Pre-reloads at 10:52:00 and reloads at 10:59:39.00 with random delay (0–700ms). Shows countdown, start time, and delay info.
+// @version      4.65
+// @description  Pre-reloads at 10:52:00 and reloads at 10:59:39.00 with random delay (0–1000ms). Shows countdown, start time, and delay info.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -12,7 +12,7 @@
 
 (function () {
   'use strict';
-  const main = { h: 10, m: 59, s: 39, ms: 0, max: 700 };
+  const main = { h: 10, m: 59, s: 39, ms: 0, max: 1000 };
   const pre  = { h: 10, m: 52, s: 0,  ms: 0, max: 2000 };
   let trigMain = false, trigPre = false;
   let reloadEnabled = true;
@@ -37,7 +37,7 @@
 
   const elClock = make('customClock', 0,  'rgba(0,0,0,0.6)', nowStr());
   const elStart = make('customStart', 24, 'rgba(0,128,0,0.6)', nowStr());
-  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', '10:59:39.700');
+  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', '10:59:40.000');
 
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
