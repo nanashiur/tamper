@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ⏰📱 39.50 (0-1000)
 // @namespace    http://tampermonkey.net/
-// @version      4.65-ios
-// @description  Pre-reloads at 10:52:00 and reloads at 10:59:39.50 with random delay (0–1000ms). iOS(Safari) friendly.
+// @version      4.66-ios
+// @description  Auto-calculates info panel based on start time + max delay. iOS(Safari) friendly.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload_ios.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload_ios.js
@@ -12,18 +12,25 @@
 
 (function () {
   'use strict';
-  const main = { h: 10, m: 59, s: 39, ms: 500, max: 1000 }; // ← 39.50秒スタート
-  const pre  = { h: 10, m: 52, s:  0, ms:   0, max: 2000 };
+  const main = { h: 10, m: 59, s: 39, ms: 500, max: 1000 }; // ← 開始時刻を触るだけでOK
+  const pre  = { h: 10, m: 52, s: 0,  ms: 0,   max: 2000 };
 
   let trigMain = false, trigPre = false;
   let reloadEnabled = true;
 
   const nowStr = () => {
     const d = new Date();
+    return `${d.toLocaleTimeString()}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+  };
+
+  // ★ 3段目：開始時刻 + max を自動計算する関数
+  const calcInfo = () => {
+    const base = new Date();
+    base.setHours(main.h, main.m, main.s, main.ms + main.max);
     return (
-      d.toLocaleTimeString() +
-      '.' +
-      String(d.getMilliseconds()).padStart(3, '0')
+      base.toLocaleTimeString() +
+      "." +
+      String(base.getMilliseconds()).padStart(3, "0")
     );
   };
 
@@ -54,9 +61,9 @@
 
   const elClock = make('customClock', 0,  'rgba(0,0,0,0.6)', nowStr());
   const elStart = make('customStart', 24, 'rgba(0,128,0,0.6)', nowStr());
-  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', '10:59:40.000');
+  // ★ 自動計算された値を入れる
+  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', calcInfo());
 
-  // iOS対応：トグル機能はそのまま
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
     const op = reloadEnabled ? '1' : '0.2';
@@ -91,6 +98,7 @@
 
   setInterval(() => {
     elClock.textContent = nowStr();
+    elInfo.textContent = calcInfo(); // ★ 動的更新
     check(pre,  () => trigPre,  v => trigPre  = v);
     check(main, () => trigMain, v => trigMain = v);
   }, 50);
