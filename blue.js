@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🟦 Auto Click Blue Reservation Button
 // @namespace    http://tampermonkey.net/
-// @version      4.2
-// @description  Auto-clicks the blue reservation button with toggle. Auto-pause after 40 s, auto-stop after 35 min.
+// @version      4.4
+// @description  Auto-clicks the blue reservation button with toggle. Auto-pause after 40s, and 35 min auto-stop after each manual restart.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/blue.js
@@ -12,7 +12,8 @@
 (function () {
     'use strict';
 
-    const startTime = Date.now();
+    const scriptStart = Date.now();  // 読み込み時刻
+    let restartTime = null;          // パネルで再開した時刻
     let stopped = false;
     let isPaused = false;
 
@@ -29,18 +30,17 @@
     el.style.background = 'rgba(60,100,255,.6)';
     el.style.color = 'white';
     el.style.padding = '3px 15px';
-    el.style.borderRadius = '0px';
     el.style.fontSize = '20px';
     el.style.fontFamily = 'monospace';
     el.style.whiteSpace = 'nowrap';
-    el.style.display = 'block';
-    el.style.border = 'none';
     el.style.cursor = 'pointer';
     el.textContent = '稼働中';
     shadow.appendChild(el);
 
+    // パネルクリック → 停止 / 再稼働
     el.addEventListener('click', () => {
         if (stopped) return;
+
         isPaused = !isPaused;
         if (isPaused) {
             el.style.background = 'rgba(255,140,0,.8)';
@@ -48,9 +48,13 @@
         } else {
             el.style.background = 'rgba(60,100,255,.6)';
             el.textContent = '稼働中';
+
+            // ⭐ 再稼働した瞬間の時刻を記録
+            restartTime = Date.now();
         }
     });
 
+    // ⭐ 読み込みから40秒後 ⇒ 一度だけ自動停止（元仕様そのまま）
     setTimeout(() => {
         if (stopped || isPaused) return;
         isPaused = true;
@@ -68,12 +72,12 @@
 
         const now = Date.now();
 
-        if (now - startTime >= 2100000) {
-            el.style.background = 'rgba(0,0,0,.7)';
-            el.textContent = '終了';
-            el.style.border = 'none';
-            stopped = true;
-            return;
+        // ⭐ 再稼働後 35分（2100000ms）経過で自動停止
+        if (!isPaused && restartTime && now - restartTime >= 2100000) {
+            isPaused = true;
+            restartTime = null;
+            el.style.background = 'rgba(255,140,0,.8)';
+            el.textContent = '停止（35分）';
         }
 
         if (!isPaused) {
@@ -92,5 +96,4 @@
 
         setTimeout(loop, 2000);
     })();
-
 })();
