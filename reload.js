@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ⏰ 38.00 (0-1500 auto-info)
+// @name         ⏰ 39.00 (0-1000 auto-info)
 // @namespace    http://tampermonkey.net/
-// @version      4.72
+// @version      4.73
 // @description  Auto-calculates info panel based on start time + max delay.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -13,8 +13,8 @@
 (function () {
   'use strict';
 
-  // ★★ 開始時刻と遅延最大値はここだけ触ればOK
-  const main = { h: 10, m: 59, s: 38, ms: 0, max: 1500 };
+  // ★★ Start time & delay → ここだけ変更すればOK
+  const main = { h: 10, m: 59, s: 39, ms: 0, max: 1000 };
   const pre  = { h: 10, m: 52, s: 0,  ms: 0, max: 2000 };
 
   let trigMain = false, trigPre = false;
@@ -87,7 +87,7 @@
         elStart.style.background = 'rgba(255,0,0,0.75)';
         elStart.textContent = nowStr();  // 実際の発火時刻
         elInfo.style.background = 'rgba(255,165,0,0.75)';
-        elInfo.textContent = nowStr();   // 発火後（実測）
+        elInfo.textContent = nowStr();   // 発火後
         location.reload();
       }, delay);
     }
@@ -95,7 +95,7 @@
 
   setInterval(() => {
     elClock.textContent = nowStr();
-    elInfo.textContent = calcInfo(); // 発火前は自動計算（常に更新）
+    elInfo.textContent = calcInfo(); // 発火前は常に（開始+max）
     check(pre,  () => trigPre,  v => trigPre  = v);
     check(main, () => trigMain, v => trigMain = v);
   }, 50);
