@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索（スマホ）
 // @namespace    http://tampermonkey.net/
-// @version      2.101
-// @description  SP：前日再検索＋35-45秒ランダム自動＋ON/OFFパネル＋時刻タブ15秒後自動展開
-// @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
+// @version      2.2-sp
+// @description  SP：前日再検索＋35-45秒ランダム＋ON/OFFパネル（デフォルトON）＋時刻タブ15秒後自動展開
+// @match        https://reserve.tokyudisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @grant        none
@@ -69,7 +69,7 @@
       setTimeout(openAllTimeSlots, 15000);
     });
 
-    // ★ pointer 再現
+    // pointer 再現
     $(el).css('cursor', 'pointer');
   };
 
@@ -88,10 +88,12 @@
   });
 
   /* -------------------------------------------------------------
-     ON/OFF パネル
+     ON/OFF パネル（デフォルト ON）
   ------------------------------------------------------------- */
   const PANEL_ID = 'tdr-auto-panel';
-  let autoON = false;
+
+  // ★ デフォルト ON
+  let autoON = true;
   let nextWait = 0;
 
   const resetRandomInterval = () => {
@@ -112,16 +114,17 @@
     lineHeight: '1',
     cursor: 'pointer',
     userSelect: 'none',
-    background: '#333',
+    background: '#007bff',   // ★ 初期は青（ON状態）
     color: '#fff',
     boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
     opacity: '0.9'
   });
-  panel.textContent = 'OFF';
+  panel.textContent = 'ON ' + nextWait;
   document.body.appendChild(panel);
 
   panel.addEventListener('click', () => {
     autoON = !autoON;
+
     if (autoON) {
       resetRandomInterval();
       panel.style.background = '#007bff';
