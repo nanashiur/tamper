@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索（スマホ）
 // @namespace    http://tampermonkey.net/
-// @version      2.2
+// @version      2.20
 // @description  SP：前日再検索＋35-45秒ランダム＋ON/OFFパネル（デフォルトON）＋時刻タブ15秒後自動展開
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
