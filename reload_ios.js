@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ⏰📱 39.30 (0-1000)
+// @name         ⏰📱 40.00 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      4.68-ios
+// @version      4.70-ios
 // @description  Auto-calculates info panel based on start time + max delay. iOS(Safari) friendly.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload_ios.js
@@ -13,16 +13,15 @@
 (function () {
   'use strict';
 
-  // ★ 発火時刻 → 39.300秒に変更
-  const main = { h: 10, m: 59, s: 39, ms: 300, max: 1000 };
+  // ★ 発火時刻 → 40.000秒 / 遅延 → 0〜500ms
+  const main = { h: 10, m: 59, s: 40, ms: 0, max: 500 };
 
-  // 事前リロード（52:00）
+  // プレリロード（52:00）
   const pre  = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
 
   let trigMain = false, trigPre = false;
   let reloadEnabled = true;
 
-  // 現在時刻の文字列
   const nowStr = () => {
     const d = new Date();
     return (
@@ -32,7 +31,7 @@
     );
   };
 
-  // ★ 3段目：開始時刻 + max → 自動計算
+  // ★ 3段目：開始時刻 + max の自動計算
   const calcInfo = () => {
     const t = new Date();
     t.setHours(main.h, main.m, main.s, main.ms + main.max);
@@ -43,7 +42,6 @@
     );
   };
 
-  // パネル生成
   const make = (id, top, bg, txt) => {
     const d = document.createElement("div");
     Object.assign(d.style, {
@@ -72,7 +70,7 @@
   const elClock = make("customClock", 0, "rgba(0,0,0,0.6)", nowStr());
   const elStart = make("customStart", 24, "rgba(0,128,0,0.6)", nowStr());
 
-  // ★ 自動計算された 40.300秒 が入る
+  // ★ 自動計算された 10:59:40.500 が入る
   const elInfo = make(
     "customInfo",
     48,
@@ -80,7 +78,6 @@
     calcInfo()
   );
 
-  // トグル切替
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
     const op = reloadEnabled ? "1" : "0.2";
@@ -90,7 +87,6 @@
   };
   elClock.onclick = elStart.onclick = elInfo.onclick = toggleReload;
 
-  // 発火チェック
   const check = (cfg, triggered, setTrig) => {
     if (!reloadEnabled) return;
     const d = new Date();
@@ -106,7 +102,7 @@
       setTrig(true);
 
       setTimeout(() => {
-        // 色変化
+        // 発火時の色変更
         elStart.style.background = "rgba(255,0,0,0.75)";
         elStart.textContent = nowStr();
 
@@ -118,12 +114,11 @@
     }
   };
 
-  // ループ処理
   setInterval(() => {
     elClock.textContent = nowStr();
-    elInfo.textContent = calcInfo(); // ★ 自動更新
+    elInfo.textContent = calcInfo(); // ★ 動的更新
 
-    check(pre, () => trigPre, (v) => (trigPre = v));
+    check(pre,  () => trigPre,  (v) => (trigPre = v));
     check(main, () => trigMain, (v) => (trigMain = v));
   }, 50);
 })();
