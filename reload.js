@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ⏰ 39.20 (0-1000 auto-info)
+// @name         ⏰ 39.70 (0-500 auto-info)
 // @namespace    http://tampermonkey.net/
-// @version      4.74
+// @version      4.76
 // @description  Auto-calculates info panel based on start time + max delay.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -14,8 +14,8 @@
   'use strict';
 
   // ★★ Start time & delay → ここだけ変更すればOK
-  const main = { h: 10, m: 59, s: 39, ms: 200, max: 1000 };
-  const pre  = { h: 10, m: 52, s: 0,  ms: 0,   max: 2000 };
+  const main = { h: 10, m: 59, s: 39, ms: 700, max: 500 };
+  const pre  = { h: 10, m: 52, s: 0,  ms: 0, max: 2000 };
 
   let trigMain = false, trigPre = false;
   let reloadEnabled = true;
@@ -95,7 +95,7 @@
 
   setInterval(() => {
     elClock.textContent = nowStr();
-    elInfo.textContent = calcInfo(); // 発火前（自動更新）
+    elInfo.textContent = calcInfo(); // 発火前（開始＋max 自動更新）
     check(pre,  () => trigPre,  v => trigPre  = v);
     check(main, () => trigMain, v => trigMain = v);
   }, 50);
