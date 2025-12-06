@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ⏰📱 40.00 (0-500)
+// @name         ⏰📱 40.30 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      4.70-ios
+// @version      4.72-ios
 // @description  Auto-calculates info panel based on start time + max delay. iOS(Safari) friendly.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload_ios.js
@@ -13,10 +13,10 @@
 (function () {
   'use strict';
 
-  // ★ 発火時刻 → 40.000秒 / 遅延 → 0〜500ms
-  const main = { h: 10, m: 59, s: 40, ms: 0, max: 500 };
+  // ★ 発火時刻 → 40.300秒 / 遅延 → 0〜500ms
+  const main = { h: 10, m: 59, s: 40, ms: 300, max: 500 };
 
-  // プレリロード（52:00）
+  // プレリロード（10:52:00）
   const pre  = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
 
   let trigMain = false, trigPre = false;
@@ -31,10 +31,10 @@
     );
   };
 
-  // ★ 3段目：開始時刻 + max の自動計算
+  // ★ 3段目：開始時刻 + max の自動計算 → 40.800秒
   const calcInfo = () => {
     const t = new Date();
-    t.setHours(main.h, main.m, main.s, main.ms + main.max);
+    t.setHours(main.h, main.m, main.s, main.ms + main.max); 
     return (
       t.toLocaleTimeString() +
       "." +
@@ -70,7 +70,7 @@
   const elClock = make("customClock", 0, "rgba(0,0,0,0.6)", nowStr());
   const elStart = make("customStart", 24, "rgba(0,128,0,0.6)", nowStr());
 
-  // ★ 自動計算された 10:59:40.500 が入る
+  // ★ 自動計算された「10:59:40.800」が表示される
   const elInfo = make(
     "customInfo",
     48,
@@ -102,7 +102,6 @@
       setTrig(true);
 
       setTimeout(() => {
-        // 発火時の色変更
         elStart.style.background = "rgba(255,0,0,0.75)";
         elStart.textContent = nowStr();
 
@@ -116,7 +115,7 @@
 
   setInterval(() => {
     elClock.textContent = nowStr();
-    elInfo.textContent = calcInfo(); // ★ 動的更新
+    elInfo.textContent = calcInfo(); // ★ 自動更新
 
     check(pre,  () => trigPre,  (v) => (trigPre = v));
     check(main, () => trigMain, (v) => (trigMain = v));
