@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ⏰📱 40.30 (0-500)
+// @name         ⏰📱 40.50 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      4.72-ios
+// @version      4.73-ios
 // @description  Auto-calculates info panel based on start time + max delay. iOS(Safari) friendly.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload_ios.js
@@ -13,8 +13,8 @@
 (function () {
   'use strict';
 
-  // ★ 発火時刻 → 40.300秒 / 遅延 → 0〜500ms
-  const main = { h: 10, m: 59, s: 40, ms: 300, max: 500 };
+  // ★ 発火時刻 → 40.500秒 / 遅延 → 0〜500ms
+  const main = { h: 10, m: 59, s: 40, ms: 500, max: 500 };
 
   // プレリロード（10:52:00）
   const pre  = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
@@ -31,7 +31,7 @@
     );
   };
 
-  // ★ 3段目：開始時刻 + max の自動計算 → 40.800秒
+  // ★ 3段目：開始時刻 + max の自動計算 → 41.000秒
   const calcInfo = () => {
     const t = new Date();
     t.setHours(main.h, main.m, main.s, main.ms + main.max); 
@@ -70,7 +70,7 @@
   const elClock = make("customClock", 0, "rgba(0,0,0,0.6)", nowStr());
   const elStart = make("customStart", 24, "rgba(0,128,0,0.6)", nowStr());
 
-  // ★ 自動計算された「10:59:40.800」が表示される
+  // ★ 自動計算された「10:59:41.000」が表示される
   const elInfo = make(
     "customInfo",
     48,
