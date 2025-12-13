@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ⏰📱 40.50 (0-500)
+// @name         ⏰📱 40.60 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      4.73-ios
-// @description  Auto-calculates info panel based on start time + max delay. iOS(Safari) friendly.
+// @version      4.80
+// @description  Auto-calculates info panel based on start time + max delay.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload_ios.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload_ios.js
@@ -13,10 +13,10 @@
 (function () {
   'use strict';
 
-  // ★ 発火時刻 → 40.500秒 / 遅延 → 0〜500ms
-  const main = { h: 10, m: 59, s: 40, ms: 500, max: 500 };
+  // ★ 開始時刻 → 40.600秒 / 遅延 → 0〜500ms
+  const main = { h: 10, m: 59, s: 40, ms: 600, max: 500 };
 
-  // プレリロード（10:52:00）
+  // プレリロード
   const pre  = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
 
   let trigMain = false, trigPre = false;
@@ -24,22 +24,14 @@
 
   const nowStr = () => {
     const d = new Date();
-    return (
-      d.toLocaleTimeString() +
-      "." +
-      String(d.getMilliseconds()).padStart(3, "0")
-    );
+    return d.toLocaleTimeString() + "." + String(d.getMilliseconds()).padStart(3, "0");
   };
 
-  // ★ 3段目：開始時刻 + max の自動計算 → 41.000秒
+  // ★ 3段目：開始時刻 + max を自動計算
   const calcInfo = () => {
     const t = new Date();
-    t.setHours(main.h, main.m, main.s, main.ms + main.max); 
-    return (
-      t.toLocaleTimeString() +
-      "." +
-      String(t.getMilliseconds()).padStart(3, "0")
-    );
+    t.setHours(main.h, main.m, main.s, main.ms + main.max);
+    return t.toLocaleTimeString() + "." + String(t.getMilliseconds()).padStart(3, "0");
   };
 
   const make = (id, top, bg, txt) => {
@@ -62,28 +54,21 @@
     });
     d.id = id;
     d.textContent = txt;
-    d.onclick = () => d.remove();
     document.body.appendChild(d);
     return d;
   };
 
-  const elClock = make("customClock", 0, "rgba(0,0,0,0.6)", nowStr());
+  const elClock = make("customClock", 0,  "rgba(0,0,0,0.6)", nowStr());
   const elStart = make("customStart", 24, "rgba(0,128,0,0.6)", nowStr());
+  const elInfo  = make("customInfo",  48, "rgba(0,0,128,0.6)", calcInfo());
 
-  // ★ 自動計算された「10:59:41.000」が表示される
-  const elInfo = make(
-    "customInfo",
-    48,
-    "rgba(0,0,128,0.6)",
-    calcInfo()
-  );
-
+  // トグル（ON/OFF）
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
     const op = reloadEnabled ? "1" : "0.2";
     elClock.style.opacity = op;
     elStart.style.opacity = op;
-    elInfo.style.opacity = op;
+    elInfo.style.opacity  = op;
   };
   elClock.onclick = elStart.onclick = elInfo.onclick = toggleReload;
 
@@ -100,14 +85,11 @@
     ) {
       const delay = Math.floor(Math.random() * (cfg.max + 1));
       setTrig(true);
-
       setTimeout(() => {
         elStart.style.background = "rgba(255,0,0,0.75)";
         elStart.textContent = nowStr();
-
         elInfo.style.background = "rgba(255,165,0,0.75)";
         elInfo.textContent = nowStr();
-
         location.reload();
       }, delay);
     }
@@ -115,9 +97,8 @@
 
   setInterval(() => {
     elClock.textContent = nowStr();
-    elInfo.textContent = calcInfo(); // ★ 自動更新
-
-    check(pre,  () => trigPre,  (v) => (trigPre = v));
-    check(main, () => trigMain, (v) => (trigMain = v));
+    elInfo.textContent  = calcInfo(); // 自動更新
+    check(pre,  () => trigPre,  v => (trigPre  = v));
+    check(main, () => trigMain, v => (trigMain = v));
   }, 50);
 })();
