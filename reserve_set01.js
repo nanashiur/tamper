@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏰 TDHRCU0001 20260205 M18
+// @name         🏨 HODHMTKD0004N 20260423 M13
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.25
-// @description  /hotel/reserve/ のPOSTで 部屋HOTDHRCU0001N・useDate=20260205・hotelPriceFrameID=M18 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @version      1.26
+// @description  /hotel/reserve/ のPOSTで 部屋HODHMTKD0004N・useDate=20260423・hotelPriceFrameID=M13 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set01.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set01.js
@@ -16,31 +16,27 @@
   if (window.__tdr_fixed_installed) return;
   window.__tdr_fixed_installed = true;
 
-  // --- トグル用フラグ（初期OFF） ---
   let ENABLED = false;
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
-  // 固定値（毎回ここだけ差し替え）
-  const TARGET   = 'HOTDHRCU0001N'; // 部屋ID（commodityCD）
-  const FIX_DATE = '20260205';      // useDate（YYYYMMDD）
-  const FIX_PF   = 'M18';           // ランク（hotelPriceFrameID）
+  const TARGET   = 'HODHMTKD0004N';
+  const FIX_DATE = '20260423';
+  const FIX_PF   = 'M13';
 
   const SYNC_QUEUE_HEADER = true;
   const INJECT_IF_MISSING = true;
 
-  // 派生コード
   const PARTS = {
     commodityCD:    TARGET,
-    searchHotelCD:  TARGET.slice(2,5),  // TDH
-    roomLetterCD:   TARGET.slice(5,8),  // RCU
-    roomMaterialCD: TARGET.slice(2,12)  // TDHRCU0001
+    searchHotelCD:  TARGET.slice(2,5),   // DHM
+    roomLetterCD:   TARGET.slice(5,8),   // TKD
+    roomMaterialCD: TARGET.slice(2,12)   // DHMTKD0004
   };
 
   const isReservePost = (url, m) =>
     /\/hotel\/reserve\/?$/.test(String(url||'')) &&
     String(m||'GET').toUpperCase() === 'POST';
 
-  // 本文 → 送信可能な形へ
   const toSendableString = (body) => {
     if (body == null) return '';
     if (body instanceof URLSearchParams) return body.toString();
@@ -51,7 +47,6 @@
     try { return String(body); } catch { return body; }
   };
 
-  // 本文を書き換え（常に文字列で返す）
   const rewriteBody = (orig) => {
     const sendable = toSendableString(orig);
     if (sendable !== orig && typeof sendable !== 'string') return orig;
@@ -59,19 +54,15 @@
     if (!txt) return orig;
 
     const p = new URLSearchParams(txt);
-    // 部屋コード一式
     p.set('commodityCD',    PARTS.commodityCD);
     p.set('searchHotelCD',  PARTS.searchHotelCD);
     p.set('roomLetterCD',   PARTS.roomLetterCD);
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
-    // 日付 & ランク
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
-
     return p.toString();
   };
 
-  // QueueIt ヘッダ同期
   const HDR  = 'x-queueit-ajaxpageurl';
   const BASE = 'https://reserve.tokyodisneyresort.jp';
   const isEncoded = (s) => /%[0-9A-F]{2}/i.test(s);
@@ -80,7 +71,10 @@
     if (!SYNC_QUEUE_HEADER || !value) return value;
     return value.split(/\s*,\s*/).map(v => {
       let orig = v, decoded = v;
-      for (let i=0;i<2;i++){ try{ const d=decodeURIComponent(decoded); if(d===decoded)break; decoded=d; }catch{break;} }
+      for (let i=0;i<2;i++){
+        try{ const d=decodeURIComponent(decoded); if(d===decoded)break; decoded=d; }
+        catch{ break; }
+      }
       const urlStr = decoded.startsWith('http') ? decoded : BASE + decoded;
       let u; try { u = new URL(urlStr); } catch { return orig; }
       u.searchParams.set('hotelRoomCd', PARTS.commodityCD);
@@ -89,7 +83,6 @@
     }).join(', ');
   };
 
-  // XHR hook
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
   const _set  = XMLHttpRequest.prototype.setRequestHeader;
@@ -118,7 +111,6 @@
     return _send.call(this, body);
   };
 
-  // fetch hook（最小）
   if (window.fetch){
     const _fetch = window.fetch;
     window.fetch = function(input, init){
@@ -143,10 +135,9 @@
     };
   }
 
-  // 起動パネル（初期OFF・色はホテルコードで切替：DHM=緑 / FSH=ピンク / TDH=オレンジ / その他=黒）
   (function showPanel(){
     try{
-      const code = PARTS.searchHotelCD; // 'TDH'
+      const code = PARTS.searchHotelCD; // DHM
       const baseRGB = (code === 'DHM') ? [22,163,74]
                     : (code === 'FSH') ? [236,72,153]
                     : (code === 'TDH') ? [234,88,12]
@@ -158,46 +149,21 @@
       const lines = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF];
 
       const el = document.createElement('div');
-      el.id = 'tdr-fixed-panel';
       el.innerHTML = lines.join('<br>');
       const s = el.style;
-      s.position = 'fixed';
-      s.top = '0';
-      s.left = '0';
-      s.zIndex = '2147483647';
-      s.background = OFF_BG; // 初期OFF
-      s.color = '#fff';
-      s.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", Meiryo, sans-serif';
-      s.fontWeight = '700';
-      s.fontSize = '16px';
-      s.padding = '6px 8px';
-      s.borderRadius = '6px';
-      s.lineHeight = '1.2';
-      s.boxShadow = '0 2px 8px rgba(0,0,0,.15)';
-      s.cursor = 'pointer';
-      s.userSelect = 'none';
-      s.pointerEvents = 'auto';
+      s.position='fixed'; s.top='0'; s.left='0'; s.zIndex='2147483647';
+      s.background=OFF_BG; s.color='#fff'; s.fontWeight='700'; s.fontSize='16px';
+      s.padding='6px 8px'; s.borderRadius='6px'; s.cursor='pointer';
 
-      const applyVisual = () => {
-        el.style.background = ENABLED ? ON_BG : OFF_BG;
-        el.title = ENABLED ? 'ON（クリックでOFF: 通常通信）' : 'OFF（クリックでON: 置換有効）';
-      };
+      const apply = ()=>{ el.style.background = ENABLED ? ON_BG : OFF_BG; };
+      el.addEventListener('click', ()=>{ ENABLED=!ENABLED; apply(); });
 
-      el.addEventListener('click', () => {
-        ENABLED = !ENABLED;
-        applyVisual();
-        console.log(`[tdr-fixed] toggled ${ENABLED ? 'ON' : 'OFF'} (code=${code})`);
-      });
-
-      const append = () => {
-        (document.body || document.documentElement).appendChild(el);
-        applyVisual();
-      };
-      (document.readyState === 'loading')
-        ? document.addEventListener('DOMContentLoaded', append, { once:true })
-        : append();
+      const add=()=>{ (document.body||document.documentElement).appendChild(el); apply(); };
+      (document.readyState==='loading')
+        ? document.addEventListener('DOMContentLoaded', add, {once:true})
+        : add();
     }catch{}
   })();
 
-  console.log('[tdr-fixed] loaded (OFF) room=HOTDHRCU0001N, date=20260205, rank=M18');
+  console.log('[tdr-fixed] loaded (OFF) room=HODHMTKD0004N, date=20260423, rank=M13');
 })();
