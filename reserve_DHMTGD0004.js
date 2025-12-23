@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004 20260422 M13
+// @name         🏨 DHMTGD0004 20260423 M13
 // @namespace    tdr-fixed-room-date-rank
 // @version      1.30
-// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20260422・hotelPriceFrameID=M13 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20260423・hotelPriceFrameID=M13 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,19 +16,17 @@
   if (window.__tdr_fixed_installed) return;
   window.__tdr_fixed_installed = true;
 
-  // --- トグル用フラグ（初期OFF） ---
   let ENABLED = false;
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
-  // 固定値（毎日の置換対象はここだけ）
+  // 固定値（毎日の置換対象）
   const TARGET   = 'HODHMTGD0004N';
-  const FIX_DATE = '20260422';
+  const FIX_DATE = '20260423';
   const FIX_PF   = 'M13';
 
   const SYNC_QUEUE_HEADER = true;
   const INJECT_IF_MISSING = true;
 
-  // 派生コード
   const PARTS = {
     commodityCD:    TARGET,
     searchHotelCD:  TARGET.slice(2,5),
@@ -63,7 +61,6 @@
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
-
     return p.toString();
   };
 
@@ -150,7 +147,6 @@
       const lines = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF];
 
       const el = document.createElement('div');
-      el.id = 'tdr-fixed-panel';
       el.innerHTML = lines.join('<br>');
       const s = el.style;
       s.position = 'fixed';
@@ -159,35 +155,19 @@
       s.zIndex = '2147483647';
       s.background = OFF_BG;
       s.color = '#fff';
-      s.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", Meiryo, sans-serif';
       s.fontWeight = '700';
       s.fontSize = '16px';
       s.padding = '6px 8px';
-      s.borderRadius = '6px';
-      s.lineHeight = '1.2';
-      s.boxShadow = '0 2px 8px rgba(0,0,0,.15)';
       s.cursor = 'pointer';
       s.userSelect = 'none';
 
-      const applyVisual = () => {
-        el.style.background = ENABLED ? ON_BG : OFF_BG;
-      };
+      const apply = () => { s.background = ENABLED ? ON_BG : OFF_BG; };
+      el.addEventListener('click', () => { ENABLED = !ENABLED; apply(); });
 
-      el.addEventListener('click', () => {
-        ENABLED = !ENABLED;
-        applyVisual();
-        console.log(`[tdr-fixed] toggled ${ENABLED ? 'ON' : 'OFF'} (code=${code})`);
-      });
-
-      const append = () => {
-        (document.body || document.documentElement).appendChild(el);
-        applyVisual();
-      };
       (document.readyState === 'loading')
-        ? document.addEventListener('DOMContentLoaded', append, { once:true })
-        : append();
+        ? document.addEventListener('DOMContentLoaded', () => { document.body.appendChild(el); apply(); }, { once:true })
+        : (document.body.appendChild(el), apply());
     }catch{}
   })();
 
-  console.log('[tdr-fixed] loaded (OFF) room=HODHMTGD0004N, date=20260422, rank=M13');
 })();
