@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ⏰ 40.50 (0-500 auto-info)
+// @name         ⏰ 40.00 (0-500 auto-info)
 // @namespace    http://tampermonkey.net/
-// @version      4.79
+// @version      4.80
 // @description  Auto-calculates info panel based on start time + max delay.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -13,8 +13,8 @@
 (function () {
   'use strict';
 
-  // ★★ Start time & delay → ここだけ変更すればOK
-  const main = { h: 10, m: 59, s: 40, ms: 500, max: 500 };
+  // ★★ Start time & delay（ここだけ変更すればOK）
+  const main = { h: 10, m: 59, s: 40, ms: 0, max: 500 };
   const pre  = { h: 10, m: 52, s: 0,  ms: 0, max: 2000 };
 
   let trigMain = false, trigPre = false;
@@ -59,7 +59,7 @@
 
   const elClock = make('customClock', 0,  'rgba(0,0,0,0.6)', nowStr());
   const elStart = make('customStart', 24, 'rgba(0,128,0,0.6)', nowStr());
-  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', calcInfo()); // ← 自動計算
+  const elInfo  = make('customInfo',  48, 'rgba(0,0,128,0.6)', calcInfo());
 
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
@@ -85,9 +85,9 @@
       setTrig(true);
       setTimeout(() => {
         elStart.style.background = 'rgba(255,0,0,0.75)';
-        elStart.textContent = nowStr();  // 実際の発火時刻
+        elStart.textContent = nowStr();
         elInfo.style.background = 'rgba(255,165,0,0.75)';
-        elInfo.textContent = nowStr();   // 発火後（実測）
+        elInfo.textContent = nowStr();
         location.reload();
       }, delay);
     }
@@ -95,7 +95,7 @@
 
   setInterval(() => {
     elClock.textContent = nowStr();
-    elInfo.textContent = calcInfo(); // 発火前（開始＋max 自動更新）
+    elInfo.textContent = calcInfo(); // 発火前は「開始＋max」
     check(pre,  () => trigPre,  v => trigPre  = v);
     check(main, () => trigMain, v => trigMain = v);
   }, 50);
