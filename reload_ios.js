@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ⏰📱 40.60 (0-500)
+// @name         ⏰📱 40.50 (0-500)
 // @namespace    http://tampermonkey.net/
-// @version      4.80
+// @version      4.81
 // @description  Auto-calculates info panel based on start time + max delay.
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload_ios.js
@@ -13,8 +13,8 @@
 (function () {
   'use strict';
 
-  // ★ 開始時刻 → 40.600秒 / 遅延 → 0〜500ms
-  const main = { h: 10, m: 59, s: 40, ms: 600, max: 500 };
+  // ★ 開始時刻 → 40.500秒 / 遅延 → 0〜500ms
+  const main = { h: 10, m: 59, s: 40, ms: 500, max: 500 };
 
   // プレリロード
   const pre  = { h: 10, m: 52, s: 0, ms: 0, max: 2000 };
