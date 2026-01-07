@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
 // @namespace    http://tampermonkey.net/
-// @version      3.09
-// @description  客室在庫をログしながら、空室を検知するとオーバーレイで通知（ログに価格ランク付き）
+// @version      3.10
+// @description  客室在庫をログしながら、空室を検知するとパネルで通知（ログに価格ランク付き）
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -26,7 +26,7 @@
   const pad = x => String(x).padStart(2, '0');
   const fmt = d => `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
   const td = new Date(),
-        p7 = new Date(td), 
+        p7 = new Date(td),
         p4 = new Date(td);
   p7.setDate(p7.getDate() + 7);
   p4.setMonth(p4.getMonth() + 4);
@@ -53,11 +53,12 @@
 
   const btnMain = makeBtn('手動', '#000');
   const updateMain = () => {
-    if (mode === 0) { btnMain.textContent = '手動';  btnMain.style.background = '#000'; }
-    if (mode === 1) { btnMain.textContent = '連続';  btnMain.style.background = 'orange'; }
-    if (mode === 2) { btnMain.textContent = '空室';  btnMain.style.background = 'pink'; }
+    if (mode === 0) { btnMain.textContent = '手動'; btnMain.style.background = '#000'; }
+    if (mode === 1) { btnMain.textContent = '連続'; btnMain.style.background = 'orange'; }
+    if (mode === 2) { btnMain.textContent = '空室'; btnMain.style.background = 'pink'; }
   };
   btnMain.onclick = () => {
+    hideVacancyPanel();
     mode = (mode + 1) % 3;
     updateMain();
     if (mode !== 0) triggerSearch();
@@ -74,6 +75,7 @@
 
   /* ---------- 検索発火 ---------- */
   const triggerSearch = () => {
+    hideVacancyPanel();
     const sel = document.getElementById('boxCalendarSelect');
     if (sel && !document.querySelector('span.calLoad')) {
       sel.dispatchEvent(new Event('change'));
@@ -103,7 +105,7 @@
             if (found) {
               mode = 0;
               updateMain();
-              showVacancyOverlay();
+              showVacancyPanel();
             } else {
               triggerSearch();
             }
@@ -148,14 +150,37 @@
     return vacancy;
   }
 
-  /* ---------- 空室オーバーレイ ---------- */
-  function showVacancyOverlay() {
-    const ov = Object.assign(document.createElement('div'), {
-      textContent: '空室発見!',
-      style: 'position:fixed;inset:0;display:flex;justify-content:center;align-items:center;background:rgba(255,0,0,0.8);color:#fff;font-size:40px;font-weight:bold;z-index:99998'
-    });
-    document.body.appendChild(ov);
-    setTimeout(() => ov.remove(), 500);
+  /* ---------- ⑪ 空室通知パネル（変更後） ---------- */
+  let vacancyPanel = null;
+
+  function showVacancyPanel() {
+    if (vacancyPanel) return;
+
+    vacancyPanel = document.createElement('div');
+    vacancyPanel.textContent = tStr();
+    vacancyPanel.style.cssText = `
+      position:fixed;
+      left:50%;
+      bottom:10%;
+      transform:translateX(-50%);
+      padding:14px 26px;
+      font-size:20px;
+      font-weight:bold;
+      color:#fff;
+      background:rgba(255,105,180,0.75);
+      border-radius:14px;
+      cursor:pointer;
+      z-index:99998;
+      user-select:none;
+      box-shadow:0 6px 18px rgba(0,0,0,0.35);
+    `;
+    vacancyPanel.onclick = hideVacancyPanel;
+    document.body.appendChild(vacancyPanel);
+  }
+
+  function hideVacancyPanel() {
+    vacancyPanel?.remove();
+    vacancyPanel = null;
   }
 
 })();
