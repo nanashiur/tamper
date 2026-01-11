@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004 20260506 M12
+// @name         🏨 DHMTGD0004 20260511 M13
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.42
-// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20260506・hotelPriceFrameID=M12 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @version      1.43
+// @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20260511・hotelPriceFrameID=M13 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,19 +16,16 @@
   if (window.__tdr_fixed_installed) return;
   window.__tdr_fixed_installed = true;
 
-  // --- トグル用フラグ（初期OFF） ---
   let ENABLED = false;
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
-  // 固定値（毎日の置換対象はここだけ）
   const TARGET   = 'HODHMTGD0004N';
-  const FIX_DATE = '20260506';
-  const FIX_PF   = 'M12';
+  const FIX_DATE = '20260511';
+  const FIX_PF   = 'M13';
 
   const SYNC_QUEUE_HEADER = true;
   const INJECT_IF_MISSING = true;
 
-  // 派生コード
   const PARTS = {
     commodityCD:    TARGET,
     searchHotelCD:  TARGET.slice(2,5),
