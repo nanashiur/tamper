@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🏨 HODHMTKD0004N 20260423 M13
+// @name         🦋 FSHSBA0001 20260523 M25
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.26
-// @description  /hotel/reserve/ のPOSTで 部屋HODHMTKD0004N・useDate=20260423・hotelPriceFrameID=M13 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @version      1.27
+// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20260523・hotelPriceFrameID=M25 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set01.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set01.js
@@ -19,18 +19,18 @@
   let ENABLED = false;
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
-  const TARGET   = 'HODHMTKD0004N';
-  const FIX_DATE = '20260423';
-  const FIX_PF   = 'M13';
+  const TARGET   = 'HOFSHSBA0001N';
+  const FIX_DATE = '20260523';
+  const FIX_PF   = 'M25';
 
   const SYNC_QUEUE_HEADER = true;
   const INJECT_IF_MISSING = true;
 
   const PARTS = {
     commodityCD:    TARGET,
-    searchHotelCD:  TARGET.slice(2,5),   // DHM
-    roomLetterCD:   TARGET.slice(5,8),   // TKD
-    roomMaterialCD: TARGET.slice(2,12)   // DHMTKD0004
+    searchHotelCD:  TARGET.slice(2,5),   // FSH
+    roomLetterCD:   TARGET.slice(5,8),   // SBA
+    roomMaterialCD: TARGET.slice(2,12)   // FSHSBA0001
   };
 
   const isReservePost = (url, m) =>
@@ -137,7 +137,7 @@
 
   (function showPanel(){
     try{
-      const code = PARTS.searchHotelCD; // DHM
+      const code = PARTS.searchHotelCD; // FSH
       const baseRGB = (code === 'DHM') ? [22,163,74]
                     : (code === 'FSH') ? [236,72,153]
                     : (code === 'TDH') ? [234,88,12]
@@ -165,5 +165,5 @@
     }catch{}
   })();
 
-  console.log('[tdr-fixed] loaded (OFF) room=HODHMTKD0004N, date=20260423, rank=M13');
+  console.log('[tdr-fixed] loaded (OFF) room=HOFSHSBA0001N, date=20260523, rank=M25');
 })();
