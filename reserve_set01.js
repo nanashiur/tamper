@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🦋 FSHSBA0001 20260523 M25
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.27
+// @version      1.44
 // @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20260523・hotelPriceFrameID=M25 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set01.js
@@ -28,9 +28,9 @@
 
   const PARTS = {
     commodityCD:    TARGET,
-    searchHotelCD:  TARGET.slice(2,5),   // FSH
-    roomLetterCD:   TARGET.slice(5,8),   // SBA
-    roomMaterialCD: TARGET.slice(2,12)   // FSHSBA0001
+    searchHotelCD:  TARGET.slice(2,5),
+    roomLetterCD:   TARGET.slice(5,8),
+    roomMaterialCD: TARGET.slice(2,12)
   };
 
   const isReservePost = (url, m) =>
@@ -60,6 +60,7 @@
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
+
     return p.toString();
   };
 
@@ -71,10 +72,7 @@
     if (!SYNC_QUEUE_HEADER || !value) return value;
     return value.split(/\s*,\s*/).map(v => {
       let orig = v, decoded = v;
-      for (let i=0;i<2;i++){
-        try{ const d=decodeURIComponent(decoded); if(d===decoded)break; decoded=d; }
-        catch{ break; }
-      }
+      for (let i=0;i<2;i++){ try{ const d=decodeURIComponent(decoded); if(d===decoded)break; decoded=d; }catch{break;} }
       const urlStr = decoded.startsWith('http') ? decoded : BASE + decoded;
       let u; try { u = new URL(urlStr); } catch { return orig; }
       u.searchParams.set('hotelRoomCd', PARTS.commodityCD);
@@ -137,7 +135,7 @@
 
   (function showPanel(){
     try{
-      const code = PARTS.searchHotelCD; // FSH
+      const code = PARTS.searchHotelCD;
       const baseRGB = (code === 'DHM') ? [22,163,74]
                     : (code === 'FSH') ? [236,72,153]
                     : (code === 'TDH') ? [234,88,12]
@@ -149,21 +147,44 @@
       const lines = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF];
 
       const el = document.createElement('div');
+      el.id = 'tdr-fixed-panel';
       el.innerHTML = lines.join('<br>');
       const s = el.style;
-      s.position='fixed'; s.top='0'; s.left='0'; s.zIndex='2147483647';
-      s.background=OFF_BG; s.color='#fff'; s.fontWeight='700'; s.fontSize='16px';
-      s.padding='6px 8px'; s.borderRadius='6px'; s.cursor='pointer';
+      s.position = 'fixed';
+      s.top = '0';
+      s.left = '0';
+      s.zIndex = '2147483647';
+      s.background = OFF_BG;
+      s.color = '#fff';
+      s.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", Meiryo, sans-serif';
+      s.fontWeight = '700';
+      s.fontSize = '16px';
+      s.padding = '6px 8px';
+      s.borderRadius = '6px';
+      s.lineHeight = '1.2';
+      s.boxShadow = '0 2px 8px rgba(0,0,0,.15)';
+      s.cursor = 'pointer';
+      s.userSelect = 'none';
 
-      const apply = ()=>{ el.style.background = ENABLED ? ON_BG : OFF_BG; };
-      el.addEventListener('click', ()=>{ ENABLED=!ENABLED; apply(); });
+      const applyVisual = () => {
+        el.style.background = ENABLED ? ON_BG : OFF_BG;
+      };
 
-      const add=()=>{ (document.body||document.documentElement).appendChild(el); apply(); };
-      (document.readyState==='loading')
-        ? document.addEventListener('DOMContentLoaded', add, {once:true})
-        : add();
+      el.addEventListener('click', () => {
+        ENABLED = !ENABLED;
+        applyVisual();
+        console.log(`[tdr-fixed] toggled ${ENABLED ? 'ON' : 'OFF'} (code=${code})`);
+      });
+
+      const append = () => {
+        (document.body || document.documentElement).appendChild(el);
+        applyVisual();
+      };
+      (document.readyState === 'loading')
+        ? document.addEventListener('DOMContentLoaded', append, { once:true })
+        : append();
     }catch{}
   })();
 
-  console.log('[tdr-fixed] loaded (OFF) room=HOFSHSBA0001N, date=20260523, rank=M25');
+  console.log(`[tdr-fixed] loaded (OFF) room=${TARGET}, date=${FIX_DATE}, rank=${FIX_PF}`);
 })();
