@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🍴📱ショーレストラン再検索
 // @namespace    http://tampermonkey.net/
-// @version      1.02
-// @description  SPショーレストラン：前日再検索＋35-45秒ランダム自動再読込＋ON/OFFパネル＋3-5時停止＋5:00:01全体再読込
+// @version      1.01
+// @description  SPショーレストラン：日付クリック再検索＋30-40秒ランダム＋ON/OFFパネル＋毎時00分F5＋3-5時停止
 // @match        https://reserve.tokyodisneyresort.jp/sp/showrestaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
@@ -15,21 +15,20 @@
 
   if (!document.querySelector('#reservationOfDateHid')) return;
 
-  const markingElemId = '__showrestaurant_current_day_update_sp';
-  if (document.getElementById(markingElemId)) return;
+  const MARK_ID = '__showrestaurant_reload_sp';
+  if (document.getElementById(MARK_ID)) return;
 
-  /* =============================================================
-     再検索処理（SPショーレストラン）
-  ============================================================= */
-  const restaurantReloadSp = (el) => {
-
+  /* -------------------------------------------------------------
+     再検索処理（完成品と同等）
+  ------------------------------------------------------------- */
+  const reloadSp = (el) => {
     const prepareDateSp = () => {
-      const current = $("#reservationOfDateHid").html();
+      const cur = $("#reservationOfDateHid").html();
       const end = $(".calendarEndDate").val();
-      if (current > end) return;
+      if (cur > end) return;
 
       const prev = $.datepicker
-        .parseDate("yymmdd", current, {})
+        .parseDate("yymmdd", cur, {})
         .addDays(-1);
 
       $("#reservationOfDateHid").html(
@@ -42,6 +41,7 @@
 
     $(el).on('click', (e) => {
       e.stopPropagation();
+
       if (prevBtn.attr('disabled') && nextBtn.attr('disabled')) return;
 
       prepareDateSp();
@@ -53,30 +53,29 @@
     $(el).css('cursor', 'pointer');
   };
 
-  /* =============================================================
-     日付バー / 見出し
-  ============================================================= */
-  restaurantReloadSp($('#reservationOfDateDisp1'));
+  /* -------------------------------------------------------------
+     日付バー
+  ------------------------------------------------------------- */
+  reloadSp($('#reservationOfDateDisp1'));
 
-  const headerSelector =
-    '.js-accordion > section > header > div > h1:nth-child(1)';
-
-  document.querySelectorAll(headerSelector).forEach(h1 => {
-    restaurantReloadSp(h1);
-    h1.style.cursor = 'pointer';
+  /* -------------------------------------------------------------
+     時間帯 見出し（完成品と同じ思想）
+  ------------------------------------------------------------- */
+  document.querySelectorAll('section > div > h1').forEach(h1 => {
+    reloadSp(h1);
   });
 
-  /* =============================================================
-     ON / OFF パネル
-  ============================================================= */
+  /* -------------------------------------------------------------
+     ON / OFF パネル（完成品そのまま）
+  ------------------------------------------------------------- */
+  const PANEL_ID = 'tdr-auto-panel-show';
   let autoON = true;
   let nextWait = 0;
-  let reloadedAt5 = false;
 
-  const resetRandomInterval = () => {
-    nextWait = Math.floor(Math.random() * 11) + 35; // 35〜45秒
+  const resetRandom = () => {
+    nextWait = Math.floor(Math.random() * 11) + 30; // 30〜40秒
   };
-  resetRandomInterval();
+  resetRandom();
 
   const panel = document.createElement('div');
   Object.assign(panel.style, {
@@ -89,21 +88,18 @@
     fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer',
-    userSelect: 'none',
     background: '#007bff',
     color: '#fff',
     boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
     opacity: '0.9'
   });
-
   panel.textContent = 'ON ' + nextWait;
   document.body.appendChild(panel);
 
   panel.addEventListener('click', () => {
     autoON = !autoON;
-
     if (autoON) {
-      resetRandomInterval();
+      resetRandom();
       panel.style.background = '#007bff';
       panel.textContent = 'ON ' + nextWait;
     } else {
@@ -112,51 +108,41 @@
     }
   });
 
-  /* =============================================================
-     自動制御ループ
-  ============================================================= */
+  /* -------------------------------------------------------------
+     自動再検索ループ（クリック発火のみ）
+  ------------------------------------------------------------- */
   setInterval(() => {
     const now = new Date();
     const h = now.getHours();
     const m = now.getMinutes();
     const s = now.getSeconds();
 
-    /* ---- 3:00〜4:59 停止 ---- */
-    if (h >= 3 && h < 5) {
-      panel.textContent = 'STOP';
-      return;
-    }
-
-    /* ---- 5:00:01 全体リロード（1回のみ） ---- */
-    if (h === 5 && m === 0 && s === 1 && !reloadedAt5) {
-      reloadedAt5 = true;
+    /* 毎時00分00秒 → F5相当リロード */
+    if (m === 0 && s === 0) {
       location.reload();
       return;
     }
 
-    /* ---- 通常動作 ---- */
-    if (!autoON) {
-      panel.textContent = 'OFF';
-      return;
-    }
+    /* 3〜5時は自動再検索しない */
+    if (h >= 3 && h < 5) return;
+    if (!autoON) return;
 
     nextWait--;
 
     if (nextWait <= 0) {
       const bar = document.querySelector('#reservationOfDateDisp1');
       if (bar) bar.click();
-      resetRandomInterval();
+      resetRandom();
     }
 
     panel.textContent = 'ON ' + nextWait;
-
   }, 1000);
 
-  /* =============================================================
+  /* -------------------------------------------------------------
      マーカー
-  ============================================================= */
+  ------------------------------------------------------------- */
   const mark = document.createElement('div');
-  mark.id = markingElemId;
+  mark.id = MARK_ID;
   mark.style.display = 'none';
   document.body.appendChild(mark);
 
