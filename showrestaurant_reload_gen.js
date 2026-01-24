@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🍴📱ショーレストラン再検索
 // @namespace    http://tampermonkey.net/
-// @version      1.01
-// @description  SPショーレストラン：前日再検索＋35-45秒ランダム自動再読込＋ON/OFFパネル
+// @version      1.02
+// @description  SPショーレストラン：前日再検索＋35-45秒ランダム自動再読込＋ON/OFFパネル＋3-5時停止＋5:00:01全体再読込
 // @match        https://reserve.tokyodisneyresort.jp/sp/showrestaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
@@ -13,17 +13,13 @@
 (function () {
   'use strict';
 
-  /* =============================================================
-     前提チェック（SPショーレストラン）
-  ============================================================= */
   if (!document.querySelector('#reservationOfDateHid')) return;
 
   const markingElemId = '__showrestaurant_current_day_update_sp';
   if (document.getElementById(markingElemId)) return;
 
   /* =============================================================
-     SPショーレストラン 再検索本体
-     ※ 完成品ブックマークレットと同じ流れ
+     再検索処理（SPショーレストラン）
   ============================================================= */
   const restaurantReloadSp = (el) => {
 
@@ -46,7 +42,6 @@
 
     $(el).on('click', (e) => {
       e.stopPropagation();
-
       if (prevBtn.attr('disabled') && nextBtn.attr('disabled')) return;
 
       prepareDateSp();
@@ -59,14 +54,10 @@
   };
 
   /* =============================================================
-     日付バー（最重要）
+     日付バー / 見出し
   ============================================================= */
   restaurantReloadSp($('#reservationOfDateDisp1'));
 
-  /* =============================================================
-     各ショーレストラン 見出し（日付クリック再読込）
-     ※ ブックマークレット完全踏襲
-  ============================================================= */
   const headerSelector =
     '.js-accordion > section > header > div > h1:nth-child(1)';
 
@@ -76,10 +67,11 @@
   });
 
   /* =============================================================
-     ON / OFF パネル（完全流用）
+     ON / OFF パネル
   ============================================================= */
   let autoON = true;
   let nextWait = 0;
+  let reloadedAt5 = false;
 
   const resetRandomInterval = () => {
     nextWait = Math.floor(Math.random() * 11) + 35; // 35〜45秒
@@ -121,10 +113,32 @@
   });
 
   /* =============================================================
-     ランダム自動再読込
+     自動制御ループ
   ============================================================= */
   setInterval(() => {
-    if (!autoON) return;
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    const s = now.getSeconds();
+
+    /* ---- 3:00〜4:59 停止 ---- */
+    if (h >= 3 && h < 5) {
+      panel.textContent = 'STOP';
+      return;
+    }
+
+    /* ---- 5:00:01 全体リロード（1回のみ） ---- */
+    if (h === 5 && m === 0 && s === 1 && !reloadedAt5) {
+      reloadedAt5 = true;
+      location.reload();
+      return;
+    }
+
+    /* ---- 通常動作 ---- */
+    if (!autoON) {
+      panel.textContent = 'OFF';
+      return;
+    }
 
     nextWait--;
 
@@ -135,10 +149,11 @@
     }
 
     panel.textContent = 'ON ' + nextWait;
+
   }, 1000);
 
   /* =============================================================
-     実行済みマーカー
+     マーカー
   ============================================================= */
   const mark = document.createElement('div');
   mark.id = markingElemId;
