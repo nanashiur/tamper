@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🍴📱ショーレストラン再検索
 // @namespace    http://tampermonkey.net/
-// @version      1.01
+// @version      1.30
 // @description  SPショーレストラン：日付クリック再検索＋30-40秒ランダム＋ON/OFFパネル＋毎時00分F5＋3-5時停止
 // @match        https://reserve.tokyodisneyresort.jp/sp/showrestaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
