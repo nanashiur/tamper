@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🍴📱レストラン一般再検索（スマホ）
+// @name         🍴📱レストラン一般再検索
 // @namespace    http://tampermonkey.net/
-// @version      2.20
-// @description  SP：前日再検索＋35-45秒ランダム＋ON/OFFパネル（デフォルトON）＋時刻タブ15秒後自動展開
+// @version      2.3
+// @description  SP：前日再検索＋35-45秒ランダム＋ON/OFF（デフォルトON）＋3-5時停止＋5:00:01全リロード
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -15,33 +15,50 @@
 
   if (!document.querySelector('#reservationOfDateHid')) return;
 
-  const markingElemId = '__restaurant_current_day_update_sp';
-  if (document.getElementById(markingElemId)) return;
+  const MARK_ID = '__restaurant_reload_running';
+  if (document.getElementById(MARK_ID)) return;
 
-  /* -------------------------------------------------------------
-     時刻タブ（15:00〜など）の自動展開
-  ------------------------------------------------------------- */
-  function openAllTimeSlots() {
-    const h1s = [...document.querySelectorAll('h1')];
-    const triggers = h1s.filter(h1 =>
-      /\d{1,2}:\d{2}/.test(h1.textContent)
-    );
-
-    let i = 0;
-    function clickNext() {
-      if (i >= triggers.length) return;
-      try { triggers[i].click(); } catch (e) {}
-      i++;
-      setTimeout(clickNext, 250);
-    }
-    clickNext();
+  /* =========================================================
+     時刻判定（3:00〜4:59:59 停止 / 5:00:01 リロード）
+  ========================================================= */
+  function getNowSec() {
+    const d = new Date();
+    return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
   }
 
-  /* -------------------------------------------------------------
+  function isMaintenanceTime() {
+    const t = getNowSec();
+    return t >= 3 * 3600 && t < 5 * 3600;
+  }
+
+  function isReloadTime() {
+    return getNowSec() === (5 * 3600 + 1);
+  }
+
+  /* =========================================================
+     時刻タブ自動展開（15秒後）
+  ========================================================= */
+  function openAllTimeSlots() {
+    const targets = [...document.querySelectorAll('h1')]
+      .filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
+
+    let i = 0;
+    (function clickNext() {
+      if (i >= targets.length) return;
+      try { targets[i].click(); } catch (e) {}
+      i++;
+      setTimeout(clickNext, 250);
+    })();
+  }
+
+  /* =========================================================
      再検索処理（SP）
-  ------------------------------------------------------------- */
-  const restaurantReloadSp = (el) => {
-    const prepareDateSp = () => {
+  ========================================================= */
+  const reloadSP = (el) => {
+    const nextBtn = $('li.next button.nextDateLink');
+    const prevBtn = $('li.prev button.preDateLink');
+
+    const prepareDate = () => {
       const cur = $("#reservationOfDateHid").html();
       const end = $(".calendarEndDate").val();
       if (cur > end) return;
@@ -52,54 +69,35 @@
       );
     };
 
-    const nextBtn = $('li.next button.nextDateLink');
-    const prevBtn = $('li.prev button.preDateLink');
-
-    $(el).on('click', (event) => {
-      event.stopPropagation();
-
+    $(el).on('click', (e) => {
+      e.stopPropagation();
       if (prevBtn.attr('disabled') && nextBtn.attr('disabled')) return;
 
-      prepareDateSp();
+      prepareDate();
       nextBtn.removeClass('hasNoData');
       changeReservationDate('next', nextBtn[0]);
       $.mobile.loading("hide");
 
-      // ★ 15秒後 時刻タブの自動展開
       setTimeout(openAllTimeSlots, 15000);
     });
 
-    // pointer 再現
     $(el).css('cursor', 'pointer');
   };
 
-  /* -------------------------------------------------------------
-     日付バー
-  ------------------------------------------------------------- */
-  restaurantReloadSp($('#reservationOfDateDisp1'));
+  reloadSP($('#reservationOfDateDisp1'));
+  document.querySelectorAll('section > div > h1:nth-child(1)')
+    .forEach(h => reloadSP(h));
 
-  /* -------------------------------------------------------------
-     朝食 / 昼食 / 夕食 見出し
-  ------------------------------------------------------------- */
-  const headerSelector = 'section > div > h1:nth-child(1)';
-  document.querySelectorAll(headerSelector).forEach(h1 => {
-    restaurantReloadSp(h1);
-    h1.style.cursor = 'pointer';
-  });
-
-  /* -------------------------------------------------------------
-     ON/OFF パネル（デフォルト ON）
-  ------------------------------------------------------------- */
-  const PANEL_ID = 'tdr-auto-panel';
-
-  // ★ デフォルト ON
+  /* =========================================================
+     ON / OFF パネル（デフォルト ON）
+  ========================================================= */
   let autoON = true;
-  let nextWait = 0;
+  let waitSec = 0;
 
-  const resetRandomInterval = () => {
-    nextWait = Math.floor(Math.random() * 11) + 35; // 35〜45秒
-  };
-  resetRandomInterval();
+  function resetWait() {
+    waitSec = Math.floor(Math.random() * 11) + 35;
+  }
+  resetWait();
 
   const panel = document.createElement('div');
   Object.assign(panel.style, {
@@ -111,53 +109,65 @@
     borderRadius: '10px',
     fontSize: '14px',
     fontWeight: '600',
-    lineHeight: '1',
     cursor: 'pointer',
-    userSelect: 'none',
-    background: '#007bff',   // ON状態
+    background: '#007bff',
     color: '#fff',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
     opacity: '0.9'
   });
-  panel.textContent = 'ON ' + nextWait;
+  panel.textContent = 'ON';
   document.body.appendChild(panel);
 
-  panel.addEventListener('click', () => {
+  panel.onclick = () => {
     autoON = !autoON;
-
     if (autoON) {
-      resetRandomInterval();
+      resetWait();
       panel.style.background = '#007bff';
-      panel.textContent = 'ON ' + nextWait;
     } else {
       panel.style.background = '#333';
       panel.textContent = 'OFF';
     }
-  });
+  };
 
-  /* -------------------------------------------------------------
-     自動ループ（35〜45秒ランダム）
-  ------------------------------------------------------------- */
+  /* =========================================================
+     自動ループ（1秒監視）
+  ========================================================= */
   setInterval(() => {
-    if (!autoON) return;
 
-    nextWait--;
-
-    if (nextWait <= 0) {
-      const bar = document.querySelector('#reservationOfDateDisp1');
-      if (bar) bar.click();
-      resetRandomInterval();
+    // 5:00:01 全リロード
+    if (isReloadTime()) {
+      location.reload();
+      return;
     }
 
-    panel.textContent = 'ON ' + nextWait;
+    // 3〜5時 停止
+    if (isMaintenanceTime()) {
+      panel.textContent = 'MAINT';
+      panel.style.background = '#666';
+      return;
+    }
+
+    if (!autoON) {
+      panel.textContent = 'OFF';
+      return;
+    }
+
+    waitSec--;
+    panel.textContent = 'ON ' + waitSec;
+
+    if (waitSec <= 0) {
+      const bar = document.querySelector('#reservationOfDateDisp1');
+      if (bar) bar.click();
+      resetWait();
+    }
 
   }, 1000);
 
-  /* -------------------------------------------------------------
+  /* =========================================================
      マーカー
-  ------------------------------------------------------------- */
+  ========================================================= */
   const mark = document.createElement('div');
-  mark.id = markingElemId;
+  mark.id = MARK_ID;
   mark.style.display = 'none';
   document.body.appendChild(mark);
 
