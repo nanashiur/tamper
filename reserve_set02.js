@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🦋 SHSBT0001N 20260526 M19
+// @name         🦋 FSHSBT0001 20260526 M19
 // @namespace    tdr-fixed-room-date-rank
-// @version      1.46
-// @description  /hotel/reserve/ のPOSTで 部屋SHSBT0001N・useDate=20260526・hotelPriceFrameID=M19 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @version      1.47
+// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBT0001N・useDate=20260526・hotelPriceFrameID=M19 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set02.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set02.js
@@ -19,7 +19,7 @@
   let ENABLED = false;
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
-  const TARGET   = 'SHSBT0001N';
+  const TARGET   = 'HOFSHSBT0001N';
   const FIX_DATE = '20260526';
   const FIX_PF   = 'M19';
 
