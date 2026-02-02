@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         🦋 FSHSBA0001 20260602 M20
+// @name         🦋 FSHSBA0001 20260603 M20
 // @namespace    tdr-fixed-room-date-rank
 // @version      1.52
 // @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20260526・hotelPriceFrameID=M19 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
@@ -20,7 +20,7 @@
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
   const TARGET   = 'HOFSHSBA0001N';
-  const FIX_DATE = '20260602';
+  const FIX_DATE = '20260603';
   const FIX_PF   = 'M20';
 
   const SYNC_QUEUE_HEADER = true;
