@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004 20260602 M13
+// @name         🏨 DHMTGD0004 20260603 M13
 // @namespace    tdr-fixed-room-date-rank
 // @version      1.52
 // @description  /hotel/reserve/ のPOSTで 部屋HODHMTGD0004N・useDate=20260511・hotelPriceFrameID=M13 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
@@ -20,7 +20,7 @@
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
   const TARGET   = 'HODHMTGD0004N';
-  const FIX_DATE = '20260602';
+  const FIX_DATE = '20260603';
   const FIX_PF   = 'M13';
 
   const SYNC_QUEUE_HEADER = true;
