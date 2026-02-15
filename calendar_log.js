@@ -1,8 +1,7 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
 // @namespace    http://tampermonkey.net/
-// @version      3.10
-// @description  客室在庫をログしながら、空室を検知するとパネルで通知（ログに価格ランク付き）
+// @version      3.20
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -37,8 +36,9 @@
   };
 
   /* ---------- 状態管理 ---------- */
-  let mode = 0;
+  let mode = 0; // 0:手動 1:短期 2:長期 3:空室
   const filters = { 0: true, 1: true, 2: true, 3: true };
+  let longTimer = null;
 
   /* ---------- UI ---------- */
   const makeBtn = (txt, bg) =>
@@ -52,15 +52,22 @@
   });
 
   const btnMain = makeBtn('手動', '#000');
+
   const updateMain = () => {
     if (mode === 0) { btnMain.textContent = '手動'; btnMain.style.background = '#000'; }
-    if (mode === 1) { btnMain.textContent = '連続'; btnMain.style.background = 'orange'; }
-    if (mode === 2) { btnMain.textContent = '空室'; btnMain.style.background = 'pink'; }
+    if (mode === 1) { btnMain.textContent = '短期'; btnMain.style.background = 'orange'; }
+    if (mode === 2) { btnMain.textContent = '長期'; btnMain.style.background = 'purple'; }
+    if (mode === 3) { btnMain.textContent = '空室'; btnMain.style.background = 'pink'; }
   };
+
   btnMain.onclick = () => {
     hideVacancyPanel();
-    mode = (mode + 1) % 3;
+    clearTimeout(longTimer);
+    longTimer = null;
+
+    mode = (mode + 1) % 4;
     updateMain();
+
     if (mode !== 0) triggerSearch();
   };
 
@@ -76,6 +83,9 @@
   /* ---------- 検索発火 ---------- */
   const triggerSearch = () => {
     hideVacancyPanel();
+    clearTimeout(longTimer);
+    longTimer = null;
+
     const sel = document.getElementById('boxCalendarSelect');
     if (sel && !document.querySelector('span.calLoad')) {
       sel.dispatchEvent(new Event('change'));
@@ -101,7 +111,13 @@
 
           if (mode === 1) {
             triggerSearch();
-          } else if (mode === 2) {
+          }
+          else if (mode === 2) {
+            longTimer = setTimeout(() => {
+              triggerSearch();
+            }, 600000); // 10分
+          }
+          else if (mode === 3) {
             if (found) {
               mode = 0;
               updateMain();
@@ -150,12 +166,11 @@
     return vacancy;
   }
 
-  /* ---------- ⑪ 空室通知パネル（変更後） ---------- */
+  /* ---------- 空室通知パネル ---------- */
   let vacancyPanel = null;
 
   function showVacancyPanel() {
     if (vacancyPanel) return;
-
     vacancyPanel = document.createElement('div');
     vacancyPanel.textContent = tStr();
     vacancyPanel.style.cssText = `
@@ -172,7 +187,6 @@
       cursor:pointer;
       z-index:99998;
       user-select:none;
-      box-shadow:0 6px 18px rgba(0,0,0,0.35);
     `;
     vacancyPanel.onclick = hideVacancyPanel;
     document.body.appendChild(vacancyPanel);
