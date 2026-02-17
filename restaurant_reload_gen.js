@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
 // @namespace    http://tampermonkey.net/
-// @version      2.3
-// @description  SP：前日再検索＋35-45秒ランダム＋ON/OFF（デフォルトON）＋3-5時停止＋5:00:01全リロード
+// @version      2.4
+// @description  SP：前日再検索＋35-45秒ランダム＋ON/OFF（デフォルトON）＋メンテ停止＋定時F5
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -19,20 +19,28 @@
   if (document.getElementById(MARK_ID)) return;
 
   /* =========================================================
-     時刻判定（3:00〜4:59:59 停止 / 5:00:01 リロード）
+     時刻ユーティリティ
   ========================================================= */
-  function getNowSec() {
+  function getNow() {
     const d = new Date();
-    return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+    return {
+      h: d.getHours(),
+      m: d.getMinutes(),
+      s: d.getSeconds(),
+      sec: d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()
+    };
   }
 
-  function isMaintenanceTime() {
-    const t = getNowSec();
-    return t >= 3 * 3600 && t < 5 * 3600;
+  // 02:59:55 ～ 05:00:05 完全停止
+  function isMaintenanceBlock() {
+    const t = getNow().sec;
+    return t >= (2 * 3600 + 59 * 60 + 55) && t <= (5 * 3600 + 5);
   }
 
-  function isReloadTime() {
-    return getNowSec() === (5 * 3600 + 1);
+  // 05:00:05 ちょうど
+  function isMaintenanceEndReload() {
+    const n = getNow();
+    return n.h === 5 && n.m === 0 && n.s === 5;
   }
 
   /* =========================================================
@@ -70,6 +78,8 @@
     };
 
     $(el).on('click', (e) => {
+      if (isMaintenanceBlock()) return;
+
       e.stopPropagation();
       if (prevBtn.attr('disabled') && nextBtn.attr('disabled')) return;
 
@@ -132,19 +142,32 @@
   /* =========================================================
      自動ループ（1秒監視）
   ========================================================= */
-  setInterval(() => {
+  let lastMinuteReload = null;
 
-    // 5:00:01 全リロード
-    if (isReloadTime()) {
+  setInterval(() => {
+    const now = getNow();
+
+    // ② メンテ明け 05:00:05 F5
+    if (isMaintenanceEndReload()) {
       location.reload();
       return;
     }
 
-    // 3〜5時 停止
-    if (isMaintenanceTime()) {
+    // ① 完全停止時間
+    if (isMaintenanceBlock()) {
       panel.textContent = 'MAINT';
       panel.style.background = '#666';
       return;
+    }
+
+    // ③ 毎時10分おき F5
+    if (now.s === 0 && now.m % 10 === 0) {
+      const key = now.h + ':' + now.m;
+      if (lastMinuteReload !== key) {
+        lastMinuteReload = key;
+        location.reload();
+        return;
+      }
     }
 
     if (!autoON) {
