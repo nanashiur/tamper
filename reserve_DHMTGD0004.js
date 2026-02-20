@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004 20260620 M19
+// @name         🏨 DHMTGD0004 20260621 M13
 // @namespace    tdr-fixed-room-date-rank
-// @version      2.26.06.20.0
+// @version      26.06.21.0
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -19,8 +19,8 @@
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
   const TARGET   = 'HODHMTGD0004N';
-  const FIX_DATE = '20260620';
-  const FIX_PF   = 'M19';
+  const FIX_DATE = '20260621';
+  const FIX_PF   = 'M13';
 
   const SYNC_QUEUE_HEADER = true;
   const INJECT_IF_MISSING = true;
