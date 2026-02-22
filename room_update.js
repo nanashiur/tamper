@@ -1,8 +1,7 @@
 // ==UserScript==
 // @name         🛋️ 部屋更新
 // @namespace    http://tampermonkey.net/
-// @version      1.5
-// @description  起動時は停止。右上パネルで稼働/停止トグル（同一タブ内のみ記憶）
+// @version      1.6
 // @match        https://reserve.tokyodisneyresort.jp/online/hotel/update/
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/room_update.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/room_update.js
@@ -24,6 +23,17 @@
     if (reserveImg) {
       reserveImg.closest('a,button')?.click();
       clicked = true;
+
+      // ★追加：予約ボタンを押したら停止状態へ
+      running = false;
+      sessionStorage.setItem('tdr-run', '0');
+      const panel = document.getElementById('tdr-panel');
+      const status = document.getElementById('tdr-status');
+      if (panel && status) {
+        status.textContent = '停止中';
+        panel.style.background = 'rgba(0,0,0,0.85)';
+      }
+
       console.log('[🛋️ 部屋更新] 「予約する」ボタンをクリック');
       return;
     }
