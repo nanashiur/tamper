@@ -1,8 +1,6 @@
 // ==UserScript==
-// @name         🏰 TDHRBC0001 20260622 M17
-// @namespace    tdr-fixed-room-date-rank
-// @version      26.02.22.0
-// @description  /hotel/reserve/ のPOSTで 部屋HOFSHSBA0001N・useDate=20260526・hotelPriceFrameID=M19 を強制。QueueItヘッダも同部屋に同期。パネルクリックでON/OFFトグル（初期OFF）。ホテルコードに応じてパネル色変更。
+// @name         🏰 TDHRBC0001 20260623
+// @version      26.02.23.0
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set03.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set03.js
@@ -20,7 +18,7 @@
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
   const TARGET   = 'HOTDHRBC0001N';
-  const FIX_DATE = '20260622';
+  const FIX_DATE = '20260623';
   const FIX_PF   = 'M17';
 
   const SYNC_QUEUE_HEADER = true;
