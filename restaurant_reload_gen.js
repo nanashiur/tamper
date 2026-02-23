@@ -1,8 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @namespace    http://tampermonkey.net/
-// @version      2.4
-// @description  SP：前日再検索＋35-45秒ランダム＋ON/OFF（デフォルトON）＋メンテ停止＋定時F5
+// @version      2.5
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -18,9 +16,6 @@
   const MARK_ID = '__restaurant_reload_running';
   if (document.getElementById(MARK_ID)) return;
 
-  /* =========================================================
-     時刻ユーティリティ
-  ========================================================= */
   function getNow() {
     const d = new Date();
     return {
@@ -31,21 +26,16 @@
     };
   }
 
-  // 02:59:55 ～ 05:00:05 完全停止
   function isMaintenanceBlock() {
     const t = getNow().sec;
     return t >= (2 * 3600 + 59 * 60 + 55) && t <= (5 * 3600 + 5);
   }
 
-  // 05:00:05 ちょうど
   function isMaintenanceEndReload() {
     const n = getNow();
     return n.h === 5 && n.m === 0 && n.s === 5;
   }
 
-  /* =========================================================
-     時刻タブ自動展開（15秒後）
-  ========================================================= */
   function openAllTimeSlots() {
     const targets = [...document.querySelectorAll('h1')]
       .filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
@@ -59,9 +49,17 @@
     })();
   }
 
-  /* =========================================================
-     再検索処理（SP）
-  ========================================================= */
+  /* ============================
+     Ajax完了検知（追加部分）
+  ============================ */
+  if (typeof $ !== "undefined") {
+    $(document).ajaxStop(function () {
+      if (autoOpen) {
+        setTimeout(openAllTimeSlots, 300);
+      }
+    });
+  }
+
   const reloadSP = (el) => {
     const nextBtn = $('li.next button.nextDateLink');
     const prevBtn = $('li.prev button.preDateLink');
@@ -87,8 +85,6 @@
       nextBtn.removeClass('hasNoData');
       changeReservationDate('next', nextBtn[0]);
       $.mobile.loading("hide");
-
-      setTimeout(openAllTimeSlots, 15000);
     });
 
     $(el).css('cursor', 'pointer');
@@ -98,9 +94,9 @@
   document.querySelectorAll('section > div > h1:nth-child(1)')
     .forEach(h => reloadSP(h));
 
-  /* =========================================================
-     ON / OFF パネル（デフォルト ON）
-  ========================================================= */
+  /* ============================
+     ON/OFFパネル
+  ============================ */
   let autoON = true;
   let waitSec = 0;
 
@@ -139,29 +135,57 @@
     }
   };
 
-  /* =========================================================
-     自動ループ（1秒監視）
-  ========================================================= */
+  /* ============================
+     TAB自動展開トグル（永続）
+  ============================ */
+  let autoOpen = localStorage.getItem('autoOpenTimeTabs') !== '0';
+
+  const openPanel = document.createElement('div');
+  Object.assign(openPanel.style, {
+    position: 'fixed',
+    top: '60px',
+    right: '10px',
+    zIndex: '2147483647',
+    padding: '8px 12px',
+    borderRadius: '10px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    background: autoOpen ? '#28a745' : '#333',
+    color: '#fff',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+    opacity: '0.9'
+  });
+  openPanel.textContent = autoOpen ? 'TAB ON' : 'TAB OFF';
+  document.body.appendChild(openPanel);
+
+  openPanel.onclick = () => {
+    autoOpen = !autoOpen;
+    localStorage.setItem('autoOpenTimeTabs', autoOpen ? '1' : '0');
+    openPanel.style.background = autoOpen ? '#28a745' : '#333';
+    openPanel.textContent = autoOpen ? 'TAB ON' : 'TAB OFF';
+  };
+
+  /* ============================
+     自動ループ
+  ============================ */
   let lastMinuteReload = null;
 
   setInterval(() => {
     const now = getNow();
 
-    // ② メンテ明け 05:00:05 F5
     if (isMaintenanceEndReload()) {
       location.reload();
       return;
     }
 
-    // ① 完全停止時間
     if (isMaintenanceBlock()) {
       panel.textContent = 'MAINT';
       panel.style.background = '#666';
       return;
     }
 
-    // ③ 毎時10分おき F5
-    if (now.s === 0 && now.m % 10 === 0) {
+    if (now.s === 0 && [10,30,50].includes(now.m)) {
       const key = now.h + ':' + now.m;
       if (lastMinuteReload !== key) {
         lastMinuteReload = key;
@@ -186,9 +210,6 @@
 
   }, 1000);
 
-  /* =========================================================
-     マーカー
-  ========================================================= */
   const mark = document.createElement('div');
   mark.id = MARK_ID;
   mark.style.display = 'none';
