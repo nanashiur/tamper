@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      2.5
+// @version      2.6
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -49,9 +49,7 @@
     })();
   }
 
-  /* ============================
-     Ajax完了検知（追加部分）
-  ============================ */
+  /* Ajax完了後にTAB展開 */
   if (typeof $ !== "undefined") {
     $(document).ajaxStop(function () {
       if (autoOpen) {
@@ -95,7 +93,7 @@
     .forEach(h => reloadSP(h));
 
   /* ============================
-     ON/OFFパネル
+     自動更新トグル
   ============================ */
   let autoON = true;
   let waitSec = 0;
@@ -126,13 +124,8 @@
 
   panel.onclick = () => {
     autoON = !autoON;
-    if (autoON) {
-      resetWait();
-      panel.style.background = '#007bff';
-    } else {
-      panel.style.background = '#333';
-      panel.textContent = 'OFF';
-    }
+    panel.style.background = autoON ? '#007bff' : '#333';
+    panel.textContent = autoON ? 'ON' : 'OFF';
   };
 
   /* ============================
@@ -167,6 +160,37 @@
   };
 
   /* ============================
+     20分ごとF5トグル（永続）
+  ============================ */
+  let autoF5 = localStorage.getItem('autoF520min') !== '0';
+
+  const f5Panel = document.createElement('div');
+  Object.assign(f5Panel.style, {
+    position: 'fixed',
+    top: '110px',
+    right: '10px',
+    zIndex: '2147483647',
+    padding: '8px 12px',
+    borderRadius: '10px',
+    fontSize: '14px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    background: autoF5 ? '#dc3545' : '#333',
+    color: '#fff',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+    opacity: '0.9'
+  });
+  f5Panel.textContent = autoF5 ? 'F5 ON' : 'F5 OFF';
+  document.body.appendChild(f5Panel);
+
+  f5Panel.onclick = () => {
+    autoF5 = !autoF5;
+    localStorage.setItem('autoF520min', autoF5 ? '1' : '0');
+    f5Panel.style.background = autoF5 ? '#dc3545' : '#333';
+    f5Panel.textContent = autoF5 ? 'F5 ON' : 'F5 OFF';
+  };
+
+  /* ============================
      自動ループ
   ============================ */
   let lastMinuteReload = null;
@@ -185,7 +209,7 @@
       return;
     }
 
-    if (now.s === 0 && [10,30,50].includes(now.m)) {
+    if (autoF5 && now.s === 0 && [10,30,50].includes(now.m)) {
       const key = now.h + ':' + now.m;
       if (lastMinuteReload !== key) {
         lastMinuteReload = key;
