@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🏰 TDHRBC0001 20260623
-// @version      26.02.24.0
+// @name         🏰 TDHRBC0001 20260624
+// @version      26.02.24.1
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set03.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_set03.js
@@ -18,7 +18,7 @@
   Object.defineProperty(window, '__tdr_fixed_enabled', { get(){ return ENABLED; } });
 
   const TARGET   = 'HOTDHRBC0001N';
-  const FIX_DATE = '20260622';
+  const FIX_DATE = '20260624';
   const FIX_PF   = 'M17';
 
   const SYNC_QUEUE_HEADER = true;
