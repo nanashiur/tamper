@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🍴📱ショーレストラン再検索
 // @namespace    http://tampermonkey.net/
-// @version      1.51
+// @version      1.60
 // @match        https://reserve.tokyodisneyresort.jp/sp/showrestaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
@@ -16,7 +16,7 @@
   if (document.getElementById('__showrestaurant_reload')) return;
 
   /* =====================
-     メンテ時間判定
+     メンテ時間判定（そのまま）
   ===================== */
   const isMaintenanceTime = () => {
     const n = new Date();
@@ -28,7 +28,7 @@
   };
 
   /* =====================
-     SP 再検索本体（完成品同等）
+     SP 再検索本体（変更なし）
   ===================== */
   const restaurantReloadSp = (el) => {
 
@@ -60,18 +60,15 @@
     $(el).css('cursor', 'pointer');
   };
 
-  /* 日付バー */
   restaurantReloadSp($('#reservationOfDateDisp1'));
-
-  /* 朝・昼・夕 見出し */
   document.querySelectorAll('section > div > h1:nth-child(1)').forEach(h1 => {
     restaurantReloadSp(h1);
   });
 
   /* =====================
-     30–40秒 自動クリック
+     自動再検索トグル（永続）
   ===================== */
-  let autoON = true;
+  let autoSearch = localStorage.getItem('show_autoSearch') !== '0';
   let wait = Math.floor(Math.random() * 11) + 30;
 
   const panel = document.createElement('div');
@@ -79,46 +76,83 @@
     position: 'fixed', top: '10px', right: '10px',
     zIndex: 9999999, padding: '8px 12px',
     borderRadius: '10px', fontWeight: '600',
-    background: '#007bff', color: '#fff',
-    cursor: 'pointer'
+    background: autoSearch ? '#007bff' : '#333',
+    color: '#fff', cursor: 'pointer'
   });
-  panel.textContent = 'ON ' + wait;
   document.body.appendChild(panel);
 
   panel.onclick = () => {
-    autoON = !autoON;
-    panel.style.background = autoON ? '#007bff' : '#333';
-    panel.textContent = autoON ? 'ON ' + wait : 'OFF';
+    autoSearch = !autoSearch;
+    localStorage.setItem('show_autoSearch', autoSearch ? '1' : '0');
+    panel.style.background = autoSearch ? '#007bff' : '#333';
   };
 
-  setInterval(() => {
-    if (!autoON) return;
+  /* =====================
+     自動F5トグル（永続）
+  ===================== */
+  let autoF5 = localStorage.getItem('show_autoF5') !== '0';
 
+  const f5Panel = document.createElement('div');
+  Object.assign(f5Panel.style, {
+    position: 'fixed', top: '60px', right: '10px',
+    zIndex: 9999999, padding: '8px 12px',
+    borderRadius: '10px', fontWeight: '600',
+    background: autoF5 ? '#dc3545' : '#333',
+    color: '#fff', cursor: 'pointer'
+  });
+  f5Panel.textContent = autoF5 ? 'F5 ON' : 'F5 OFF';
+  document.body.appendChild(f5Panel);
+
+  f5Panel.onclick = () => {
+    autoF5 = !autoF5;
+    localStorage.setItem('show_autoF5', autoF5 ? '1' : '0');
+    f5Panel.style.background = autoF5 ? '#dc3545' : '#333';
+    f5Panel.textContent = autoF5 ? 'F5 ON' : 'F5 OFF';
+  };
+
+  /* =====================
+     メインループ
+  ===================== */
+  let lastReloadKey = null;
+
+  setInterval(() => {
+
+    const n = new Date();
+
+    /* --- メンテ中 --- */
     if (isMaintenanceTime()) {
       panel.textContent = 'MAINT';
       return;
     }
 
-    wait--;
-    if (wait <= 0) {
-      document.querySelector('#reservationOfDateDisp1')?.click();
-      wait = Math.floor(Math.random() * 11) + 30;
+    /* --- 自動再検索 --- */
+    if (autoSearch) {
+      wait--;
+      if (wait <= 0) {
+        document.querySelector('#reservationOfDateDisp1')?.click();
+        wait = Math.floor(Math.random() * 11) + 30;
+      }
+      panel.textContent = 'ON ' + wait;
+    } else {
+      panel.textContent = 'OFF';
     }
-    panel.textContent = 'ON ' + wait;
-  }, 1000);
 
-  /* =====================
-     毎10分 F5（メンテ除外）
-  ===================== */
-  setInterval(() => {
-    const n = new Date();
-    if (isMaintenanceTime()) return;
-    if (n.getSeconds() === 0 && n.getMinutes() % 10 === 0) {
-      location.reload();
-    }
+    /* --- F5制御 --- */
+    if (!autoF5) return;
+
     if (n.getHours() === 5 && n.getMinutes() === 0 && n.getSeconds() === 5) {
       location.reload();
+      return;
     }
+
+    if (n.getSeconds() === 0 && [10,30,50].includes(n.getMinutes())) {
+      const key = n.getHours() + ':' + n.getMinutes();
+      if (lastReloadKey !== key) {
+        lastReloadKey = key;
+        location.reload();
+      }
+    }
+
   }, 1000);
 
   const mark = document.createElement('div');
