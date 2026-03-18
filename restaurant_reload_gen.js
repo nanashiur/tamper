@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      2.6
+// @version      2.8
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -49,9 +49,9 @@
     })();
   }
 
-  /* Ajax完了後にTAB展開 */
   if (typeof $ !== "undefined") {
-    $(document).ajaxStop(function () {
+    $(document).off("ajaxStop.restaurantReload");
+    $(document).on("ajaxStop.restaurantReload", function () {
       if (autoOpen) {
         setTimeout(openAllTimeSlots, 300);
       }
@@ -93,9 +93,9 @@
     .forEach(h => reloadSP(h));
 
   /* ============================
-     自動更新トグル
+     自動再検索トグル（永続）
   ============================ */
-  let autoON = true;
+  let autoON = localStorage.getItem('autoSearch') === '1';
   let waitSec = 0;
 
   function resetWait() {
@@ -114,16 +114,17 @@
     fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer',
-    background: '#007bff',
+    background: autoON ? '#007bff' : '#333',
     color: '#fff',
     boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
     opacity: '0.9'
   });
-  panel.textContent = 'ON';
+  panel.textContent = autoON ? 'ON' : 'OFF';
   document.body.appendChild(panel);
 
   panel.onclick = () => {
     autoON = !autoON;
+    localStorage.setItem('autoSearch', autoON ? '1' : '0');
     panel.style.background = autoON ? '#007bff' : '#333';
     panel.textContent = autoON ? 'ON' : 'OFF';
   };
@@ -196,9 +197,10 @@
   let lastMinuteReload = null;
 
   setInterval(() => {
+
     const now = getNow();
 
-    if (isMaintenanceEndReload()) {
+    if (autoF5 && isMaintenanceEndReload()) {
       location.reload();
       return;
     }
@@ -210,12 +212,15 @@
     }
 
     if (autoF5 && now.s === 0 && [10,30,50].includes(now.m)) {
+
       const key = now.h + ':' + now.m;
+
       if (lastMinuteReload !== key) {
         lastMinuteReload = key;
         location.reload();
         return;
       }
+
     }
 
     if (!autoON) {
@@ -227,9 +232,13 @@
     panel.textContent = 'ON ' + waitSec;
 
     if (waitSec <= 0) {
+
       const bar = document.querySelector('#reservationOfDateDisp1');
+
       if (bar) bar.click();
+
       resetWait();
+
     }
 
   }, 1000);
