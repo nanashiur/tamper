@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🍴レストラン検索（宿泊特典）
 // @namespace    st.tdr
-// @version      1.2.2
-// @description  「時間の選択」画面で時間帯別再検索／「人数・時間の選択」で2回目以降は全時間帯再検索。右上パネルで30秒ごと自動再検索ON/OFF（OFF時は「OFF」と表示）。
+// @version      1.3.1
+// @description  「時間の選択」画面で時間帯別再検索／「人数・時間の選択」で2回目以降は全時間帯再検索。右上パネルで30～50秒ランダム間隔の自動再検索ON/OFF（OFF時は「OFF」と表示）。
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -26,7 +26,6 @@
     if (document.getElementById(MARK_ID)) return;
     if (!ready()) { setTimeout(boot, 300); return; }
 
-    // ====== 元のブックマークレットコード ======
     (function () {
       const markingElemId = '__privileges_restaurant_reload';
       if (document.getElementById(markingElemId)) return;
@@ -56,7 +55,6 @@
         });
       };
 
-      // 時間帯別ヘッダをタップしたときに対象時間帯のみリロード
       const timeRanges = document.querySelectorAll('#timeContent section h1#mealDivName');
       timeRanges.forEach((el_timeRange) => {
         el_timeRange.addEventListener('click', () => {
@@ -84,7 +82,6 @@
         el_timeRange.style.cursor = 'pointer';
       });
 
-      // timeGet.refresh のインターセプト
       const orig_timeGet_refresh = timeGet.refresh;
       timeGet.refresh = function (b, a) {
         if ($(`#timeContent section.${b}`).length) {
@@ -96,7 +93,6 @@
         }
       };
 
-      // アコーディオンの状態を復元
       const orig_setupAccordion = setupAccordion;
       setupAccordion = function () {
         $('#timeContent section.js-accordion header').each((idx, el) => {
@@ -108,7 +104,6 @@
         orig_setupAccordion.apply(this, arguments);
       };
 
-      // 「戻る」で検索済みフラグをリセット
       document.querySelectorAll('#timeContent > header a.cancel, #timeContentMain > ul.listBtn01 a.back').forEach((el) => {
         el.addEventListener('click', () => {
           opened_headers = [];
@@ -118,7 +113,7 @@
         });
       });
 
-      // ====== 追加: 右上パネルで30秒ごと自動再検索 ======
+      // ====== 追加: 右上パネルで30～50秒ランダム間隔の自動再検索 ======
       (function(){
         const PANEL_ID = '__tdr_auto_search_panel';
         if (document.getElementById(PANEL_ID)) return;
@@ -148,6 +143,7 @@
         let running = false;
         let timer = null;
         let nextAt = 0;
+        let intervalSec = 30;
 
         const updatePanel = () => {
           if (!running) {
@@ -160,23 +156,27 @@
           panel.style.background = '#0064d2';
         };
 
+        const setNextInterval = () => {
+          intervalSec = Math.floor(Math.random() * 21) + 30; // 30～50秒
+          nextAt = Date.now() + intervalSec * 1000;
+        };
+
         const doFullSearch = () => {
           try { save_accordion_status(); } catch(e) {}
           const task = controller.getTimeInfo();
           if (task && typeof task.always === 'function') task.always(()=>{});
+          setNextInterval();
         };
 
         const start = () => {
           if (running) return;
           running = true;
           doFullSearch();
-          nextAt = Date.now() + 30000;
           updatePanel();
           timer = setInterval(() => {
             const now = Date.now();
             if (now >= nextAt) {
               doFullSearch();
-              nextAt = now + 30000;
             }
             updatePanel();
           }, 250);
