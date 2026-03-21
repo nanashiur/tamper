@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🛋️ 部屋更新
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.7
 // @match        https://reserve.tokyodisneyresort.jp/online/hotel/update/
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/room_update.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/room_update.js
@@ -12,8 +12,19 @@
   'use strict';
 
   const startTime = Date.now();
-  let running = sessionStorage.getItem('tdr-run') === '1'; // 初期: 停止
+  let running = sessionStorage.getItem('tdr-run') === '1';
   let clicked = false;
+  const WEBHOOK_URL = 'https://discord.com/api/webhooks/1484508249943445535/MhUkh4McvQTKXn5gQcFJ8kXMbAvqIebGq--unxE0oreYRTXbUVjsg1rOsZ8AJH7ljGQd';
+
+  function sendDiscordNotification() {
+    fetch(WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: '予約するボタンを押しました'
+      })
+    }).catch(() => {});
+  }
 
   function clickPriorityButton() {
     if (clicked || !running) return;
@@ -24,7 +35,6 @@
       reserveImg.closest('a,button')?.click();
       clicked = true;
 
-      // ★追加：予約ボタンを押したら停止状態へ
       running = false;
       sessionStorage.setItem('tdr-run', '0');
       const panel = document.getElementById('tdr-panel');
@@ -34,6 +44,7 @@
         panel.style.background = 'rgba(0,0,0,0.85)';
       }
 
+      sendDiscordNotification();
       console.log('[🛋️ 部屋更新] 「予約する」ボタンをクリック');
       return;
     }
