@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      2.8
+// @version      2.9
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -99,7 +99,7 @@
   let waitSec = 0;
 
   function resetWait() {
-    waitSec = Math.floor(Math.random() * 11) + 35;
+    waitSec = Math.floor(Math.random() * 11) + 15;
   }
   resetWait();
 
