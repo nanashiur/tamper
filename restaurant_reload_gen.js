@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.00
+// @version      3.01
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @grant        none
 // @run-at       document-end
-// ==/UserScript==
+// ==UserScript==
 
 (function () {
   'use strict';
@@ -67,7 +67,7 @@
       基本機能 (ver 2.8形式)
   ============================ */
   function openAllTimeSlots() {
-    const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d (?:2})/.test(h.textContent));
+    const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
     let i = 0;
     (function clickNext() {
       if (i >= targets.length) return;
@@ -107,7 +107,7 @@
   let autoON = localStorage.getItem('autoSearch') === '1';
   let autoOpen = localStorage.getItem('autoOpenTimeTabs') !== '0';
   let autoF5 = localStorage.getItem('autoF520min') !== '0';
-  let waitSec = 15; // 初期待機時間を15秒に設定
+  let waitSec = 15;
 
   const createPanel = (top, text, bg, onClick) => {
     const p = document.createElement('div');
@@ -140,15 +140,15 @@
     const d = new Date();
     const secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
 
-    // 🌀 無限読み込み監視 (20秒タイムアウト)：通知のみ
-    if (autoON && isSearchPending && (now - lastSearchStartTime > 20000)) {
+    // 🌀 無限読み込み監視 (120秒タイムアウトに緩和)：通知のみ
+    if (autoON && isSearchPending && (now - lastSearchStartTime > 120000)) {
       if (!isErrorReported) {
-        sendDiscord("🌀 無限読み込み検知", "応答が20秒以上ありません。通信が固まっている可能性があります。");
+        sendDiscord("🌀 無限読み込み検知", "応答が120秒間ありません。サーバーが極端に重いか、通信が停止しています。");
         isErrorReported = true;
         autoON = false; // ループを止めて通知のみ行う
       }
       panel.textContent = "FREEZE";
-      panel.style.background = "#ff8c00"; // オレンジ色で警告
+      panel.style.background = "#ff8c00";
       return;
     }
 
