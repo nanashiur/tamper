@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.02
+// @version      3.03
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -44,18 +44,18 @@
       if (settings.url.includes("ajaxReservationOfDate")) {
         lastSearchStartTime = Date.now();
         isSearchPending = true;
-        isErrorReported = false;
+        isErrorReported = false; 
       }
     });
 
     $(document).on("ajaxComplete", (event, xhr, settings) => {
       if (settings.url.includes("ajaxReservationOfDate")) {
         isSearchPending = false;
+        // ❌ 403検知：通知のみ行い、autoONは維持する
         if (xhr.status === 403) {
           if (!isErrorReported) {
-            sendDiscord("🚫 403エラー検知", "通信が拒否されました(403)。手動で確認してください。");
+            sendDiscord("🚫 403エラー検知", "通信が拒否されました(403)。自動検索は継続します。");
             isErrorReported = true;
-            if (typeof autoON !== 'undefined') autoON = false;
           }
         }
       }
@@ -63,10 +63,9 @@
   }
 
   /* ============================
-      基本機能 (タブ自動展開修正済み)
+      基本機能
   ============================ */
   function openAllTimeSlots() {
-    // 正規表現を修正: /\d{1,2}:\d{2}/
     const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
     let i = 0;
     (function clickNext() {
@@ -140,11 +139,12 @@
     const d = new Date();
     const secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
 
+    // 🌀 無限読み込み監視 (120秒タイムアウト)：通知のみ行いautoONは止める
     if (autoON && isSearchPending && (now - lastSearchStartTime > 120000)) {
       if (!isErrorReported) {
         sendDiscord("🌀 無限読み込み検知", "応答が120秒間ありません。");
         isErrorReported = true;
-        autoON = false;
+        autoON = false; // 無限ロード時はループを止める
       }
       panel.textContent = "FREEZE";
       panel.style.background = "#ff8c00";
@@ -152,18 +152,18 @@
     }
 
     if (secTotal >= 10795 && secTotal <= 18305) { panel.textContent = 'MAINT'; return; }
-
+    
     if (autoF5) {
       if (d.getHours() === 5 && d.getMinutes() === 0 && d.getSeconds() === 5) location.reload();
       if (d.getSeconds() === 0 && [10, 30, 50].includes(d.getMinutes())) location.reload();
     }
 
-    if (!autoON) {
+    if (!autoON) { 
       if (panel.textContent !== 'OFF' && panel.textContent !== 'MAINT' && panel.textContent !== 'FREEZE') {
         panel.textContent = 'OFF';
         panel.style.background = '#333';
       }
-      return;
+      return; 
     }
 
     waitSec--;
