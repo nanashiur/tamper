@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.01
+// @version      3.02
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @grant        none
 // @run-at       document-end
-// ==UserScript==
+// ==/UserScript==
 
 (function () {
   'use strict';
@@ -44,19 +44,18 @@
       if (settings.url.includes("ajaxReservationOfDate")) {
         lastSearchStartTime = Date.now();
         isSearchPending = true;
-        isErrorReported = false; // 新しいリクエスト開始時にリセット
+        isErrorReported = false;
       }
     });
 
     $(document).on("ajaxComplete", (event, xhr, settings) => {
       if (settings.url.includes("ajaxReservationOfDate")) {
         isSearchPending = false;
-        // ❌ 403検知：通知のみ、リロードなし
         if (xhr.status === 403) {
           if (!isErrorReported) {
             sendDiscord("🚫 403エラー検知", "通信が拒否されました(403)。手動で確認してください。");
             isErrorReported = true;
-            if (typeof autoON !== 'undefined') autoON = false; // 異常時は一旦停止
+            if (typeof autoON !== 'undefined') autoON = false;
           }
         }
       }
@@ -64,9 +63,10 @@
   }
 
   /* ============================
-      基本機能 (ver 2.8形式)
+      基本機能 (タブ自動展開修正済み)
   ============================ */
   function openAllTimeSlots() {
+    // 正規表現を修正: /\d{1,2}:\d{2}/
     const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
     let i = 0;
     (function clickNext() {
@@ -78,7 +78,7 @@
   }
 
   if (typeof $ !== "undefined") {
-    $(document).off("ajaxStop.restaurantReload").on("ajaxStop.restaurantReload", () => {
+    $(document).off("ajaxStop.restaurantReload").on("ajaxStop.restaurantReload", function() {
       if (localStorage.getItem('autoOpenTimeTabs') !== '0') {
         setTimeout(openAllTimeSlots, 300);
       }
@@ -140,12 +140,11 @@
     const d = new Date();
     const secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
 
-    // 🌀 無限読み込み監視 (120秒タイムアウトに緩和)：通知のみ
     if (autoON && isSearchPending && (now - lastSearchStartTime > 120000)) {
       if (!isErrorReported) {
-        sendDiscord("🌀 無限読み込み検知", "応答が120秒間ありません。サーバーが極端に重いか、通信が停止しています。");
+        sendDiscord("🌀 無限読み込み検知", "応答が120秒間ありません。");
         isErrorReported = true;
-        autoON = false; // ループを止めて通知のみ行う
+        autoON = false;
       }
       panel.textContent = "FREEZE";
       panel.style.background = "#ff8c00";
@@ -153,18 +152,18 @@
     }
 
     if (secTotal >= 10795 && secTotal <= 18305) { panel.textContent = 'MAINT'; return; }
-    
+
     if (autoF5) {
       if (d.getHours() === 5 && d.getMinutes() === 0 && d.getSeconds() === 5) location.reload();
       if (d.getSeconds() === 0 && [10, 30, 50].includes(d.getMinutes())) location.reload();
     }
 
-    if (!autoON) { 
+    if (!autoON) {
       if (panel.textContent !== 'OFF' && panel.textContent !== 'MAINT' && panel.textContent !== 'FREEZE') {
         panel.textContent = 'OFF';
         panel.style.background = '#333';
       }
-      return; 
+      return;
     }
 
     waitSec--;
@@ -172,7 +171,6 @@
     if (waitSec <= 0) {
       const bar = document.querySelector('#reservationOfDateDisp1');
       if (bar) bar.click();
-      // 15秒〜20秒の間でリセット
       waitSec = Math.floor(Math.random() * 6) + 15;
     }
   }, 1000);
