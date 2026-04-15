@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.28
+// @version      3.29
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -11,7 +11,6 @@
 (function () {
   'use strict';
 
-  // --- Discord Webhook 設定 ---
   const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1484508249943445535/MhUkh4McvQTKXn5gQcFJ8kXMbAvqIebGq--unxE0oreYRTXbUVjsg1rOsZ8AJH7ljGQd';
 
   if (!document.querySelector('#reservationOfDateHid')) return;
@@ -22,7 +21,6 @@
   let isSearchPending = false;
   let lastNotificationTime = 0; 
 
-  // 情報取得（店名・日付）
   function getSearchInfo() {
     const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
     let fullName = nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
@@ -31,11 +29,9 @@
     return fullName + dateStr;
   }
 
-  // Discord通知実行（1分クールタイム）
   function sendDiscord(titleText, message) {
     const now = Date.now();
     if (now - lastNotificationTime < 60000 || !DISCORD_WEBHOOK_URL) return;
-
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -44,16 +40,13 @@
         embeds: [{
           title: `${titleText}：${getSearchInfo()}`,
           description: message,
-          color: 16711680, // 赤色
+          color: 16711680,
           timestamp: new Date().toISOString()
         }]
       })
-    }).then(() => { 
-      lastNotificationTime = Date.now(); 
-    }).catch(e => console.error(e));
+    }).then(() => { lastNotificationTime = Date.now(); }).catch(e => console.error(e));
   }
 
-  // Ajax監視 (403検知)
   if (typeof $ !== "undefined") {
     $(document).on("ajaxSend", (event, xhr, settings) => {
       if (settings.url.includes("ajaxReservationOfDate")) {
@@ -64,14 +57,11 @@
     $(document).on("ajaxComplete", (event, xhr, settings) => {
       if (settings.url.includes("ajaxReservationOfDate")) {
         isSearchPending = false;
-        if (xhr.status === 403) {
-          sendDiscord("403エラー", "制限中。継続します。");
-        }
+        if (xhr.status === 403) sendDiscord("403エラー", "制限中。継続します。");
       }
     });
   }
 
-  // 自動タブ展開
   function openAllTimeSlots() {
     const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
     let i = 0;
@@ -85,13 +75,10 @@
 
   if (typeof $ !== "undefined") {
     $(document).off("ajaxStop.restaurantReload").on("ajaxStop.restaurantReload", function() {
-      if (localStorage.getItem('autoOpenTimeTabs') !== '0') {
-        setTimeout(openAllTimeSlots, 300);
-      }
+      if (localStorage.getItem('autoOpenTimeTabs') !== '0') setTimeout(openAllTimeSlots, 300);
     });
   }
 
-  // 日付切り替えバーの機能拡張
   const reloadSP = (el) => {
     $(el).on('click', (e) => {
       e.stopPropagation();
@@ -102,14 +89,13 @@
       nextBtn.removeClass('hasNoData');
       changeReservationDate('next', nextBtn[0]);
       $.mobile.loading("hide");
-      lastNotificationTime = 0; // 手動操作時は即通知許可
+      lastNotificationTime = 0;
     }).css('cursor', 'pointer');
   };
 
   reloadSP($('#reservationOfDateDisp1'));
   document.querySelectorAll('section > div > h1:nth-child(1)').forEach(h => reloadSP(h));
 
-  // パネル制御
   let autoOpen = localStorage.getItem('autoOpenTimeTabs') !== '0';
   let autoF5 = localStorage.getItem('autoF520min') !== '0';
   let searchStatus = localStorage.getItem('searchStatus') || 'L'; 
@@ -149,20 +135,31 @@
     openPanel.style.background = autoOpen ? '#28a745' : '#333'; openPanel.textContent = autoOpen ? 'TAB ON' : 'TAB OFF';
   });
 
-  const f5Panel = createPanel(110, 'F5 OFF', '#333', () => {
-    autoF5 = !autoF5; localStorage.setItem('autoF520min', autoF5 ? '1' : '0');
-    if(!autoF5) { f5Panel.style.background = '#333'; f5Panel.textContent = 'F5 OFF'; }
-    else { f5Panel.style.background = '#6f42c1'; } 
-  });
-  if(autoF5) f5Panel.style.background = '#6f42c1';
+  // F5ボタンの表示更新関数
+  function updateF5Panel() {
+    if (!autoF5) {
+      f5Panel.style.background = '#333';
+      f5Panel.textContent = 'F5 OFF';
+    } else {
+      const m = Math.floor(f5WaitSec / 60);
+      const s = f5WaitSec % 60;
+      f5Panel.style.background = '#6f42c1';
+      f5Panel.textContent = `F5 ${m}:${s.toString().padStart(2, '0')}`;
+    }
+  }
 
-  // メインループ
+  const f5Panel = createPanel(110, 'F5 OFF', '#333', () => {
+    autoF5 = !autoF5;
+    localStorage.setItem('autoF520min', autoF5 ? '1' : '0');
+    updateF5Panel();
+  });
+  updateF5Panel();
+
   setInterval(() => {
     const now = Date.now();
     const d = new Date();
     const secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
     
-    // フリーズ検知
     if (searchStatus !== 'OFF' && isSearchPending && (now - lastSearchStartTime > 120000)) {
       sendDiscord("フリーズ", "停止。");
       searchStatus = 'OFF';
@@ -171,10 +168,13 @@
     }
     
     if (secTotal >= 10795 && secTotal <= 18305) return;
+
     if (autoF5) {
       f5WaitSec--;
+      updateF5Panel(); // 毎秒更新
       if (f5WaitSec <= 0 || (d.getHours() === 5 && d.getMinutes() === 0 && d.getSeconds() === 5)) location.reload();
     }
+
     if (searchStatus === 'OFF') return;
     waitSec--;
     updateMainPanel();
