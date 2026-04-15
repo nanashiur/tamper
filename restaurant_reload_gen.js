@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.06
+// @version      3.18
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -21,20 +21,51 @@
   let isSearchPending = false;
   let isErrorReported = false;
 
+  /* ============================
+      レストラン名称取得 (システム上の独立した名称を取得)
+  ============================ */
+  function getSearchInfo() {
+    // ソース内の <p class="name"> にある独立したレストラン名を取得
+    const nameEl = document.querySelector('.box04 .name') ||
+                   document.querySelector('.p-restaurantDetail__name');
+
+    let fullName = nameEl ? nameEl.textContent.trim() : "";
+
+    if (!fullName) {
+      // 予備：タイトルから取得（余計な文言はカット）
+      fullName = document.title.split('｜')[0]
+                  .replace(/レストラン空き状況確認|予約・購入|東京ディズニーリゾート・オンラインサイト/g, '')
+                  .trim();
+    }
+
+    // 日付の取得 [20260419]
+    const dateHid = document.querySelector('#reservationOfDateHid');
+    const dateStr = dateHid ? ` [${dateHid.textContent.trim()}]` : '';
+
+    return (fullName || "レストラン") + dateStr;
+  }
+
   function sendDiscord(title, message) {
     if (!DISCORD_WEBHOOK_URL || !DISCORD_WEBHOOK_URL.startsWith('http')) return;
+    const info = getSearchInfo();
+    const payload = {
+      username: "レストラン一般監視アラート",
+      embeds: [{
+        title: `${title}：${info}`,
+        description: message,
+        color: 16711680,
+        timestamp: new Date().toISOString()
+      }]
+    };
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: "TDR予約監視アラート",
-        embeds: [{ title, description: message, color: 16711680, timestamp: new Date().toISOString() }]
-      })
+      body: JSON.stringify(payload)
     }).catch(e => console.error(e));
   }
 
   /* ============================
-      Ajax通信監視
+      通信監視
   ============================ */
   if (typeof $ !== "undefined") {
     $(document).on("ajaxSend", (event, xhr, settings) => {
@@ -57,7 +88,7 @@
   }
 
   /* ============================
-      基本機能 (タブ展開)
+      自動タブ展開
   ============================ */
   function openAllTimeSlots() {
     const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
@@ -95,11 +126,11 @@
   document.querySelectorAll('section > div > h1:nth-child(1)').forEach(h => reloadSP(h));
 
   /* ============================
-      UI制御パネル
+      UIパネル (初期Lモード)
   ============================ */
   let autoOpen = localStorage.getItem('autoOpenTimeTabs') !== '0';
   let autoF5 = localStorage.getItem('autoF520min') !== '0';
-  let searchStatus = localStorage.getItem('searchStatus') || 'OFF'; // OFF, L, M, S
+  let searchStatus = localStorage.getItem('searchStatus') || 'L';
   let waitSec = 15;
   let f5WaitSec = Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080;
 
@@ -111,16 +142,14 @@
     return p;
   };
 
-  // メイン統合ボタン (OFF -> L -> M -> S)
   const mainPanel = createPanel(10, searchStatus, '#333', () => {
     if (searchStatus === 'OFF') searchStatus = 'L';
     else if (searchStatus === 'L') searchStatus = 'M';
     else if (searchStatus === 'M') searchStatus = 'S';
     else searchStatus = 'OFF';
-
     localStorage.setItem('searchStatus', searchStatus);
     updateMainPanel();
-    waitSec = 1; // 切り替え時即座にカウントダウン開始
+    waitSec = 1;
   });
 
   function updateMainPanel() {
@@ -140,19 +169,18 @@
   const f5Panel = createPanel(110, 'F5 OFF', '#333', () => {
     autoF5 = !autoF5; localStorage.setItem('autoF520min', autoF5 ? '1' : '0');
     if(!autoF5) { f5Panel.style.background = '#333'; f5Panel.textContent = 'F5 OFF'; }
-    else { f5Panel.style.background = '#6f42c1'; } // 紫色
+    else { f5Panel.style.background = '#6f42c1'; }
   });
   if(autoF5) f5Panel.style.background = '#6f42c1';
 
   /* ============================
-      メイン監視ループ
+      メインループ
   ============================ */
   setInterval(() => {
     const now = Date.now();
     const d = new Date();
     const secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
 
-    // 🌀 無限読み込み監視
     if (searchStatus !== 'OFF' && isSearchPending && (now - lastSearchStartTime > 120000)) {
       if (!isErrorReported) {
         sendDiscord("🌀 無限読み込み検知", "応答が120秒間ありません。");
@@ -166,7 +194,6 @@
 
     if (secTotal >= 10795 && secTotal <= 18305) { mainPanel.textContent = 'MAINT'; return; }
 
-    // 🔄 F5リロード監視
     if (autoF5) {
       f5WaitSec--;
       const m = Math.floor(f5WaitSec / 60);
@@ -177,14 +204,12 @@
 
     if (searchStatus === 'OFF') return;
 
-    // 🔍 検索カウントダウン
     waitSec--;
     updateMainPanel();
 
     if (waitSec <= 0) {
       const bar = document.querySelector('#reservationOfDateDisp1');
       if (bar) bar.click();
-
       if (searchStatus === 'S') waitSec = Math.floor(Math.random() * 6) + 5;
       else if (searchStatus === 'L') waitSec = Math.floor(Math.random() * 11) + 30;
       else waitSec = Math.floor(Math.random() * 11) + 15;
