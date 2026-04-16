@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.29
+// @version      3.30
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -21,26 +21,29 @@
   let isSearchPending = false;
   let lastNotificationTime = 0; 
 
-  function getSearchInfo() {
+  function getRestaurantName() {
     const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
-    let fullName = nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
-    const dateHid = document.querySelector('#reservationOfDateHid');
-    const dateStr = dateHid ? ` [${dateHid.textContent.trim()}]` : '';
-    return fullName + dateStr;
+    return nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
   }
 
-  function sendDiscord(titleText, message) {
+  function getTargetDate() {
+    const dateHid = document.querySelector('#reservationOfDateHid');
+    return dateHid ? ` [${dateHid.textContent.trim()}]` : '';
+  }
+
+  function sendDiscord(reasonText) {
     const now = Date.now();
     if (now - lastNotificationTime < 60000 || !DISCORD_WEBHOOK_URL) return;
+
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: "レストラン一般再検索",
         embeds: [{
-          title: `${titleText}：${getSearchInfo()}`,
-          description: message,
-          color: 16711680,
+          title: getRestaurantName() + getTargetDate(), // タイトルは「店名 [日付]」
+          description: reasonText, // 説明にエラー理由を記載
+          color: 16711680, // 赤色
           timestamp: new Date().toISOString()
         }]
       })
@@ -57,7 +60,9 @@
     $(document).on("ajaxComplete", (event, xhr, settings) => {
       if (settings.url.includes("ajaxReservationOfDate")) {
         isSearchPending = false;
-        if (xhr.status === 403) sendDiscord("403エラー", "制限中。継続します。");
+        if (xhr.status === 403) {
+          sendDiscord("🚫403エラー：制限中。継続します。");
+        }
       }
     });
   }
@@ -135,7 +140,6 @@
     openPanel.style.background = autoOpen ? '#28a745' : '#333'; openPanel.textContent = autoOpen ? 'TAB ON' : 'TAB OFF';
   });
 
-  // F5ボタンの表示更新関数
   function updateF5Panel() {
     if (!autoF5) {
       f5Panel.style.background = '#333';
@@ -161,7 +165,7 @@
     const secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
     
     if (searchStatus !== 'OFF' && isSearchPending && (now - lastSearchStartTime > 120000)) {
-      sendDiscord("フリーズ", "停止。");
+      sendDiscord("🌀フリーズ：応答がありません。停止しました。");
       searchStatus = 'OFF';
       updateMainPanel();
       return;
@@ -171,7 +175,7 @@
 
     if (autoF5) {
       f5WaitSec--;
-      updateF5Panel(); // 毎秒更新
+      updateF5Panel();
       if (f5WaitSec <= 0 || (d.getHours() === 5 && d.getMinutes() === 0 && d.getSeconds() === 5)) location.reload();
     }
 
