@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.33
+// @version      3.34
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @grant        none
 // @run-at       document-end
@@ -19,10 +19,9 @@
   let isSearchPending = false;
   let lastNotificationTime = 0; 
 
-  // --- パネル用ステータス ---
   let autoOpen = localStorage.getItem('autoOpenTimeTabs') !== '0';
   let autoF5 = localStorage.getItem('autoF520min') !== '0';
-  let notifyEnabled = localStorage.getItem('notifyEnabled') !== '0'; // デフォルトON
+  let notifyEnabled = localStorage.getItem('notifyEnabled') !== '0';
   let searchStatus = localStorage.getItem('searchStatus') || 'L'; 
 
   function getRestaurantName() {
@@ -35,11 +34,16 @@
     return dateHid ? ` [${dateHid.textContent.trim()}]` : '';
   }
 
-  function sendDiscord(reasonText, colorCode = 16776960) {
-    if (!notifyEnabled) return; // 通知オフなら即終了
+  // 通知実行
+  function sendDiscord(reasonText, isError = true) {
+    if (!notifyEnabled) return;
     const now = Date.now();
-    // 16776960(黄色)はエラー/発見に関わらず1分クールタイムを入れる
-    if (now - lastNotificationTime < 60000 || !DISCORD_WEBHOOK_URL) return;
+    
+    // エラー（赤）の場合は1分間のクールタイムを適用
+    if (isError && now - lastNotificationTime < 60000) return;
+
+    const colorCode = isError ? 16711680 : 16776960; // 赤 or 黄
+    const emoji = isError ? "🚫" : "🔔";
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -47,13 +51,15 @@
       body: JSON.stringify({
         username: "レストラン一般再検索",
         embeds: [{
-          title: getRestaurantName() + getTargetDate(),
+          title: `${emoji}${getRestaurantName()}${getTargetDate()}`,
           description: reasonText,
           color: colorCode,
           timestamp: new Date().toISOString()
         }]
       })
-    }).then(() => { lastNotificationTime = Date.now(); }).catch(e => console.error(e));
+    }).then(() => { 
+      if (isError) lastNotificationTime = Date.now(); 
+    }).catch(e => console.error(e));
   }
 
   if (typeof $ !== "undefined") {
@@ -68,7 +74,7 @@
       if (settings.url.includes("ajaxReservationOfDate")) {
         isSearchPending = false;
         if (xhr.status === 403) {
-          sendDiscord("🚫403エラー：制限中。");
+          sendDiscord("制限中。継続します。", true);
           return;
         }
         const responseHtml = xhr.responseText;
@@ -83,7 +89,7 @@
           }
         });
         if (availableSlots.length > 0) {
-          sendDiscord(`✅空席発見：${availableSlots.join(', ')}`);
+          sendDiscord(`空席発見：${availableSlots.join(', ')}`, false);
         }
       }
     });
@@ -98,7 +104,6 @@
     return p;
   };
 
-  // 1段目: メインステータス
   const mainPanel = createPanel(10, searchStatus, '#333', () => {
     if (searchStatus === 'OFF') searchStatus = 'L';
     else if (searchStatus === 'L') searchStatus = 'M';
@@ -114,21 +119,19 @@
     mainPanel.style.background = colors[searchStatus];
   }
 
-  // 2段目: TABトグル & 通知トグル（横並びにするため少し工夫）
   const openPanel = createPanel(60, autoOpen ? 'TAB ON' : 'TAB OFF', autoOpen ? '#28a745' : '#333', () => {
     autoOpen = !autoOpen; localStorage.setItem('autoOpenTimeTabs', autoOpen ? '1' : '0');
     openPanel.style.background = autoOpen ? '#28a745' : '#333'; openPanel.textContent = autoOpen ? 'TAB ON' : 'TAB OFF';
   });
-  // 通知トグル (TABの左横に配置)
+
   const notifyPanel = createPanel(60, notifyEnabled ? '🔔 ON' : '🔕 OFF', notifyEnabled ? '#ffc107' : '#333', () => {
     notifyEnabled = !notifyEnabled; localStorage.setItem('notifyEnabled', notifyEnabled ? '1' : '0');
     notifyPanel.style.background = notifyEnabled ? '#ffc107' : '#333'; 
     notifyPanel.style.color = notifyEnabled ? '#000' : '#fff';
     notifyPanel.textContent = notifyEnabled ? '🔔 ON' : '🔕 OFF';
   });
-  notifyPanel.style.right = '90px'; // 横に並べる
+  notifyPanel.style.right = '90px';
 
-  // 3段目: F5
   const f5Panel = createPanel(110, 'F5 OFF', '#333', () => {
     autoF5 = !autoF5; localStorage.setItem('autoF520min', autoF5 ? '1' : '0'); updateF5Panel();
   });
@@ -140,7 +143,6 @@
     }
   }
 
-  // 既存の補助機能
   function openAllTimeSlots() {
     const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
     targets.forEach((t, i) => setTimeout(() => t.click(), i * 250));
@@ -164,7 +166,6 @@
   reloadSP($('#reservationOfDateDisp1'));
   document.querySelectorAll('section > div > h1:nth-child(1)').forEach(h => reloadSP(h));
 
-  // メインループ
   let waitSec = 15;
   let f5WaitSec = Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080;
   updateMainPanel(); updateF5Panel();
@@ -172,7 +173,7 @@
   setInterval(() => {
     const now = Date.now(), d = new Date(), secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
     if (searchStatus !== 'OFF' && isSearchPending && (now - lastSearchStartTime > 120000)) {
-      sendDiscord("🌀フリーズ：停止。"); searchStatus = 'OFF'; updateMainPanel(); return;
+      sendDiscord("フリーズ：停止。", true); searchStatus = 'OFF'; updateMainPanel(); return;
     }
     if (secTotal >= 10795 && secTotal <= 18305) return;
     if (autoF5) { f5WaitSec--; updateF5Panel(); if (f5WaitSec <= 0) location.reload(); }
