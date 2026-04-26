@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004 20260826
-// @version      26.08.26.1
+// @name         🏨 DHMTGD0004 20260827
+// @version      26.08.27.1
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -14,22 +14,31 @@
   if (window.__tdr_combined_installed) return;
   window.__tdr_combined_installed = true;
 
-  // --- ストレージキー ---
   const STORAGE_FIXED_KEY = 'tdr_fixed_enabled_state';
   const STORAGE_CLICK_KEY = 'auto_click_mode';
-  const STORAGE_TIMER_KEY = 'tdr_11am_timer_enabled';
+  const STORAGE_TIMER_MODE_KEY = 'tdr_11am_timer_mode'; // モード保存用 (0: OFF, 1: 35-45s, 2: 55-59s)
   const START_TIME_KEY = 'auto_click_start';
 
-  // --- 状態管理 ---
   let FIXED_ENABLED = localStorage.getItem(STORAGE_FIXED_KEY) === 'true';
-  let TIMER_ENABLED = localStorage.getItem(STORAGE_TIMER_KEY) === 'true';
-  let randomTriggerSec = null; 
+  let TIMER_MODE = parseInt(localStorage.getItem(STORAGE_TIMER_MODE_KEY) || '0', 10);
+
+  let randomTriggerSec = 0;
+  const generateRandomSec = (mode) => {
+    if (mode === 1) {
+      randomTriggerSec = Math.floor(Math.random() * 11) + 35; // 35-45秒
+    } else if (mode === 2) {
+      randomTriggerSec = Math.floor(Math.random() * 5) + 55;  // 55-59秒
+    }
+    console.log(`[Timer] モード ${mode}: 実行秒数を ${randomTriggerSec}s に設定しました`);
+  };
+
+  // 初期決定
+  if (TIMER_MODE > 0) generateRandomSec(TIMER_MODE);
 
   const TARGET       = 'HODHMTGD0004N';
-  const FIX_DATE     = '20260826'; 
+  const FIX_DATE     = '20260827';
   const FIX_PF       = 'M17';
   const SIX_HOURS    = 6 * 60 * 60 * 1000;
-  
   const ALPHA_ON  = 0.85;
   const ALPHA_OFF = 0.35;
 
@@ -45,22 +54,10 @@
     FAST: { label: '稼働', color: `rgba(220, 38, 38, ${ALPHA_ON})`, interval: 1000 }
   };
 
-  // ==========================================
-  // 1. 通信書き換えロジック
-  // ==========================================
+  // 通信書き換え（省略せず維持）
   const isReservePost = (url, m) => /\/hotel\/reserve\/?$/.test(String(url||'')) && String(m||'GET').toUpperCase() === 'POST';
-  const toSendableString = (body) => {
-    if (body == null) return '';
-    if (body instanceof URLSearchParams) return body.toString();
-    if (typeof body === 'string') return body;
-    try { return String(body); } catch { return body; }
-  };
   const rewriteBody = (orig) => {
-    const sendable = toSendableString(orig);
-    if (sendable !== orig && typeof sendable !== 'string') return orig;
-    const txt = (typeof sendable === 'string') ? sendable : '';
-    if (!txt) return orig;
-    const p = new URLSearchParams(txt);
+    const p = new URLSearchParams(typeof orig === 'string' ? orig : '');
     p.set('commodityCD', PARTS.commodityCD);
     p.set('searchHotelCD', PARTS.searchHotelCD);
     p.set('roomLetterCD', PARTS.roomLetterCD);
@@ -69,70 +66,29 @@
     p.set('hotelPriceFrameID', FIX_PF);
     return p.toString();
   };
-  const HDR = 'x-queueit-ajaxpageurl';
-  const BASE = 'https://reserve.tokyodisneyresort.jp';
-  const isEncoded = (s) => /%[0-9A-F]{2}/i.test(s);
-  const rewriteQueueHeaderValue = (value) => {
-    if (!value) return value;
-    return value.split(/\s*,\s*/).map(v => {
-      let orig = v, decoded = v;
-      for (let i=0;i<2;i++){ try{ const d=decodeURIComponent(decoded); if(d===decoded)break; decoded=d; }catch{break;} }
-      const urlStr = decoded.startsWith('http') ? decoded : BASE + decoded;
-      let u; try { u = new URL(urlStr); } catch { return orig; }
+  const rewriteQueueHeaderValue = (v) => {
+    if (!v) return v;
+    const urlStr = v.includes('http') ? v : 'https://reserve.tokyodisneyresort.jp' + (v.startsWith('/') ? '' : '/') + v;
+    try {
+      const u = new URL(urlStr);
       u.searchParams.set('hotelRoomCd', PARTS.commodityCD);
-      const out = u.href.startsWith(BASE) ? u.href.slice(BASE.length) : u.href;
-      return isEncoded(orig) ? encodeURIComponent(out) : out;
-    }).join(', ');
+      return u.href.replace('https://reserve.tokyodisneyresort.jp', '');
+    } catch { return v; }
   };
 
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
   const _set  = XMLHttpRequest.prototype.setRequestHeader;
-  XMLHttpRequest.prototype.open = function(method, url){ this.__u=url; this.__m=method; this.__hdrs={}; return _open.apply(this, arguments); };
-  XMLHttpRequest.prototype.setRequestHeader = function(name, value){
-    const key = String(name||''); let val=value;
-    if (FIXED_ENABLED && key.toLowerCase()===HDR) val = rewriteQueueHeaderValue(value);
-    this.__hdrs[key.toLowerCase()] = val;
-    return _set.call(this, key, val);
+  XMLHttpRequest.prototype.open = function(m, u){ this.__u=u; this.__m=m; return _open.apply(this, arguments); };
+  XMLHttpRequest.prototype.setRequestHeader = function(n, v){
+    if (FIXED_ENABLED && n.toLowerCase()==='x-queueit-ajaxpageurl') v = rewriteQueueHeaderValue(v);
+    return _set.call(this, n, v);
   };
-  XMLHttpRequest.prototype.send = function(body){
-    try{ if (FIXED_ENABLED && isReservePost(this.__u, this.__m)){
-      body = rewriteBody(body);
-      if (!(HDR in (this.__hdrs||{}))){
-        const loc = location.pathname + location.search;
-        const v = rewriteQueueHeaderValue(isEncoded(loc) ? loc : encodeURIComponent(loc));
-        try { _set.call(this, HDR, v); } catch {}
-      }
-    }}catch{}
-    return _send.call(this, body);
+  XMLHttpRequest.prototype.send = function(b){
+    if (FIXED_ENABLED && isReservePost(this.__u, this.__m)) b = rewriteBody(b);
+    return _send.call(this, b);
   };
-  if (window.fetch){
-    const _fetch = window.fetch;
-    window.fetch = function(input, init){
-      try{
-        const url = (typeof input==='string') ? input : (input&&input.url);
-        const method = (init&&init.method) || (input&&input.method) || 'GET';
-        if (FIXED_ENABLED && isReservePost(url, method) && init){
-          if ('body' in init) init = Object.assign({}, init, { body: rewriteBody(init.body) });
-          if (init.headers){
-            const h = new Headers(init.headers);
-            if (h.has(HDR)) h.set(HDR, rewriteQueueHeaderValue(h.get(HDR)));
-            else {
-              const loc = location.pathname + location.search;
-              const v = rewriteQueueHeaderValue(isEncoded(loc) ? loc : encodeURIComponent(loc));
-              h.set(HDR, v);
-            }
-            init.headers = h;
-          }
-        }
-      }catch{}
-      return _fetch(input, init);
-    };
-  }
 
-  // ==========================================
-  // 2. UIデザイン
-  // ==========================================
   const appendUI = () => {
     const parent = document.body || document.documentElement;
     const container = document.createElement('div');
@@ -143,15 +99,15 @@
     });
 
     const code = PARTS.searchHotelCD;
-    const baseRGB = (code === 'DHM') ? [22,163,74] : (code === 'FSH') ? [236,72,153] : (code === 'TDH') ? [234,88,12] : [0,0,0];
+    const baseRGB = (code === 'DHM') ? [22,163,74] : (code === 'FSH') ? [236,72,153] : [234,88,12];
     const rgba = (a) => `rgba(${baseRGB[0]}, ${baseRGB[1]}, ${baseRGB[2]}, ${a})`;
-    
+
+    // 1段目: 固定
     const fixedEl = document.createElement('div');
     fixedEl.innerHTML = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF].join('<br>');
     Object.assign(fixedEl.style, {
       color: '#fff', fontFamily: 'sans-serif', fontWeight: '700', fontSize: '14px',
-      padding: '5px 8px', borderRadius: '4px 4px 0 0', lineHeight: '1.2', cursor: 'pointer', userSelect: 'none',
-      textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.2)'
+      padding: '5px 8px', borderRadius: '4px 4px 0 0', lineHeight: '1.2', cursor: 'pointer', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.2)'
     });
     const updateFixedVisual = () => {
       fixedEl.style.background = FIXED_ENABLED ? rgba(ALPHA_ON) : rgba(ALPHA_OFF);
@@ -160,15 +116,41 @@
     fixedEl.addEventListener('click', () => { FIXED_ENABLED = !FIXED_ENABLED; updateFixedVisual(); });
     updateFixedVisual();
 
+    // 2段目: 3段階タイマートグル
+    const timerEl = document.createElement('div');
+    Object.assign(timerEl.style, {
+      color: 'white', padding: '1px 8px', fontSize: '12px', fontWeight: 'bold',
+      fontFamily: 'sans-serif', cursor: 'pointer', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(4px)'
+    });
+    const updateTimerUI = () => {
+      if (TIMER_MODE === 0) {
+          timerEl.style.background = `rgba(0, 0, 0, ${ALPHA_OFF})`;
+          timerEl.textContent = 'OFF';
+      } else if (TIMER_MODE === 1) {
+          timerEl.style.background = `rgba(234, 88, 12, ${ALPHA_ON})`; // オレンジ
+          timerEl.textContent = `${randomTriggerSec}s`;
+      } else if (TIMER_MODE === 2) {
+          timerEl.style.background = `rgba(147, 51, 234, ${ALPHA_ON})`; // 紫
+          timerEl.textContent = `${randomTriggerSec}s`;
+      }
+      localStorage.setItem(STORAGE_TIMER_MODE_KEY, TIMER_MODE);
+    };
+    timerEl.addEventListener('click', () => {
+      TIMER_MODE = (TIMER_MODE + 1) % 3; // 0 -> 1 -> 2 -> 0
+      if (TIMER_MODE > 0) generateRandomSec(TIMER_MODE);
+      updateTimerUI();
+    });
+    updateTimerUI();
+
+    // 3段目: 連打
     let currentClickMode = localStorage.getItem(STORAGE_CLICK_KEY) || 'STOP';
-    let startTime = localStorage.getItem(START_TIME_KEY) || Date.now();
+    let startTime = parseInt(localStorage.getItem(START_TIME_KEY) || Date.now(), 10);
     localStorage.setItem(START_TIME_KEY, startTime);
 
     const clickEl = document.createElement('div');
     Object.assign(clickEl.style, {
       color: 'white', padding: '4px 8px', fontSize: '13px', fontWeight: 'bold',
-      fontFamily: 'sans-serif', cursor: 'pointer', userSelect: 'none',
-      textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(4px)'
+      fontFamily: 'sans-serif', cursor: 'pointer', borderRadius: '0 0 4px 4px', textAlign: 'center', backdropFilter: 'blur(4px)'
     });
     const updateClickUI = (isWaiting = false) => {
       if (currentClickMode === 'STOP') {
@@ -176,7 +158,7 @@
         clickEl.style.background = CLICK_MODES.STOP.color;
       } else if (isWaiting) {
         clickEl.textContent = '待機';
-        clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`; 
+        clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
       } else {
         clickEl.textContent = CLICK_MODES[currentClickMode].label;
         clickEl.style.background = CLICK_MODES[currentClickMode].color;
@@ -188,77 +170,31 @@
       updateClickUI();
     });
 
-    const timerEl = document.createElement('div');
-    timerEl.textContent = '11時';
-    Object.assign(timerEl.style, {
-      color: 'white', padding: '4px 8px', fontSize: '13px', fontWeight: 'bold',
-      fontFamily: 'sans-serif', cursor: 'pointer', userSelect: 'none',
-      borderRadius: '0 0 4px 4px', textAlign: 'center', backdropFilter: 'blur(4px)'
-    });
-    const updateTimerUI = () => {
-      // 11時タイマーをオレンジ色に変更、文字は白を維持
-      if (TIMER_ENABLED) {
-          timerEl.style.background = `rgba(234, 88, 12, ${ALPHA_ON})`; // Deep Orange
-      } else {
-          timerEl.style.background = `rgba(0, 0, 0, ${ALPHA_OFF})`;
-      }
-      localStorage.setItem(STORAGE_TIMER_KEY, TIMER_ENABLED);
-    };
-    timerEl.addEventListener('click', () => {
-      TIMER_ENABLED = !TIMER_ENABLED;
-      randomTriggerSec = null; 
-      updateTimerUI();
-    });
-    updateTimerUI();
-
     container.appendChild(fixedEl);
-    container.appendChild(clickEl);
     container.appendChild(timerEl);
+    container.appendChild(clickEl);
     parent.appendChild(container);
 
     (function loop() {
       const now = new Date();
-      
-      if (TIMER_ENABLED) {
-        const h = now.getHours();
-        const m = now.getMinutes();
-        const s = now.getSeconds();
-
-        if (h === 10 && m === 59) {
-            if (randomTriggerSec === null) {
-                randomTriggerSec = Math.floor(Math.random() * 11) + 40; 
-                console.log(`[Timer] 今日は 10:59:${randomTriggerSec} に稼働します`);
-            }
-            if (s >= randomTriggerSec && currentClickMode === 'STOP') {
-                currentClickMode = 'FAST';
-                localStorage.setItem(STORAGE_CLICK_KEY, 'FAST');
-                updateClickUI();
-            }
-        } else if (h === 11) {
-            randomTriggerSec = null; 
+      if (TIMER_MODE > 0) {
+        const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+        if (h === 10 && m === 59 && s >= randomTriggerSec && currentClickMode === 'STOP') {
+            currentClickMode = 'FAST';
+            localStorage.setItem(STORAGE_CLICK_KEY, 'FAST');
+            updateClickUI();
         }
       }
-
       if (Date.now() - startTime >= SIX_HOURS) {
-        currentClickMode = 'STOP';
-        localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
-        updateClickUI();
-        clickEl.textContent = '終了';
-        return;
+        currentClickMode = 'STOP'; updateClickUI(); clickEl.textContent = '終了'; return;
       }
-
       let isWaiting = false;
       if (currentClickMode !== 'STOP') {
         const btn = document.querySelector('.js-reserve.button.next');
-        if (btn) {
-          btn.click();
-          isWaiting = false;
-        } else {
-          isWaiting = true;
-        }
+        if (btn) { btn.click(); isWaiting = false; } else { isWaiting = true; }
       }
       updateClickUI(isWaiting);
-      setTimeout(loop, currentClickMode === 'STOP' ? 1000 : CLICK_MODES[currentClickMode].interval);
+      setTimeout(loop, currentClickMode === 'STOP' ? 1000 : 1000);
     })();
   };
 
