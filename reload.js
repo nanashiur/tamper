@@ -1,8 +1,6 @@
 // ==UserScript==
 // @name         ⏰ 40.50 (0-500 auto-info)
-// @namespace    http://tampermonkey.net/
-// @version      4.82
-// @description  Auto-calculates info panel based on start time + max delay.
+// @version      4.84
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -13,19 +11,20 @@
 (function () {
   'use strict';
 
-  // ★★ Start time & delay（ここだけ変更すればOK）
+  // ★★ Start time & delay
   const main = { h: 10, m: 59, s: 40, ms: 500, max: 500 };
   const pre  = { h: 10, m: 52, s: 0,  ms: 0,   max: 2000 };
 
   let trigMain = false, trigPre = false;
-  let reloadEnabled = true;
+
+  // localStorageから状態を復元（データがない場合は false = OFF をデフォルトに）
+  let reloadEnabled = localStorage.getItem('customReloadEnabled') === 'true';
 
   const nowStr = () => {
     const d = new Date();
     return `${d.toLocaleTimeString()}.${String(d.getMilliseconds()).padStart(3, '0')}`;
   };
 
-  // ★ 3段目：開始時刻 + max を自動計算
   const calcInfo = () => {
     const base = new Date();
     base.setHours(main.h, main.m, main.s, main.ms + main.max);
@@ -34,6 +33,9 @@
 
   const make = (id, top, bg, txt) => {
     const d = document.createElement('div');
+    // 現在の状態（デフォルトOFF）に合わせて透明度を決定
+    const initialOpacity = reloadEnabled ? '1' : '0.2';
+
     Object.assign(d.style, {
       position: 'fixed',
       right: '0px',
@@ -48,11 +50,11 @@
       borderRadius: '0px',
       whiteSpace: 'nowrap',
       zIndex: 99999,
-      cursor: 'pointer'
+      cursor: 'pointer',
+      opacity: initialOpacity
     });
     d.id = id;
     d.textContent = txt;
-    d.onclick = () => d.remove();
     document.body.appendChild(d);
     return d;
   };
@@ -63,11 +65,14 @@
 
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
+    localStorage.setItem('customReloadEnabled', reloadEnabled);
+
     const op = reloadEnabled ? '1' : '0.2';
     elClock.style.opacity = op;
     elStart.style.opacity = op;
     elInfo.style.opacity = op;
   };
+
   elClock.onclick = elStart.onclick = elInfo.onclick = toggleReload;
 
   const check = (cfg, triggered, setTrig) => {
@@ -95,7 +100,7 @@
 
   setInterval(() => {
     elClock.textContent = nowStr();
-    elInfo.textContent = calcInfo(); // 発火前は「開始＋max」
+    elInfo.textContent = calcInfo();
     check(pre,  () => trigPre,  v => trigPre  = v);
     check(main, () => trigMain, v => trigMain = v);
   }, 50);
