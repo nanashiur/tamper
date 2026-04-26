@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004
-// @version      26.08.27.1
+// @version      26.08.27.2
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,24 +16,21 @@
 
   const STORAGE_FIXED_KEY = 'tdr_fixed_enabled_state';
   const STORAGE_CLICK_KEY = 'auto_click_mode';
-  const STORAGE_TIMER_MODE_KEY = 'tdr_11am_timer_mode'; // モード保存用 (0: OFF, 1: 35-45s, 2: 55-59s)
+  const STORAGE_TIMER_ON_MODE_KEY = 'tdr_11am_timer_on_mode';
+  const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled';
   const START_TIME_KEY = 'auto_click_start';
 
   let FIXED_ENABLED = localStorage.getItem(STORAGE_FIXED_KEY) === 'true';
-  let TIMER_MODE = parseInt(localStorage.getItem(STORAGE_TIMER_MODE_KEY) || '0', 10);
+  let TIMER_ON_MODE = parseInt(localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) || '0', 10);
+  let TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
 
   let randomTriggerSec = 0;
   const generateRandomSec = (mode) => {
-    if (mode === 1) {
-      randomTriggerSec = Math.floor(Math.random() * 11) + 35; // 35-45秒
-    } else if (mode === 2) {
-      randomTriggerSec = Math.floor(Math.random() * 5) + 55;  // 55-59秒
-    }
-    console.log(`[Timer] モード ${mode}: 実行秒数を ${randomTriggerSec}s に設定しました`);
+    if (mode === 1) randomTriggerSec = Math.floor(Math.random() * 11) + 35; // 35-45s
+    else if (mode === 2) randomTriggerSec = Math.floor(Math.random() * 5) + 55;  // 55-59s
   };
 
-  // 初期決定
-  if (TIMER_MODE > 0) generateRandomSec(TIMER_MODE);
+  if (TIMER_ON_MODE > 0) generateRandomSec(TIMER_ON_MODE);
 
   const TARGET       = 'HODHMTGD0004N';
   const FIX_DATE     = '20260827';
@@ -50,11 +47,10 @@
   };
 
   const CLICK_MODES = {
-    STOP: { label: '停止', color: `rgba(0, 0, 0, ${ALPHA_OFF})`, interval: 1000 },
-    FAST: { label: '稼働', color: `rgba(220, 38, 38, ${ALPHA_ON})`, interval: 1000 }
+    STOP: { label: '停止', color: `rgba(0, 0, 0, ${ALPHA_OFF})` },
+    FAST: { label: '稼働', color: `rgba(220, 38, 38, ${ALPHA_ON})` }
   };
 
-  // 通信書き換え（省略せず維持）
   const isReservePost = (url, m) => /\/hotel\/reserve\/?$/.test(String(url||'')) && String(m||'GET').toUpperCase() === 'POST';
   const rewriteBody = (orig) => {
     const p = new URLSearchParams(typeof orig === 'string' ? orig : '');
@@ -68,14 +64,12 @@
   };
   const rewriteQueueHeaderValue = (v) => {
     if (!v) return v;
-    const urlStr = v.includes('http') ? v : 'https://reserve.tokyodisneyresort.jp' + (v.startsWith('/') ? '' : '/') + v;
     try {
-      const u = new URL(urlStr);
+      const u = new URL(v.includes('http') ? v : 'https://reserve.tokyodisneyresort.jp' + (v.startsWith('/') ? '' : '/') + v);
       u.searchParams.set('hotelRoomCd', PARTS.commodityCD);
       return u.href.replace('https://reserve.tokyodisneyresort.jp', '');
     } catch { return v; }
   };
-
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
   const _set  = XMLHttpRequest.prototype.setRequestHeader;
@@ -102,7 +96,7 @@
     const baseRGB = (code === 'DHM') ? [22,163,74] : (code === 'FSH') ? [236,72,153] : [234,88,12];
     const rgba = (a) => `rgba(${baseRGB[0]}, ${baseRGB[1]}, ${baseRGB[2]}, ${a})`;
 
-    // 1段目: 固定
+    // 1段目: ホテル固定
     const fixedEl = document.createElement('div');
     fixedEl.innerHTML = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF].join('<br>');
     Object.assign(fixedEl.style, {
@@ -116,33 +110,47 @@
     fixedEl.addEventListener('click', () => { FIXED_ENABLED = !FIXED_ENABLED; updateFixedVisual(); });
     updateFixedVisual();
 
-    // 2段目: 3段階タイマートグル
-    const timerEl = document.createElement('div');
-    Object.assign(timerEl.style, {
+    // 2段目: ONタイマー
+    const timerOnEl = document.createElement('div');
+    Object.assign(timerOnEl.style, {
       color: 'white', padding: '1px 8px', fontSize: '12px', fontWeight: 'bold',
       fontFamily: 'sans-serif', cursor: 'pointer', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(4px)'
     });
-    const updateTimerUI = () => {
-      if (TIMER_MODE === 0) {
-          timerEl.style.background = `rgba(0, 0, 0, ${ALPHA_OFF})`;
-          timerEl.textContent = 'OFF';
-      } else if (TIMER_MODE === 1) {
-          timerEl.style.background = `rgba(234, 88, 12, ${ALPHA_ON})`; // オレンジ
-          timerEl.textContent = `${randomTriggerSec}s`;
-      } else if (TIMER_MODE === 2) {
-          timerEl.style.background = `rgba(147, 51, 234, ${ALPHA_ON})`; // 紫
-          timerEl.textContent = `${randomTriggerSec}s`;
+    const updateTimerOnUI = () => {
+      if (TIMER_ON_MODE === 0) {
+        timerOnEl.style.background = `rgba(0, 0, 0, ${ALPHA_OFF})`;
+        timerOnEl.textContent = 'OFF';
+      } else {
+        timerOnEl.style.background = TIMER_ON_MODE === 1 ? `rgba(234, 88, 12, ${ALPHA_ON})` : `rgba(147, 51, 234, ${ALPHA_ON})`;
+        timerOnEl.textContent = `${randomTriggerSec}s`;
       }
-      localStorage.setItem(STORAGE_TIMER_MODE_KEY, TIMER_MODE);
+      localStorage.setItem(STORAGE_TIMER_ON_MODE_KEY, TIMER_ON_MODE);
     };
-    timerEl.addEventListener('click', () => {
-      TIMER_MODE = (TIMER_MODE + 1) % 3; // 0 -> 1 -> 2 -> 0
-      if (TIMER_MODE > 0) generateRandomSec(TIMER_MODE);
-      updateTimerUI();
+    timerOnEl.addEventListener('click', () => {
+      TIMER_ON_MODE = (TIMER_ON_MODE + 1) % 3;
+      if (TIMER_ON_MODE > 0) generateRandomSec(TIMER_ON_MODE);
+      updateTimerOnUI();
     });
-    updateTimerUI();
+    updateTimerOnUI();
 
-    // 3段目: 連打
+    // 3段目: OFFタイマー
+    const timerOffEl = document.createElement('div');
+    Object.assign(timerOffEl.style, {
+      color: 'white', padding: '1px 8px', fontSize: '12px', fontWeight: 'bold',
+      fontFamily: 'sans-serif', cursor: 'pointer', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(4px)'
+    });
+    const updateTimerOffUI = () => {
+      timerOffEl.style.background = TIMER_OFF_ENABLED ? `rgba(59, 130, 246, ${ALPHA_ON})` : `rgba(0, 0, 0, ${ALPHA_OFF})`;
+      timerOffEl.textContent = TIMER_OFF_ENABLED ? 'STOP' : 'OFF';
+      localStorage.setItem(STORAGE_TIMER_OFF_KEY, TIMER_OFF_ENABLED);
+    };
+    timerOffEl.addEventListener('click', () => {
+      TIMER_OFF_ENABLED = !TIMER_OFF_ENABLED;
+      updateTimerOffUI();
+    });
+    updateTimerOffUI();
+
+    // 4段目: 稼働スイッチ
     let currentClickMode = localStorage.getItem(STORAGE_CLICK_KEY) || 'STOP';
     let startTime = parseInt(localStorage.getItem(START_TIME_KEY) || Date.now(), 10);
     localStorage.setItem(START_TIME_KEY, startTime);
@@ -171,30 +179,40 @@
     });
 
     container.appendChild(fixedEl);
-    container.appendChild(timerEl);
+    container.appendChild(timerOnEl);
+    container.appendChild(timerOffEl);
     container.appendChild(clickEl);
     parent.appendChild(container);
 
     (function loop() {
       const now = new Date();
-      if (TIMER_MODE > 0) {
-        const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
-        if (h === 10 && m === 59 && s >= randomTriggerSec && currentClickMode === 'STOP') {
-            currentClickMode = 'FAST';
-            localStorage.setItem(STORAGE_CLICK_KEY, 'FAST');
-            updateClickUI();
+      const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+
+      if (TIMER_OFF_ENABLED && h === 11 && m === 0 && s >= 30) {
+        if (currentClickMode === 'FAST') {
+          currentClickMode = 'STOP';
+          localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
+          updateClickUI();
         }
       }
+
+      if (TIMER_ON_MODE > 0 && h === 10 && m === 59 && s >= randomTriggerSec && currentClickMode === 'STOP') {
+        currentClickMode = 'FAST';
+        localStorage.setItem(STORAGE_CLICK_KEY, 'FAST');
+        updateClickUI();
+      }
+
       if (Date.now() - startTime >= SIX_HOURS) {
         currentClickMode = 'STOP'; updateClickUI(); clickEl.textContent = '終了'; return;
       }
+
       let isWaiting = false;
       if (currentClickMode !== 'STOP') {
         const btn = document.querySelector('.js-reserve.button.next');
         if (btn) { btn.click(); isWaiting = false; } else { isWaiting = true; }
       }
       updateClickUI(isWaiting);
-      setTimeout(loop, currentClickMode === 'STOP' ? 1000 : 1000);
+      setTimeout(loop, 1000);
     })();
   };
 
