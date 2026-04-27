@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ⏰ 40.50 (0-500 auto-info)
-// @version      4.84
+// @version      4.90
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reload.js
@@ -17,7 +17,7 @@
 
   let trigMain = false, trigPre = false;
 
-  // localStorageから状態を復元（データがない場合は false = OFF をデフォルトに）
+  // 状態の維持：localStorageから読み込み（データがなければデフォルトOFF）
   let reloadEnabled = localStorage.getItem('customReloadEnabled') === 'true';
 
   const nowStr = () => {
@@ -33,7 +33,7 @@
 
   const make = (id, top, bg, txt) => {
     const d = document.createElement('div');
-    // 現在の状態（デフォルトOFF）に合わせて透明度を決定
+    // 初期状態の透明度を設定
     const initialOpacity = reloadEnabled ? '1' : '0.2';
 
     Object.assign(d.style, {
@@ -65,6 +65,7 @@
 
   const toggleReload = () => {
     reloadEnabled = !reloadEnabled;
+    // 状態をブラウザに保存
     localStorage.setItem('customReloadEnabled', reloadEnabled);
 
     const op = reloadEnabled ? '1' : '0.2';
