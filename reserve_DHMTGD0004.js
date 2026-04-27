@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004
-// @version      26.08.27.2
+// @version      26.08.28.1
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -33,7 +33,7 @@
   if (TIMER_ON_MODE > 0) generateRandomSec(TIMER_ON_MODE);
 
   const TARGET       = 'HODHMTGD0004N';
-  const FIX_DATE     = '20260827';
+  const FIX_DATE     = '20260828';
   const FIX_PF       = 'M17';
   const SIX_HOURS    = 6 * 60 * 60 * 1000;
   const ALPHA_ON  = 0.85;
