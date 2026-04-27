@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
 // @namespace    http://tampermonkey.net/
-// @version      4.21
+// @version      4.35
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -19,14 +19,18 @@
     return v ? JSON.parse(v) : def;
   };
 
+  const FULL_LABEL = { 0: '空室', 1: '満室', 2: '吸収', 3: '未販' };
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
-  const STYLE = {
-    0: 'color:red;font-weight:bold',
-    1: 'color:inherit',
-    2: 'color:blue',
-    3: 'color:green'
-  };
+  
+  const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const BTN_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
+
+  const DISCORD_COLOR = {
+    0: 16711680, // 赤
+    1: 1,        // ほぼ黒
+    2: 255,      // 青
+    3: 32768     // 緑
+  };
 
   const pad = (x, len = 2) => String(x).padStart(len, '0');
   const tStr = () => { 
@@ -34,31 +38,37 @@
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`; 
   };
 
-  const lastStockState = new Map();
+  const lastStatusState = new Map();
   const loadedKeys = new Set();
 
   let mode = load('mode', 0);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
-  // デフォルト値をtrueに変更
   let notifyEnabled = load('notify', true);
   let longTimer = null;
 
   const makeBtn = (txt, bg) => Object.assign(document.createElement('div'), {
     textContent: txt,
-    style: `background:${bg};color:#fff;padding:4px 6px;margin-right:3px;cursor:pointer;border-radius:4px;font-size:11px;user-select:none;text-align:center;min-width:20px;`
+    style: `background:${bg};color:#fff;padding:4px 6px;margin-right:3px;cursor:pointer;border-radius:4px;font-size:12px;user-select:none;text-align:center;min-width:24px;line-height:1.2;`
   });
 
   const panel = Object.assign(document.createElement('div'), {
     style: 'position:fixed;top:4px;left:50%;transform:translateX(-50%);display:flex;z-index:99999;background:rgba(255,255,255,0.8);padding:2px;border-radius:6px;box-shadow:0 2px 5px rgba(0,0,0,0.2);'
   });
 
-  const btnMain = makeBtn('手動', '#000');
-  // 背景色を紫(purple)に変更
+  const btnMain = makeBtn('👆', '#000');
   const btnNotify = makeBtn('🔔', 'purple');
 
   const updateMain = () => {
-    const modes = { 0: { t: '手動', c: '#000' }, 1: { t: '短期', c: 'orange' }, 2: { t: '長期', c: 'purple' }, 3: { t: '空室', c: 'pink' } };
-    btnMain.textContent = modes[mode].t; btnMain.style.background = modes[mode].c; save('mode', mode);
+    // 0:手動(👆/黒), 1:短期(🐇/赤), 2:長期(🐢/青), 3:空室(👁/ピンク)
+    const modes = { 
+      0: { t: '👆', c: '#000' }, 
+      1: { t: '🐇', c: 'red' }, 
+      2: { t: '🐢', c: 'blue' }, 
+      3: { t: '👁', c: 'pink' } 
+    };
+    btnMain.textContent = modes[mode].t; 
+    btnMain.style.background = modes[mode].c; 
+    save('mode', mode);
   };
 
   const updateNotify = () => { btnNotify.style.opacity = notifyEnabled ? '1' : '0.25'; save('notify', notifyEnabled); };
@@ -90,19 +100,22 @@
     if (sel && !document.querySelector('span.calLoad')) sel.dispatchEvent(new Event('change'));
   };
 
-  const stockMark = n => {
-    const v = Number(n) || 0;
-    if (v <= 0) return '満室';
+  const sendDiscordEmbed = async (dt, roomDispName, rm, st, lastSt, price, priceRank) => {
+    const changeTxt = `${FULL_LABEL[lastSt]}→${FULL_LABEL[st]}`;
+    const priceStr = price > 0 ? `　価格：${price.toLocaleString()}円` : '';
+    const rankStr = priceRank ? `　[${priceRank}]` : '';
+    
     const marks = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
-    return marks[v] || '◯';
-  };
+    const stockVisual = marks[rm] || '◯';
 
-  const sendDiscordEmbed = async (dt, roomCd, rm) => {
+    const titleStr = `**${tStr()}**\n${dt}　${changeTxt}\n${roomDispName}`;
+
     const payload = {
       username: "ホテルカレンダー検索",
       embeds: [{
-        title: `${tStr()}\n${dt} ${roomCd} ${stockMark(rm)}`,
-        color: 16776960
+        title: titleStr,
+        color: DISCORD_COLOR[st] ?? 1,
+        description: st === 0 ? `在庫：${stockVisual}${priceStr}${rankStr}` : undefined
       }]
     };
     try {
@@ -113,7 +126,7 @@
   if (window.$?.lifeobs?.ajax) {
     const orig = $.lifeobs.ajax;
     $.lifeobs.ajax = opt => {
-      if (opt.url.indexOf('/hotel/api/queryHotelPriceStock/') !== -1) {
+      if (opt.url && opt.url.includes('/hotel/api/queryHotelPriceStock/')) {
         let params = {};
         if (typeof opt.data === 'string') {
           opt.data.split('&').forEach(pair => {
@@ -123,9 +136,7 @@
         } else {
           params = opt.data || {};
         }
-
         const contextKey = `${params.hotelId || 'default'}_${params.useYearMonth || 'now'}`;
-
         const ok = opt.success;
         opt.success = resp => {
           const anyVacancyFound = logStock(resp, contextKey);
@@ -157,40 +168,42 @@
 
     console.group(tStr());
 
-    Object.values(infos).forEach(g => Object.values(g.roomStockInfos ?? {}).forEach(r =>
+    Object.values(infos).forEach(g => Object.values(g.roomStockInfos ?? {}).forEach(r => {
+      const roomName = r.roomName || "不明な客室";
       Object.entries(r.roomBedStockRangeInfos ?? {}).forEach(([roomCd, b]) =>
         (b.roomBedStockRange ?? []).forEach(d => {
           const dt = `${d.useDate.slice(0, 4)}/${d.useDate.slice(4, 6)}/${d.useDate.slice(6)}`;
           const st = +d.saleStatus;
           const rm = d.remainStockNum ?? 0;
           const priceRank = d.priceFrameID || d.priceLevel || '--'; 
-          const commodityCd = d.commodityCd ?? roomCd ?? b.currentRoomBedStock?.commodityCd ?? '不明';
+          const totalPrice = d.roomPriceTotal || 0;
+          const commodityCd = d.commodityCd || roomCd || "不明";
           
           const stateKey = `${contextKey}__${commodityCd}__${dt}`;
-          const lastRm = lastStockState.get(stateKey);
+          const lastSt = lastStatusState.get(stateKey);
 
           if (st === 0 && rm > 0) {
             vacancyDetected = true;
           }
 
-          if (!isFirstTime && notifyEnabled && st === 0) {
-            if (lastRm !== undefined && lastRm === 0 && rm > 0) {
-              notifications.push({ dt, roomCd: commodityCd, rm });
+          if (!isFirstTime && notifyEnabled) {
+            if (lastSt !== undefined && lastSt !== st) {
+              notifications.push({ dt, roomDispName: roomName, rm, st, lastSt, price: totalPrice, priceRank });
             }
           }
 
-          lastStockState.set(stateKey, rm);
+          lastStatusState.set(stateKey, st);
 
           if (filters[st]) {
             console.log(`%c${dt}%c\t%c${LABEL[st]}　${rm}　${priceRank}`, '', '', STYLE[st]);
           }
         })
-      )
-    ));
+      );
+    }));
     console.groupEnd();
 
     if (notifications.length > 0) {
-      notifications.forEach(n => sendDiscordEmbed(n.dt, n.roomCd, n.rm));
+      notifications.forEach(n => sendDiscordEmbed(n.dt, n.roomDispName, n.rm, n.st, n.lastSt, n.price, n.priceRank));
     }
 
     loadedKeys.add(contextKey);
