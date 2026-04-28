@@ -11,11 +11,19 @@
 
 (() => {
   'use strict';
+
+  // ================================================================
+  // 【手動設定エリア】ここを書き換えてください
+  // ================================================================
+  const TARGET       = 'HODHMTGD0004N';  // ターゲットコード
+  const FIX_DATE     = '20260829';       // 日付 (YYYYMMDD)
+  const FIX_PF       = 'M19';            // ランクコード
+  const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1494882197474381835/JIR_jzaAbrFFvj7-qPP8FO8kmWVp6ufX8bmCpOpFRQ4kPZVX_lTTF6knh79I2dLvy6aD';
+  // ================================================================
+
   if (window.__tdr_combined_installed) return;
   window.__tdr_combined_installed = true;
 
-  const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1494882197474381835/JIR_jzaAbrFFvj7-qPP8FO8kmWVp6ufX8bmCpOpFRQ4kPZVX_lTTF6knh79I2dLvy6aD';
-  
   const errorHistory = []; 
   let isNotified = false;
   let IS_FORCED_STOP = false; 
@@ -30,7 +38,7 @@
         username: "超高速予約スクリプト",
         embeds: [{
           title: "403エラー",
-          color: 16762880, // オレンジ寄りの黄色 (Amber: #FFBF00)
+          color: 16762880, 
           description: `直近2分間に **${count}回** の403(Forbidden)を検知したため、動作を強制停止しました。`,
           timestamp: new Date().toISOString()
         }]
@@ -55,9 +63,6 @@
   };
   if (TIMER_ON_MODE > 0) generateRandomSec(TIMER_ON_MODE);
 
-  const TARGET       = 'HODHMTGD0004N';
-  const FIX_DATE     = '20260829'; 
-  const FIX_PF       = 'M19';
   const SIX_HOURS    = 6 * 60 * 60 * 1000;
   const ALPHA_ON  = 0.85;
   const ALPHA_OFF = 0.35;
@@ -72,7 +77,6 @@
   const CLICK_MODES = {
     STOP: { label: '停止', color: `rgba(0, 0, 0, ${ALPHA_OFF})` },
     FAST: { label: '稼働', color: `rgba(220, 38, 38, ${ALPHA_ON})` },
-    // --- 色更新: 黄色寄りのオレンジ (アンバー/山吹色) ---
     FORCED: { label: '強制', color: `rgba(255, 191, 0, 1)` } 
   };
 
