@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004 set00
-// @version      26.08.29.2
+// @version      26.08.29.3
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -28,18 +28,23 @@
   let isNotified = false;
   let IS_FORCED_STOP = false; 
 
-  const sendDiscordNotification = (count) => {
+  const sendDiscordNotification = (count, forced = true) => {
     if (isNotified) return;
     isNotified = true;
+    
+    // 続行か停止かのコメントを生成
+    const statusMsg = forced ? "動作を停止しました。" : "重要時間帯のため動作を続行します。";
+    const description = `直近2分間に **${count}回** の403(Forbidden)を検知しました。\n\n**【ステータス】: ${statusMsg}**`;
+    
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: "超高速予約スクリプト",
         embeds: [{
-          title: "403エラー",
+          title: "403エラー監視",
           color: 16762880, 
-          description: `直近2分間に **${count}回** の403(Forbidden)を検知したため、動作を強制停止しました。`,
+          description: description,
           timestamp: new Date().toISOString()
         }]
       })
@@ -98,14 +103,29 @@
     this.addEventListener('loadend', () => {
       if (this.status === 403) {
         const now = Date.now();
+        const d = new Date(now);
+        const h = d.getHours(), min = d.getMinutes();
+        
+        // 重要時間帯判定 (10:59:00 - 11:05:00)
+        const isCriticalTime = (h === 10 && min === 59) || (h === 11 && min < 5);
+
         errorHistory.push(now);
         while (errorHistory.length > 0 && errorHistory[0] < now - 120000) {
           errorHistory.shift();
         }
+
         if (errorHistory.length >= 20) {
-          IS_FORCED_STOP = true;
-          localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
-          sendDiscordNotification(errorHistory.length);
+          TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
+          
+          if (!TIMER_OFF_ENABLED && isCriticalTime) {
+            // 続行モード
+            sendDiscordNotification(errorHistory.length, false);
+          } else {
+            // 強制停止モード
+            IS_FORCED_STOP = true;
+            localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
+            sendDiscordNotification(errorHistory.length, true);
+          }
         }
       }
     });
@@ -135,7 +155,11 @@
     
     const fixedEl = document.createElement('div');
     fixedEl.innerHTML = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF].join('<br>');
-    Object.assign(fixedEl.style, { color: '#fff', padding: '5px 8px', fontSize: '14px', fontWeight: '700', fontFamily: 'sans-serif', textAlign: 'center', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.2)'});
+    Object.assign(fixedEl.style, { 
+      color: '#fff', padding: '5px 8px', fontSize: '14px', fontWeight: '700', 
+      fontFamily: 'sans-serif', textAlign: 'center', cursor: 'pointer', 
+      lineHeight: '1.2', borderBottom: '1px solid rgba(255,255,255,0.2)'
+    });
     const updateFixedVisual = () => { fixedEl.style.background = FIXED_ENABLED ? rgba(ALPHA_ON) : rgba(ALPHA_OFF); localStorage.setItem(STORAGE_FIXED_KEY, FIXED_ENABLED); };
     fixedEl.addEventListener('click', () => { FIXED_ENABLED = !FIXED_ENABLED; updateFixedVisual(); });
     updateFixedVisual();
@@ -152,8 +176,16 @@
 
     const timerOffEl = document.createElement('div');
     Object.assign(timerOffEl.style, { color: 'white', padding: '1px 8px', fontSize: '12px', fontWeight: 'bold', fontFamily: 'sans-serif', textAlign: 'center', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(4px)' });
-    const updateTimerOffUI = () => { timerOffEl.style.background = TIMER_OFF_ENABLED ? `rgba(59, 130, 246, ${ALPHA_ON})` : `rgba(0, 0, 0, ${ALPHA_OFF})`; timerOffEl.textContent = TIMER_OFF_ENABLED ? 'STOP' : 'OFF'; localStorage.setItem(STORAGE_TIMER_OFF_KEY, TIMER_OFF_ENABLED); };
-    timerOffEl.addEventListener('click', () => { TIMER_OFF_ENABLED = !TIMER_OFF_ENABLED; updateTimerOffUI(); });
+    const updateTimerOffUI = () => { 
+      TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
+      timerOffEl.style.background = TIMER_OFF_ENABLED ? `rgba(59, 130, 246, ${ALPHA_ON})` : `rgba(0, 0, 0, ${ALPHA_OFF})`; 
+      timerOffEl.textContent = TIMER_OFF_ENABLED ? 'STOP' : 'OFF'; 
+    };
+    timerOffEl.addEventListener('click', () => { 
+      TIMER_OFF_ENABLED = !TIMER_OFF_ENABLED; 
+      localStorage.setItem(STORAGE_TIMER_OFF_KEY, TIMER_OFF_ENABLED);
+      updateTimerOffUI(); 
+    });
     updateTimerOffUI();
 
     let currentClickMode = localStorage.getItem(STORAGE_CLICK_KEY) || 'STOP';
@@ -197,6 +229,8 @@
       const now = new Date();
       const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
       const isBurstTime = (h === 10 && m === 59 && s >= 50) || (h === 11 && m === 0 && s <= 20);
+
+      TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
 
       if (TIMER_OFF_ENABLED && h === 11 && m === 0 && s >= 35) {
         if (currentClickMode === 'FAST') { currentClickMode = 'STOP'; localStorage.setItem(STORAGE_CLICK_KEY, 'STOP'); updateClickUI(); }
