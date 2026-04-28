@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🏨 DHMTGD0004
-// @version      26.08.28.1
+// @name         🏨 DHMTGD0004 set00
+// @version      26.08.29.1
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,25 +16,26 @@
 
   const STORAGE_FIXED_KEY = 'tdr_fixed_enabled_state';
   const STORAGE_CLICK_KEY = 'auto_click_mode';
-  const STORAGE_TIMER_ON_MODE_KEY = 'tdr_11am_timer_on_mode';
-  const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled';
+  const STORAGE_TIMER_ON_MODE_KEY = 'tdr_11am_timer_on_mode'; 
+  const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled'; 
   const START_TIME_KEY = 'auto_click_start';
 
   let FIXED_ENABLED = localStorage.getItem(STORAGE_FIXED_KEY) === 'true';
   let TIMER_ON_MODE = parseInt(localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) || '0', 10);
   let TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
-
+  
   let randomTriggerSec = 0;
   const generateRandomSec = (mode) => {
-    if (mode === 1) randomTriggerSec = Math.floor(Math.random() * 11) + 35; // 35-45s
-    else if (mode === 2) randomTriggerSec = Math.floor(Math.random() * 5) + 55;  // 55-59s
+    // モード1: 30〜35s, モード2: 55〜58s
+    if (mode === 1) randomTriggerSec = Math.floor(Math.random() * 6) + 30;
+    else if (mode === 2) randomTriggerSec = Math.floor(Math.random() * 4) + 55;
   };
-
   if (TIMER_ON_MODE > 0) generateRandomSec(TIMER_ON_MODE);
 
+  // --- 8/29, M19 ---
   const TARGET       = 'HODHMTGD0004N';
-  const FIX_DATE     = '20260828';
-  const FIX_PF       = 'M17';
+  const FIX_DATE     = '20260829'; 
+  const FIX_PF       = 'M19';
   const SIX_HOURS    = 6 * 60 * 60 * 1000;
   const ALPHA_ON  = 0.85;
   const ALPHA_OFF = 0.35;
@@ -70,6 +71,7 @@
       return u.href.replace('https://reserve.tokyodisneyresort.jp', '');
     } catch { return v; }
   };
+
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
   const _set  = XMLHttpRequest.prototype.setRequestHeader;
@@ -95,8 +97,7 @@
     const code = PARTS.searchHotelCD;
     const baseRGB = (code === 'DHM') ? [22,163,74] : (code === 'FSH') ? [236,72,153] : [234,88,12];
     const rgba = (a) => `rgba(${baseRGB[0]}, ${baseRGB[1]}, ${baseRGB[2]}, ${a})`;
-
-    // 1段目: ホテル固定
+    
     const fixedEl = document.createElement('div');
     fixedEl.innerHTML = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF].join('<br>');
     Object.assign(fixedEl.style, {
@@ -110,7 +111,6 @@
     fixedEl.addEventListener('click', () => { FIXED_ENABLED = !FIXED_ENABLED; updateFixedVisual(); });
     updateFixedVisual();
 
-    // 2段目: ONタイマー
     const timerOnEl = document.createElement('div');
     Object.assign(timerOnEl.style, {
       color: 'white', padding: '1px 8px', fontSize: '12px', fontWeight: 'bold',
@@ -133,7 +133,6 @@
     });
     updateTimerOnUI();
 
-    // 3段目: OFFタイマー
     const timerOffEl = document.createElement('div');
     Object.assign(timerOffEl.style, {
       color: 'white', padding: '1px 8px', fontSize: '12px', fontWeight: 'bold',
@@ -150,7 +149,6 @@
     });
     updateTimerOffUI();
 
-    // 4段目: 稼働スイッチ
     let currentClickMode = localStorage.getItem(STORAGE_CLICK_KEY) || 'STOP';
     let startTime = parseInt(localStorage.getItem(START_TIME_KEY) || Date.now(), 10);
     localStorage.setItem(START_TIME_KEY, startTime);
@@ -160,16 +158,19 @@
       color: 'white', padding: '4px 8px', fontSize: '13px', fontWeight: 'bold',
       fontFamily: 'sans-serif', cursor: 'pointer', borderRadius: '0 0 4px 4px', textAlign: 'center', backdropFilter: 'blur(4px)'
     });
-    const updateClickUI = (isWaiting = false) => {
+    const updateClickUI = (isWaiting = false, isBurst = false) => {
       if (currentClickMode === 'STOP') {
-        clickEl.textContent = CLICK_MODES.STOP.label;
+        clickEl.textContent = '停止';
         clickEl.style.background = CLICK_MODES.STOP.color;
+      } else if (isBurst) {
+        clickEl.textContent = '全開';
+        clickEl.style.background = `rgba(255, 0, 0, 1)`; 
       } else if (isWaiting) {
         clickEl.textContent = '待機';
-        clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
+        clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`; 
       } else {
-        clickEl.textContent = CLICK_MODES[currentClickMode].label;
-        clickEl.style.background = CLICK_MODES[currentClickMode].color;
+        clickEl.textContent = '稼働';
+        clickEl.style.background = CLICK_MODES.FAST.color;
       }
     };
     clickEl.addEventListener('click', () => {
@@ -188,20 +189,20 @@
       const now = new Date();
       const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
 
-      if (TIMER_OFF_ENABLED && h === 11 && m === 0 && s >= 30) {
+      const isBurstTime = (h === 10 && m === 59 && s >= 50) || (h === 11 && m === 0 && s <= 20);
+
+      if (TIMER_OFF_ENABLED && h === 11 && m === 0 && s >= 35) {
         if (currentClickMode === 'FAST') {
           currentClickMode = 'STOP';
           localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
           updateClickUI();
         }
       }
-
       if (TIMER_ON_MODE > 0 && h === 10 && m === 59 && s >= randomTriggerSec && currentClickMode === 'STOP') {
         currentClickMode = 'FAST';
         localStorage.setItem(STORAGE_CLICK_KEY, 'FAST');
         updateClickUI();
       }
-
       if (Date.now() - startTime >= SIX_HOURS) {
         currentClickMode = 'STOP'; updateClickUI(); clickEl.textContent = '終了'; return;
       }
@@ -211,8 +212,17 @@
         const btn = document.querySelector('.js-reserve.button.next');
         if (btn) { btn.click(); isWaiting = false; } else { isWaiting = true; }
       }
-      updateClickUI(isWaiting);
-      setTimeout(loop, 1000);
+      updateClickUI(isWaiting, isBurstTime);
+
+      let nextInterval;
+      if (currentClickMode === 'STOP') {
+          nextInterval = 1000;
+      } else if (isBurstTime) {
+          nextInterval = 1000;
+      } else {
+          nextInterval = Math.random() * 1000 + 1500; 
+      }
+      setTimeout(loop, nextInterval);
     })();
   };
 
