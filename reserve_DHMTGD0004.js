@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004 set00
-// @version      26.08.29.3
+// @version      26.08.30.1
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,8 +16,8 @@
   // 【手動設定エリア】ここを書き換えてください
   // ================================================================
   const TARGET       = 'HODHMTGD0004N';  // ターゲットコード
-  const FIX_DATE     = '20260829';       // 日付 (YYYYMMDD)
-  const FIX_PF       = 'M19';            // ランクコード
+  const FIX_DATE     = '20260830';       // 日付 (YYYYMMDD)
+  const FIX_PF       = 'M14';            // ランクコード
   const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1494882197474381835/JIR_jzaAbrFFvj7-qPP8FO8kmWVp6ufX8bmCpOpFRQ4kPZVX_lTTF6knh79I2dLvy6aD';
   // ================================================================
 
@@ -32,7 +32,6 @@
     if (isNotified) return;
     isNotified = true;
     
-    // 続行か停止かのコメントを生成
     const statusMsg = forced ? "動作を停止しました。" : "重要時間帯のため動作を続行します。";
     const description = `直近2分間に **${count}回** の403(Forbidden)を検知しました。\n\n**【ステータス】: ${statusMsg}**`;
     
@@ -106,7 +105,6 @@
         const d = new Date(now);
         const h = d.getHours(), min = d.getMinutes();
         
-        // 重要時間帯判定 (10:59:00 - 11:05:00)
         const isCriticalTime = (h === 10 && min === 59) || (h === 11 && min < 5);
 
         errorHistory.push(now);
@@ -118,10 +116,8 @@
           TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
           
           if (!TIMER_OFF_ENABLED && isCriticalTime) {
-            // 続行モード
             sendDiscordNotification(errorHistory.length, false);
           } else {
-            // 強制停止モード
             IS_FORCED_STOP = true;
             localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
             sendDiscordNotification(errorHistory.length, true);
