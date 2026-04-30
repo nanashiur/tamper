@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      4.41
-// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
+// @version      4.62
+// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @grant        none
@@ -25,12 +25,12 @@
   const BTN_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
   const MODE_STYLE = {
     0: { t: '👆', c: '#000', f: '#fff' },
-    1: { t: '🐇', c: 'yellow', f: '#000' }, 
+    1: { t: '🐇', c: 'orange', f: '#fff' }, 
     2: { t: '🐢', c: 'purple', f: '#fff' }, 
     3: { t: '👁', c: 'pink', f: '#000' }
   };
 
-  const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768 };
+  const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0x000000 };
 
   const pad = (x, len = 2) => String(x).padStart(len, '0');
   const tStr = () => { 
@@ -40,11 +40,30 @@
 
   const lastStatusState = new Map();
   const loadedKeys = new Set();
+  let errorTimestamps = [];
 
   let mode = load('mode', 0);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
   let notifyEnabled = load('notify', false); 
   let longTimer = null;
+
+  const initMonthClick = () => {
+    const isSP = !!document.querySelector('.boxCalendar.month table');
+    const monthElem = isSP 
+      ? document.querySelector('.boxCalendar.month .selectMonth li p.currentMonth')
+      : document.querySelector('.boxInputSelect .cal table.vacancyCalTable tbody tr th.heading');
+
+    if (monthElem && !monthElem.dataset.hasListener) {
+      monthElem.style.cursor = 'pointer';
+      monthElem.addEventListener('click', () => {
+        const loading = isSP 
+          ? document.querySelectorAll('.boxCalendar.month table tbody tr td dl dd span.calLoad').length > 0
+          : document.querySelectorAll('.boxInputSelect .cal table.vacancyCalTable tbody tr td dl dd span img.spinner').length > 0;
+        if (!loading) document.getElementById('boxCalendarSelect')?.dispatchEvent(new Event('change'));
+      });
+      monthElem.dataset.hasListener = "true";
+    }
+  };
 
   const makeBtn = (txt, bg, fg = '#fff') => Object.assign(document.createElement('div'), {
     textContent: txt,
@@ -60,9 +79,7 @@
 
   const updateMain = () => {
     const s = MODE_STYLE[mode];
-    btnMain.textContent = s.t;
-    btnMain.style.background = s.c;
-    btnMain.style.color = s.f;
+    btnMain.textContent = s.t; btnMain.style.background = s.c; btnMain.style.color = s.f;
     save('mode', mode);
   };
   const updateNotify = () => { btnNotify.style.opacity = notifyEnabled ? '1' : '0.25'; save('notify', notifyEnabled); };
@@ -83,10 +100,10 @@
   panel.append(btnMain, makeFilter(0), makeFilter(1), makeFilter(2), makeFilter(3), btnNotify);
   document.body.appendChild(panel);
   updateMain(); updateNotify();
+  initMonthClick();
 
   const triggerSearch = () => {
     hideVacancyPanel(); clearTimeout(longTimer); longTimer = null;
-    
     const now = new Date();
     const h = now.getHours();
     const m = now.getMinutes();
@@ -95,34 +112,51 @@
       let interval = 600000; 
       if (h === 4 && m === 59) interval = 1000; 
       else if (h === 4 && m >= 55) interval = 10000; 
-
-      console.log(`[${tStr()}] メンテ待機中... 次回チェック: ${interval/1000}秒後`);
       longTimer = setTimeout(triggerSearch, interval);
       return;
     }
-
     const sel = document.getElementById('boxCalendarSelect');
     if (sel && !document.querySelector('span.calLoad')) sel.dispatchEvent(new Event('change'));
   };
 
-  const sendDiscordEmbed = async (dt, roomDispName, rm, st, lastSt, price, priceRank) => {
-    const changeTxt = `${FULL_LABEL[lastSt]}→${FULL_LABEL[st]}`;
-    const priceStr = price > 0 ? `　価格：${price.toLocaleString()}円` : '';
-    const rankStr = priceRank ? `　[${priceRank}]` : '';
-    const marks = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
-    const stockVisual = marks[rm] || '◯';
-
-    const payload = {
-      username: "ホテルカレンダー検索",
-      embeds: [{
-        title: `**${tStr()}**\n${dt}　${changeTxt}\n${roomDispName}`,
-        color: DISCORD_COLOR[st] ?? 1,
-        description: st === 0 ? `在庫：${stockVisual}${priceStr}${rankStr}` : undefined
-      }]
-    };
+  const sendDiscord = async (payload) => {
     try {
       await fetch(WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     } catch (e) { console.error('Discord通知失敗', e); }
+  };
+
+  const handleErrorCount = () => {
+    const now = Date.now();
+    errorTimestamps.push(now);
+    errorTimestamps = errorTimestamps.filter(t => now - t < 60000);
+
+    const d = new Date();
+    const h = d.getHours();
+    const m = d.getMinutes();
+
+    // バーストタイム判定 (10:59:00 ~ 11:04:59)
+    const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
+
+    if (errorTimestamps.length >= 15) {
+      const msg = `⚠️ 通信エラー多発 (1分間に${errorTimestamps.length}回)`;
+      const payload = {
+        username: "📅 空室在庫ログ",
+        embeds: [{ 
+            title: msg, 
+            color: DISCORD_COLOR.error, 
+            description: `時刻: ${tStr()}\n状況: ${isBurstTime ? "不必要タイム(10:59-11:04)内のため監視を続行します" : "安全のため自動巡回を停止しました"}` 
+        }]
+      };
+      sendDiscord(payload);
+
+      if (!isBurstTime) {
+        mode = 0;
+        updateMain();
+        errorTimestamps = [];
+        return true; 
+      }
+    }
+    return false; 
   };
 
   if (window.$?.lifeobs?.ajax) {
@@ -134,16 +168,31 @@
           opt.data.split('&').forEach(pair => { const [k, v] = pair.split('='); params[k] = v; });
         } else { params = opt.data || {}; }
         const contextKey = `${params.hotelId || 'default'}_${params.useYearMonth || 'now'}`;
+        
         const ok = opt.success;
         opt.success = resp => {
           const anyFound = logStock(resp, contextKey);
           ok?.(resp);
+          initMonthClick();
           if (mode === 1) triggerSearch();
           else if (mode === 2) {
             longTimer = setTimeout(triggerSearch, 600000 + (Math.floor(Math.random() * 20001) - 10000));
           } else if (mode === 3) {
             if (anyFound) { mode = 0; updateMain(); showVacancyPanel(); } else { triggerSearch(); }
           }
+        };
+
+        const err = opt.error;
+        opt.error = k => {
+          const stopped = handleErrorCount();
+          if (window.RecentDaysPriceStockQuery?.prototype?.afterSystemErrorOccurred) {
+             window.RecentDaysPriceStockQuery.prototype.afterSystemErrorOccurred(k);
+          }
+          
+          if (!stopped && mode !== 0) {
+            setTimeout(triggerSearch, 1500); // 待機時間を1.5秒に変更
+          }
+          err?.(k);
         };
       }
       return orig(opt);
@@ -154,7 +203,6 @@
     const infos = resp.ecRoomStockInfos ?? {};
     const isFirstTime = !loadedKeys.has(contextKey);
     let vacancyDetected = false;
-
     console.group(tStr());
     Object.values(infos).forEach(g => Object.values(g.roomStockInfos ?? {}).forEach(r => {
       const roomName = r.roomName || "不明な客室";
@@ -171,7 +219,17 @@
 
           if (st === 0 && rm > 0) vacancyDetected = true;
           if (!isFirstTime && notifyEnabled && lastSt !== undefined && lastSt !== st) {
-            sendDiscordEmbed(dt, roomName, rm, st, lastSt, totalPrice, priceRank);
+            const changeTxt = `${FULL_LABEL[lastSt]}→${FULL_LABEL[st]}`;
+            const marks = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
+            const payload = {
+              username: "📅 空室在庫ログ",
+              embeds: [{
+                title: `**${tStr()}**\n${dt}　${changeTxt}\n${roomName}`,
+                color: DISCORD_COLOR[st] ?? 1,
+                description: st === 0 ? `在庫：${marks[rm] || '◯'}　価格：${totalPrice.toLocaleString()}円　[${priceRank}]` : undefined
+              }]
+            };
+            sendDiscord(payload);
           }
           lastStatusState.set(stateKey, st);
           if (filters[st]) console.log(`%c${dt}%c\t%c${LABEL[st]}　${rm}　${priceRank}`, '', '', STYLE[st]);
