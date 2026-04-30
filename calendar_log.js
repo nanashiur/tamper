@@ -1,7 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @namespace    http://tampermonkey.net/
-// @version      4.35
+// @version      4.41
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -21,16 +20,17 @@
 
   const FULL_LABEL = { 0: '空室', 1: '満室', 2: '吸収', 3: '未販' };
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
-  
   const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
+  
   const BTN_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
-
-  const DISCORD_COLOR = {
-    0: 16711680, // 赤
-    1: 1,        // ほぼ黒
-    2: 255,      // 青
-    3: 32768     // 緑
+  const MODE_STYLE = {
+    0: { t: '👆', c: '#000', f: '#fff' },
+    1: { t: '🐇', c: 'yellow', f: '#000' }, 
+    2: { t: '🐢', c: 'purple', f: '#fff' }, 
+    3: { t: '👁', c: 'pink', f: '#000' }
   };
+
+  const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768 };
 
   const pad = (x, len = 2) => String(x).padStart(len, '0');
   const tStr = () => { 
@@ -43,12 +43,12 @@
 
   let mode = load('mode', 0);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
-  let notifyEnabled = load('notify', true);
+  let notifyEnabled = load('notify', false); 
   let longTimer = null;
 
-  const makeBtn = (txt, bg) => Object.assign(document.createElement('div'), {
+  const makeBtn = (txt, bg, fg = '#fff') => Object.assign(document.createElement('div'), {
     textContent: txt,
-    style: `background:${bg};color:#fff;padding:4px 6px;margin-right:3px;cursor:pointer;border-radius:4px;font-size:12px;user-select:none;text-align:center;min-width:24px;line-height:1.2;`
+    style: `background:${bg};color:${fg};padding:4px 6px;margin-right:3px;cursor:pointer;border-radius:4px;font-size:12px;user-select:none;text-align:center;min-width:24px;line-height:1.2;`
   });
 
   const panel = Object.assign(document.createElement('div'), {
@@ -59,27 +59,17 @@
   const btnNotify = makeBtn('🔔', 'purple');
 
   const updateMain = () => {
-    // 0:手動(👆/黒), 1:短期(🐇/赤), 2:長期(🐢/青), 3:空室(👁/ピンク)
-    const modes = { 
-      0: { t: '👆', c: '#000' }, 
-      1: { t: '🐇', c: 'red' }, 
-      2: { t: '🐢', c: 'blue' }, 
-      3: { t: '👁', c: 'pink' } 
-    };
-    btnMain.textContent = modes[mode].t; 
-    btnMain.style.background = modes[mode].c; 
+    const s = MODE_STYLE[mode];
+    btnMain.textContent = s.t;
+    btnMain.style.background = s.c;
+    btnMain.style.color = s.f;
     save('mode', mode);
   };
-
   const updateNotify = () => { btnNotify.style.opacity = notifyEnabled ? '1' : '0.25'; save('notify', notifyEnabled); };
 
   btnMain.onclick = () => { 
-    hideVacancyPanel(); 
-    clearTimeout(longTimer); 
-    longTimer = null; 
-    mode = (mode + 1) % 4; 
-    updateMain(); 
-    if (mode !== 0) triggerSearch(); 
+    hideVacancyPanel(); clearTimeout(longTimer); longTimer = null;
+    mode = (mode + 1) % 4; updateMain(); if (mode !== 0) triggerSearch(); 
   };
   btnNotify.onclick = () => { notifyEnabled = !notifyEnabled; updateNotify(); };
 
@@ -96,6 +86,21 @@
 
   const triggerSearch = () => {
     hideVacancyPanel(); clearTimeout(longTimer); longTimer = null;
+    
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+
+    if (h >= 3 && h < 5) {
+      let interval = 600000; 
+      if (h === 4 && m === 59) interval = 1000; 
+      else if (h === 4 && m >= 55) interval = 10000; 
+
+      console.log(`[${tStr()}] メンテ待機中... 次回チェック: ${interval/1000}秒後`);
+      longTimer = setTimeout(triggerSearch, interval);
+      return;
+    }
+
     const sel = document.getElementById('boxCalendarSelect');
     if (sel && !document.querySelector('span.calLoad')) sel.dispatchEvent(new Event('change'));
   };
@@ -104,16 +109,13 @@
     const changeTxt = `${FULL_LABEL[lastSt]}→${FULL_LABEL[st]}`;
     const priceStr = price > 0 ? `　価格：${price.toLocaleString()}円` : '';
     const rankStr = priceRank ? `　[${priceRank}]` : '';
-    
     const marks = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
     const stockVisual = marks[rm] || '◯';
-
-    const titleStr = `**${tStr()}**\n${dt}　${changeTxt}\n${roomDispName}`;
 
     const payload = {
       username: "ホテルカレンダー検索",
       embeds: [{
-        title: titleStr,
+        title: `**${tStr()}**\n${dt}　${changeTxt}\n${roomDispName}`,
         color: DISCORD_COLOR[st] ?? 1,
         description: st === 0 ? `在庫：${stockVisual}${priceStr}${rankStr}` : undefined
       }]
@@ -129,30 +131,18 @@
       if (opt.url && opt.url.includes('/hotel/api/queryHotelPriceStock/')) {
         let params = {};
         if (typeof opt.data === 'string') {
-          opt.data.split('&').forEach(pair => {
-            const [k, v] = pair.split('=');
-            params[k] = v;
-          });
-        } else {
-          params = opt.data || {};
-        }
+          opt.data.split('&').forEach(pair => { const [k, v] = pair.split('='); params[k] = v; });
+        } else { params = opt.data || {}; }
         const contextKey = `${params.hotelId || 'default'}_${params.useYearMonth || 'now'}`;
         const ok = opt.success;
         opt.success = resp => {
-          const anyVacancyFound = logStock(resp, contextKey);
+          const anyFound = logStock(resp, contextKey);
           ok?.(resp);
           if (mode === 1) triggerSearch();
           else if (mode === 2) {
-            const delay = 600000 + (Math.floor(Math.random() * 20001) - 10000);
-            longTimer = setTimeout(() => { triggerSearch(); }, delay);
+            longTimer = setTimeout(triggerSearch, 600000 + (Math.floor(Math.random() * 20001) - 10000));
           } else if (mode === 3) {
-            if (anyVacancyFound) {
-              mode = 0;
-              updateMain();
-              showVacancyPanel();
-            } else {
-              triggerSearch();
-            }
+            if (anyFound) { mode = 0; updateMain(); showVacancyPanel(); } else { triggerSearch(); }
           }
         };
       }
@@ -163,11 +153,9 @@
   function logStock(resp, contextKey) {
     const infos = resp.ecRoomStockInfos ?? {};
     const isFirstTime = !loadedKeys.has(contextKey);
-    const notifications = [];
     let vacancyDetected = false;
 
     console.group(tStr());
-
     Object.values(infos).forEach(g => Object.values(g.roomStockInfos ?? {}).forEach(r => {
       const roomName = r.roomName || "不明な客室";
       Object.entries(r.roomBedStockRangeInfos ?? {}).forEach(([roomCd, b]) =>
@@ -175,37 +163,22 @@
           const dt = `${d.useDate.slice(0, 4)}/${d.useDate.slice(4, 6)}/${d.useDate.slice(6)}`;
           const st = +d.saleStatus;
           const rm = d.remainStockNum ?? 0;
-          const priceRank = d.priceFrameID || d.priceLevel || '--'; 
+          const priceRank = d.priceFrameID || d.priceLevel || '--';
           const totalPrice = d.roomPriceTotal || 0;
           const commodityCd = d.commodityCd || roomCd || "不明";
-          
           const stateKey = `${contextKey}__${commodityCd}__${dt}`;
           const lastSt = lastStatusState.get(stateKey);
 
-          if (st === 0 && rm > 0) {
-            vacancyDetected = true;
+          if (st === 0 && rm > 0) vacancyDetected = true;
+          if (!isFirstTime && notifyEnabled && lastSt !== undefined && lastSt !== st) {
+            sendDiscordEmbed(dt, roomName, rm, st, lastSt, totalPrice, priceRank);
           }
-
-          if (!isFirstTime && notifyEnabled) {
-            if (lastSt !== undefined && lastSt !== st) {
-              notifications.push({ dt, roomDispName: roomName, rm, st, lastSt, price: totalPrice, priceRank });
-            }
-          }
-
           lastStatusState.set(stateKey, st);
-
-          if (filters[st]) {
-            console.log(`%c${dt}%c\t%c${LABEL[st]}　${rm}　${priceRank}`, '', '', STYLE[st]);
-          }
+          if (filters[st]) console.log(`%c${dt}%c\t%c${LABEL[st]}　${rm}　${priceRank}`, '', '', STYLE[st]);
         })
       );
     }));
     console.groupEnd();
-
-    if (notifications.length > 0) {
-      notifications.forEach(n => sendDiscordEmbed(n.dt, n.roomDispName, n.rm, n.st, n.lastSt, n.price, n.priceRank));
-    }
-
     loadedKeys.add(contextKey);
     return vacancyDetected;
   }
