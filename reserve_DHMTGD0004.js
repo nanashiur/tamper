@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004 set00
-// @version      26.08.30.1
+// @version      26.08.31.1
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,7 +16,7 @@
   // 【手動設定エリア】ここを書き換えてください
   // ================================================================
   const TARGET       = 'HODHMTGD0004N';  // ターゲットコード
-  const FIX_DATE     = '20260830';       // 日付 (YYYYMMDD)
+  const FIX_DATE     = '20260831';       // 日付 (YYYYMMDD)
   const FIX_PF       = 'M14';            // ランクコード
   const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1494882197474381835/JIR_jzaAbrFFvj7-qPP8FO8kmWVp6ufX8bmCpOpFRQ4kPZVX_lTTF6knh79I2dLvy6aD';
   // ================================================================
@@ -33,13 +33,13 @@
     isNotified = true;
     
     const statusMsg = forced ? "動作を停止しました。" : "重要時間帯のため動作を続行します。";
-    const description = `直近2分間に **${count}回** の403(Forbidden)を検知しました。\n\n**【ステータス】: ${statusMsg}**`;
+    const description = `直近2分間に **${count}回** の403を検知しました。\n\n**【ステータス】: ${statusMsg}**`;
     
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: "超高速予約スクリプト",
+        username: "🏨 DHMTGD0004 set00",
         embeds: [{
           title: "403エラー監視",
           color: 16762880, 
