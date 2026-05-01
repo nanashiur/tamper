@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004 set00
-// @version      26.08.31.1
-// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
+// @version      26.09.01.1
+// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @run-at       document-start
@@ -13,11 +13,11 @@
   'use strict';
 
   // ================================================================
-  // 【手動設定エリア】ここを書き換えてください
+  // 【手動設定エリア】
   // ================================================================
-  const TARGET       = 'HODHMTGD0004N';  // ターゲットコード
-  const FIX_DATE     = '20260831';       // 日付 (YYYYMMDD)
-  const FIX_PF       = 'M14';            // ランクコード
+  const TARGET       = 'HODHMTGD0004N';  
+  const FIX_DATE     = '20260901';       // 9/1に更新
+  const FIX_PF       = 'M15';            // M15に更新
   const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1494882197474381835/JIR_jzaAbrFFvj7-qPP8FO8kmWVp6ufX8bmCpOpFRQ4kPZVX_lTTF6knh79I2dLvy6aD';
   // ================================================================
 
@@ -31,7 +31,6 @@
   const sendDiscordNotification = (count, forced = true) => {
     if (isNotified) return;
     isNotified = true;
-    
     const statusMsg = forced ? "動作を停止しました。" : "重要時間帯のため動作を続行します。";
     const description = `直近2分間に **${count}回** の403を検知しました。\n\n**【ステータス】: ${statusMsg}**`;
     
@@ -56,14 +55,18 @@
   const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled'; 
   const START_TIME_KEY = 'auto_click_start';
 
+  // デフォルト値を設定 (初回実行時のみ)
+  if (localStorage.getItem(STORAGE_FIXED_KEY) === null) localStorage.setItem(STORAGE_FIXED_KEY, 'true');
+  if (localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) === null) localStorage.setItem(STORAGE_TIMER_ON_MODE_KEY, '1');
+
   let FIXED_ENABLED = localStorage.getItem(STORAGE_FIXED_KEY) === 'true';
   let TIMER_ON_MODE = parseInt(localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) || '0', 10);
   let TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
   
   let randomTriggerSec = 0;
   const generateRandomSec = (mode) => {
-    if (mode === 1) randomTriggerSec = Math.floor(Math.random() * 6) + 30;
-    else if (mode === 2) randomTriggerSec = Math.floor(Math.random() * 4) + 55;
+    if (mode === 1) randomTriggerSec = Math.floor(Math.random() * 6) + 30; 
+    else if (mode === 2) randomTriggerSec = Math.floor(Math.random() * 4) + 55; 
   };
   if (TIMER_ON_MODE > 0) generateRandomSec(TIMER_ON_MODE);
 
@@ -104,24 +107,13 @@
         const now = Date.now();
         const d = new Date(now);
         const h = d.getHours(), min = d.getMinutes();
-        
         const isCriticalTime = (h === 10 && min === 59) || (h === 11 && min < 5);
-
         errorHistory.push(now);
-        while (errorHistory.length > 0 && errorHistory[0] < now - 120000) {
-          errorHistory.shift();
-        }
-
+        while (errorHistory.length > 0 && errorHistory[0] < now - 120000) { errorHistory.shift(); }
         if (errorHistory.length >= 20) {
           TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
-          
-          if (!TIMER_OFF_ENABLED && isCriticalTime) {
-            sendDiscordNotification(errorHistory.length, false);
-          } else {
-            IS_FORCED_STOP = true;
-            localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
-            sendDiscordNotification(errorHistory.length, true);
-          }
+          if (!TIMER_OFF_ENABLED && isCriticalTime) { sendDiscordNotification(errorHistory.length, false); }
+          else { IS_FORCED_STOP = true; localStorage.setItem(STORAGE_CLICK_KEY, 'STOP'); sendDiscordNotification(errorHistory.length, true); }
         }
       }
     });
@@ -140,10 +132,7 @@
     const parent = document.body || document.documentElement;
     const container = document.createElement('div');
     container.id = 'tdr-integrated-panel';
-    Object.assign(container.style, {
-      position: 'fixed', top: '0', left: '0', zIndex: '2147483647',
-      display: 'flex', flexDirection: 'column', width: 'fit-content'
-    });
+    Object.assign(container.style, { position: 'fixed', top: '0', left: '0', zIndex: '2147483647', display: 'flex', flexDirection: 'column', width: 'fit-content' });
 
     const code = PARTS.searchHotelCD;
     const baseRGB = (code === 'DHM') ? [22,163,74] : (code === 'FSH') ? [236,72,153] : [234,88,12];
@@ -151,11 +140,7 @@
     
     const fixedEl = document.createElement('div');
     fixedEl.innerHTML = [PARTS.roomLetterCD, FIX_DATE.slice(4), FIX_PF].join('<br>');
-    Object.assign(fixedEl.style, { 
-      color: '#fff', padding: '5px 8px', fontSize: '14px', fontWeight: '700', 
-      fontFamily: 'sans-serif', textAlign: 'center', cursor: 'pointer', 
-      lineHeight: '1.2', borderBottom: '1px solid rgba(255,255,255,0.2)'
-    });
+    Object.assign(fixedEl.style, { color: '#fff', padding: '5px 8px', fontSize: '14px', fontWeight: '700', fontFamily: 'sans-serif', textAlign: 'center', cursor: 'pointer', lineHeight: '1.2', borderBottom: '1px solid rgba(255,255,255,0.2)' });
     const updateFixedVisual = () => { fixedEl.style.background = FIXED_ENABLED ? rgba(ALPHA_ON) : rgba(ALPHA_OFF); localStorage.setItem(STORAGE_FIXED_KEY, FIXED_ENABLED); };
     fixedEl.addEventListener('click', () => { FIXED_ENABLED = !FIXED_ENABLED; updateFixedVisual(); });
     updateFixedVisual();
@@ -177,11 +162,7 @@
       timerOffEl.style.background = TIMER_OFF_ENABLED ? `rgba(59, 130, 246, ${ALPHA_ON})` : `rgba(0, 0, 0, ${ALPHA_OFF})`; 
       timerOffEl.textContent = TIMER_OFF_ENABLED ? 'STOP' : 'OFF'; 
     };
-    timerOffEl.addEventListener('click', () => { 
-      TIMER_OFF_ENABLED = !TIMER_OFF_ENABLED; 
-      localStorage.setItem(STORAGE_TIMER_OFF_KEY, TIMER_OFF_ENABLED);
-      updateTimerOffUI(); 
-    });
+    timerOffEl.addEventListener('click', () => { TIMER_OFF_ENABLED = !TIMER_OFF_ENABLED; localStorage.setItem(STORAGE_TIMER_OFF_KEY, TIMER_OFF_ENABLED); updateTimerOffUI(); });
     updateTimerOffUI();
 
     let currentClickMode = localStorage.getItem(STORAGE_CLICK_KEY) || 'STOP';
@@ -191,22 +172,11 @@
     const clickEl = document.createElement('div');
     Object.assign(clickEl.style, { color: 'white', padding: '4px 8px', fontSize: '13px', fontWeight: 'bold', fontFamily: 'sans-serif', cursor: 'pointer', borderRadius: '0 0 4px 4px', textAlign: 'center', backdropFilter: 'blur(4px)' });
     const updateClickUI = (isWaiting = false, isBurst = false) => {
-      if (IS_FORCED_STOP) {
-        clickEl.textContent = CLICK_MODES.FORCED.label;
-        clickEl.style.background = CLICK_MODES.FORCED.color;
-      } else if (currentClickMode === 'STOP') {
-        clickEl.textContent = '停止';
-        clickEl.style.background = CLICK_MODES.STOP.color;
-      } else if (isBurst) {
-        clickEl.textContent = '全開';
-        clickEl.style.background = `rgba(255, 0, 0, 1)`; 
-      } else if (isWaiting) {
-        clickEl.textContent = '待機';
-        clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`; 
-      } else {
-        clickEl.textContent = '稼働';
-        clickEl.style.background = CLICK_MODES.FAST.color;
-      }
+      if (IS_FORCED_STOP) { clickEl.textContent = CLICK_MODES.FORCED.label; clickEl.style.background = CLICK_MODES.FORCED.color; }
+      else if (currentClickMode === 'STOP') { clickEl.textContent = '停止'; clickEl.style.background = CLICK_MODES.STOP.color; }
+      else if (isBurst) { clickEl.textContent = '全開'; clickEl.style.background = `rgba(255, 0, 0, 1)`; }
+      else if (isWaiting) { clickEl.textContent = '待機'; clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`; }
+      else { clickEl.textContent = '稼働'; clickEl.style.background = CLICK_MODES.FAST.color; }
     };
     clickEl.addEventListener('click', () => {
       if (IS_FORCED_STOP) { IS_FORCED_STOP = false; isNotified = false; errorHistory.length = 0; }
@@ -225,23 +195,12 @@
       const now = new Date();
       const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
       const isBurstTime = (h === 10 && m === 59 && s >= 50) || (h === 11 && m === 0 && s <= 20);
-
       TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
-
-      if (TIMER_OFF_ENABLED && h === 11 && m === 0 && s >= 35) {
-        if (currentClickMode === 'FAST') { currentClickMode = 'STOP'; localStorage.setItem(STORAGE_CLICK_KEY, 'STOP'); updateClickUI(); }
-      }
-      if (TIMER_ON_MODE > 0 && h === 10 && m === 59 && s >= randomTriggerSec && currentClickMode === 'STOP' && !IS_FORCED_STOP) {
-        currentClickMode = 'FAST'; localStorage.setItem(STORAGE_CLICK_KEY, 'FAST'); updateClickUI();
-      }
-
+      if (TIMER_OFF_ENABLED && h === 11 && m === 0 && s >= 35) { if (currentClickMode === 'FAST') { currentClickMode = 'STOP'; localStorage.setItem(STORAGE_CLICK_KEY, 'STOP'); updateClickUI(); } }
+      if (TIMER_ON_MODE > 0 && h === 10 && m === 59 && s >= randomTriggerSec && currentClickMode === 'STOP' && !IS_FORCED_STOP) { currentClickMode = 'FAST'; localStorage.setItem(STORAGE_CLICK_KEY, 'FAST'); updateClickUI(); }
       let isWaiting = false;
-      if (currentClickMode !== 'STOP' && !IS_FORCED_STOP) {
-        const btn = document.querySelector('.js-reserve.button.next');
-        if (btn) { btn.click(); isWaiting = false; } else { isWaiting = true; }
-      }
+      if (currentClickMode !== 'STOP' && !IS_FORCED_STOP) { const btn = document.querySelector('.js-reserve.button.next'); if (btn) { btn.click(); isWaiting = false; } else { isWaiting = true; } }
       updateClickUI(isWaiting, isBurstTime);
-
       let nextInterval = (currentClickMode === 'STOP' || IS_FORCED_STOP) ? 1000 : (isBurstTime ? 1000 : Math.random() * 1000 + 1500);
       setTimeout(loop, nextInterval);
     })();
