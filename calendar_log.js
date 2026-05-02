@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      4.62
+// @version      4.69
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -21,6 +21,7 @@
   const FULL_LABEL = { 0: '空室', 1: '満室', 2: '吸収', 3: '未販' };
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
+  const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
   
   const BTN_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
   const MODE_STYLE = {
@@ -30,15 +31,26 @@
     3: { t: '👁', c: 'pink', f: '#000' }
   };
 
-  const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0x000000 };
+  const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
 
   const pad = (x, len = 2) => String(x).padStart(len, '0');
-  const tStr = () => { 
+  
+  const tStrSec = () => { 
     const d = new Date(); 
-    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`; 
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}`; 
   };
 
-  const lastStatusState = new Map();
+  const tStrMs = () => {
+    const d = new Date();
+    return `${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
+  };
+
+  const tStrFullMs = () => {
+    const d = new Date();
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
+  };
+
+  const lastStateMap = new Map();
   const loadedKeys = new Set();
   let errorTimestamps = [];
 
@@ -85,7 +97,7 @@
   const updateNotify = () => { btnNotify.style.opacity = notifyEnabled ? '1' : '0.25'; save('notify', notifyEnabled); };
 
   btnMain.onclick = () => { 
-    hideVacancyPanel(); clearTimeout(longTimer); longTimer = null;
+    hidePopup(); clearTimeout(longTimer); longTimer = null;
     mode = (mode + 1) % 4; updateMain(); if (mode !== 0) triggerSearch(); 
   };
   btnNotify.onclick = () => { notifyEnabled = !notifyEnabled; updateNotify(); };
@@ -103,7 +115,7 @@
   initMonthClick();
 
   const triggerSearch = () => {
-    hideVacancyPanel(); clearTimeout(longTimer); longTimer = null;
+    clearTimeout(longTimer); longTimer = null;
     const now = new Date();
     const h = now.getHours();
     const m = now.getMinutes();
@@ -125,34 +137,31 @@
     } catch (e) { console.error('Discord通知失敗', e); }
   };
 
-  const handleErrorCount = () => {
+  const handleErrorCount = (errObj) => {
     const now = Date.now();
     errorTimestamps.push(now);
     errorTimestamps = errorTimestamps.filter(t => now - t < 60000);
-
     const d = new Date();
     const h = d.getHours();
     const m = d.getMinutes();
-
-    // バーストタイム判定 (10:59:00 ~ 11:04:59)
     const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
+    
+    const errStatus = errObj?.status || errObj?.statusText || "Error";
 
-    if (errorTimestamps.length >= 15) {
-      const msg = `⚠️ 通信エラー多発 (1分間に${errorTimestamps.length}回)`;
+    if (errorTimestamps.length >= 10) {
+      const isStopping = !isBurstTime;
       const payload = {
         username: "📅 空室在庫ログ",
         embeds: [{ 
-            title: msg, 
+            title: `⚠️ ${errStatus} 通信エラー多発`, 
             color: DISCORD_COLOR.error, 
-            description: `時刻: ${tStr()}\n状況: ${isBurstTime ? "不必要タイム(10:59-11:04)内のため監視を続行します" : "安全のため自動巡回を停止しました"}` 
+            description: `時刻: ${tStrFullMs()} ${isStopping ? "自動停止" : "続行"}`
         }]
       };
       sendDiscord(payload);
-
-      if (!isBurstTime) {
-        mode = 0;
-        updateMain();
-        errorTimestamps = [];
+      if (isStopping) {
+        mode = 0; updateMain(); errorTimestamps = [];
+        showPopup(`${errStatus} Error`);
         return true; 
       }
     }
@@ -176,22 +185,21 @@
           initMonthClick();
           if (mode === 1) triggerSearch();
           else if (mode === 2) {
-            longTimer = setTimeout(triggerSearch, 600000 + (Math.floor(Math.random() * 20001) - 10000));
+            // 9分(540,000ms)〜11分(660,000ms)のランダム待機に変更
+            const randomInterval = Math.floor(Math.random() * (660001 - 540000)) + 540000;
+            longTimer = setTimeout(triggerSearch, randomInterval);
           } else if (mode === 3) {
-            if (anyFound) { mode = 0; updateMain(); showVacancyPanel(); } else { triggerSearch(); }
+            if (anyFound) { mode = 0; updateMain(); showPopup("空室"); } else { triggerSearch(); }
           }
         };
 
         const err = opt.error;
         opt.error = k => {
-          const stopped = handleErrorCount();
+          const stopped = handleErrorCount(k);
           if (window.RecentDaysPriceStockQuery?.prototype?.afterSystemErrorOccurred) {
              window.RecentDaysPriceStockQuery.prototype.afterSystemErrorOccurred(k);
           }
-          
-          if (!stopped && mode !== 0) {
-            setTimeout(triggerSearch, 1500); // 待機時間を1.5秒に変更
-          }
+          if (!stopped && mode !== 0) setTimeout(triggerSearch, 1500);
           err?.(k);
         };
       }
@@ -203,7 +211,7 @@
     const infos = resp.ecRoomStockInfos ?? {};
     const isFirstTime = !loadedKeys.has(contextKey);
     let vacancyDetected = false;
-    console.group(tStr());
+    console.group(tStrMs());
     Object.values(infos).forEach(g => Object.values(g.roomStockInfos ?? {}).forEach(r => {
       const roomName = r.roomName || "不明な客室";
       Object.entries(r.roomBedStockRangeInfos ?? {}).forEach(([roomCd, b]) =>
@@ -215,23 +223,31 @@
           const totalPrice = d.roomPriceTotal || 0;
           const commodityCd = d.commodityCd || roomCd || "不明";
           const stateKey = `${contextKey}__${commodityCd}__${dt}`;
-          const lastSt = lastStatusState.get(stateKey);
+          
+          const prev = lastStateMap.get(stateKey);
 
           if (st === 0 && rm > 0) vacancyDetected = true;
-          if (!isFirstTime && notifyEnabled && lastSt !== undefined && lastSt !== st) {
-            const changeTxt = `${FULL_LABEL[lastSt]}→${FULL_LABEL[st]}`;
-            const marks = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
+
+          if (!isFirstTime && notifyEnabled && prev !== undefined && (prev.st !== st || prev.rm !== rm)) {
+            let changeTxt;
+            if (prev.st !== st) {
+              changeTxt = `${FULL_LABEL[prev.st]}→${FULL_LABEL[st]}`;
+            } else {
+              changeTxt = `${MARKS[prev.rm] || prev.rm}→${MARKS[rm] || rm}`;
+            }
+            
             const payload = {
               username: "📅 空室在庫ログ",
               embeds: [{
-                title: `**${tStr()}**\n${dt}　${changeTxt}\n${roomName}`,
+                title: `**${tStrSec()}**\n${dt}　${changeTxt}\n${roomName}`,
                 color: DISCORD_COLOR[st] ?? 1,
-                description: st === 0 ? `在庫：${marks[rm] || '◯'}　価格：${totalPrice.toLocaleString()}円　[${priceRank}]` : undefined
+                description: `時刻: ${tStrMs()}　在庫${MARKS[rm] || '◯'}　${totalPrice.toLocaleString()}円　[${priceRank}]`
               }]
             };
             sendDiscord(payload);
           }
-          lastStatusState.set(stateKey, st);
+          
+          lastStateMap.set(stateKey, { st, rm });
           if (filters[st]) console.log(`%c${dt}%c\t%c${LABEL[st]}　${rm}　${priceRank}`, '', '', STYLE[st]);
         })
       );
@@ -241,14 +257,14 @@
     return vacancyDetected;
   }
 
-  let vacancyPanel = null;
-  function showVacancyPanel() {
-    if (vacancyPanel) return;
-    vacancyPanel = document.createElement('div');
-    vacancyPanel.innerHTML = '✨ 空室を検知しました ✨<br><span style="font-size:12px;">検索を停止し手動モードに戻りました</span>';
-    vacancyPanel.style.cssText = `position:fixed;left:50%;bottom:15%;transform:translateX(-50%);padding:16px 30px;font-size:18px;font-weight:bold;color:#fff;background:purple;border:2px solid #fff;border-radius:14px;cursor:pointer;z-index:99998;user-select:none;box-shadow: 0 4px 20px rgba(0,0,0,0.6);text-align:center;line-height:1.4;`;
-    vacancyPanel.onclick = () => { vacancyPanel.remove(); vacancyPanel = null; };
-    document.body.appendChild(vacancyPanel);
+  let popupElem = null;
+  function showPopup(txt) {
+    if (popupElem) popupElem.remove();
+    popupElem = document.createElement('div');
+    popupElem.textContent = txt;
+    popupElem.style.cssText = `position:fixed;left:50%;bottom:15%;transform:translateX(-50%);padding:8px 15px;font-size:18px;font-weight:bold;color:#fff;background:rgba(128, 0, 128, 0.9);border:2px solid #fff;border-radius:12px;cursor:pointer;z-index:999999;user-select:none;box-shadow: 0 6px 30px rgba(0,0,0,0.8);text-align:center;`;
+    popupElem.onclick = () => { popupElem.remove(); popupElem = null; };
+    document.body.appendChild(popupElem);
   }
-  function hideVacancyPanel() { vacancyPanel?.remove(); vacancyPanel = null; }
+  function hidePopup() { if (popupElem) { popupElem.remove(); popupElem = null; } }
 })();
