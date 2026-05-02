@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.36
+// @version      3.41
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
+// @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
+// @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
@@ -23,6 +25,7 @@
   let autoF5 = localStorage.getItem('autoF520min') !== '0';
   let notifyEnabled = localStorage.getItem('notifyEnabled') !== '0';
   let searchStatus = localStorage.getItem('searchStatus') || 'L'; 
+  let excludedTimes = JSON.parse(localStorage.getItem('excludedTimes') || '[]');
 
   function getRestaurantName() {
     const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
@@ -55,6 +58,39 @@
     }).then(() => { if (isError) lastNotificationTime = Date.now(); }).catch(e => console.error(e));
   }
 
+  function addExclusionSwitches() {
+    document.querySelectorAll('tr').forEach(row => {
+      const th = row.querySelector('th');
+      const tdState = row.querySelector('.state');
+      if (!th || !tdState) return;
+      const timeStr = th.innerText.trim();
+      if (!/^\d{1,2}:\d{2}$/.test(timeStr)) return;
+      if (tdState.querySelector('.ex-switch')) return;
+
+      const isExcluded = excludedTimes.includes(timeStr);
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'ex-switch';
+      checkbox.checked = !isExcluded;
+      checkbox.style.cssText = 'margin-left: 10px; transform: scale(1.1); vertical-align: middle; cursor: pointer; position: relative; z-index: 100;';
+      
+      tdState.style.whiteSpace = 'nowrap';
+      checkbox.onclick = (e) => e.stopPropagation();
+      checkbox.onchange = (e) => {
+        if (!e.target.checked) {
+          if (!excludedTimes.includes(timeStr)) excludedTimes.push(timeStr);
+        } else {
+          excludedTimes = excludedTimes.filter(t => t !== timeStr);
+        }
+        localStorage.setItem('excludedTimes', JSON.stringify(excludedTimes));
+      };
+      tdState.appendChild(checkbox);
+    });
+  }
+
+  const observer = new MutationObserver(() => { addExclusionSwitches(); });
+  observer.observe(document.body, { childList: true, subtree: true });
+
   if (typeof $ !== "undefined") {
     $(document).on("ajaxSend", (event, xhr, settings) => {
       if (settings.url.includes("ajaxReservationOfDate")) {
@@ -74,7 +110,7 @@
         tempDiv.querySelectorAll('tr').forEach(row => {
           if (row.querySelector('.state')?.textContent.includes('空席あり')) {
             const time = row.querySelector('th')?.textContent.trim();
-            if (time) availableSlots.push(time);
+            if (time && !excludedTimes.includes(time)) availableSlots.push(time);
           }
         });
         if (availableSlots.length > 0) sendDiscord(`空席発見：${availableSlots.join(', ')}`, false);
@@ -100,11 +136,7 @@
   });
 
   function updateMainPanel(isMaintenance = false) {
-    if (isMaintenance) {
-      mainPanel.textContent = "Maint.";
-      mainPanel.style.background = "#888";
-      return;
-    }
+    if (isMaintenance) { mainPanel.textContent = "Maint."; mainPanel.style.background = "#888"; return; }
     mainPanel.textContent = (searchStatus === 'OFF') ? 'OFF' : `${searchStatus} ${waitSec}`;
     const colors = { OFF: '#333', L: '#007bff', M: '#ff8c00', S: '#e83e8c' };
     mainPanel.style.background = colors[searchStatus];
@@ -128,21 +160,20 @@
   });
   function updateF5Panel() {
     if (!autoF5) { f5Panel.style.background = '#333'; f5Panel.textContent = 'F5 OFF'; }
-    else { 
-      const m = Math.floor(f5WaitSec / 60), s = f5WaitSec % 60;
-      f5Panel.style.background = '#6f42c1'; f5Panel.textContent = `F5 ${m}:${s.toString().padStart(2, '0')}`;
-    }
+    else { const m = Math.floor(f5WaitSec / 60), s = f5WaitSec % 60; f5Panel.style.background = '#6f42c1'; f5Panel.textContent = `F5 ${m}:${s.toString().padStart(2, '0')}`; }
   }
 
   function openAllTimeSlots() {
     const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
     targets.forEach((t, i) => setTimeout(() => t.click(), i * 250));
   }
+  
   if (typeof $ !== "undefined") {
     $(document).off("ajaxStop.restaurantReload").on("ajaxStop.restaurantReload", function() {
       if (localStorage.getItem('autoOpenTimeTabs') !== '0') setTimeout(openAllTimeSlots, 300);
     });
   }
+
   const reloadSP = (el) => {
     $(el).on('click', (e) => {
       e.stopPropagation();
@@ -160,20 +191,14 @@
   let waitSec = 15;
   let f5WaitSec = Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080;
   updateMainPanel(); updateF5Panel();
+  addExclusionSwitches();
 
   setInterval(() => {
     const now = Date.now(), d = new Date(), secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
-    
-    // メンテナンス停止判定 (2:59:55 - 5:00:05)
-    if (secTotal >= 10795 && secTotal <= 18005) {
-      updateMainPanel(true);
-      return;
-    }
-
+    if (secTotal >= 10795 && secTotal <= 18005) { updateMainPanel(true); return; }
     if (searchStatus !== 'OFF' && isSearchPending && (now - lastSearchStartTime > 120000)) {
       sendDiscord("フリーズ：停止。", true); searchStatus = 'OFF'; updateMainPanel(); return;
     }
-    
     if (autoF5) { f5WaitSec--; updateF5Panel(); if (f5WaitSec <= 0) location.reload(); }
     if (searchStatus === 'OFF') return;
     waitSec--; updateMainPanel();
