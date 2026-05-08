@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      4.73
+// @version      4.74
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -24,6 +24,9 @@
   const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
   
+  // ボタン用の色設定を独立させて定義
+  const BTN_BG_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
+
   const MODE_STYLE = {
     0: { t: '👆', c: '#000', f: '#fff' },
     1: { t: '🐇', c: 'orange', f: '#fff' }, 
@@ -117,7 +120,8 @@
   btnNotify.onclick = () => { notifyEnabled = !notifyEnabled; updateNotify(); };
 
   const makeFilter = c => {
-    const b = makeBtn(LABEL[c], STYLE[c].split(';')[0].split(':')[1]);
+    // ボタン生成時に固定のカラーマップを使用
+    const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff');
     const updateF = () => b.style.opacity = filters[c] ? 1 : 0.25;
     b.onclick = () => { filters[c] = !filters[c]; updateF(); save('filters', filters); };
     updateF(); return b;
@@ -228,7 +232,7 @@
         const roomName = r.roomName || "不明な客室";
         for (const [roomCd, b] of Object.entries(r.roomBedStockRangeInfos ?? {})) {
           for (const d of (b.roomBedStockRange ?? [])) {
-            const dtRaw = d.useDate; // YYYYMMDD
+            const dtRaw = d.useDate; 
             const useDateObj = new Date(dtRaw.slice(0, 4), dtRaw.slice(4, 6) - 1, dtRaw.slice(6));
             const dt = `${dtRaw.slice(0, 4)}/${dtRaw.slice(4, 6)}/${dtRaw.slice(6)}`;
             const st = +d.saleStatus;
@@ -242,7 +246,6 @@
             if (st === 0 && rm > 0) vacancyDetected = true;
 
             if (!isFirstTime && notifyEnabled && prev !== undefined && (prev.st !== st || prev.rm !== rm)) {
-              // 4ヶ月先（122日以上先）かつ変化元が未販売（3）の場合は通知をスキップ
               const diffDays = (useDateObj - nowObj) / (1000 * 60 * 60 * 24);
               const isNewSale = (prev.st === 3 && diffDays >= 122);
 
