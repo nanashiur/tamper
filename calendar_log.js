@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      4.72
+// @version      4.73
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -19,43 +19,36 @@
   };
 
   const FULL_LABEL = { 0: '空室', 1: '満室', 2: '吸収', 3: '未販' };
+  const TITLE_EMOJI = { 0: '🟥', 1: '⬛️', 2: '🟦', 3: '🟩' };
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
-
-  const BTN_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
+  
   const MODE_STYLE = {
     0: { t: '👆', c: '#000', f: '#fff' },
-    1: { t: '🐇', c: 'orange', f: '#fff' },
-    2: { t: '🐢', c: 'purple', f: '#fff' },
+    1: { t: '🐇', c: 'orange', f: '#fff' }, 
+    2: { t: '🐢', c: 'purple', f: '#fff' }, 
     3: { t: '👁', c: 'pink', f: '#000' }
   };
 
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
 
   const pad = (x, len = 2) => String(x).padStart(len, '0');
-
-  const tStrSec = () => {
-    const d = new Date();
-    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}`;
+  const tStrSec = () => { 
+    const d = new Date(); 
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}`; 
   };
-
   const tStrMs = () => {
     const d = new Date();
     return `${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
   };
-
   const tStrFullMs = () => {
     const d = new Date();
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
   };
 
   const getIP = async () => {
-    const apis = [
-      'https://inet-ip.info/ip',
-      'https://www.cloudflare.com/cdn-cgi/trace',
-      'https://api.ipify.org'
-    ];
+    const apis = ['https://inet-ip.info/ip', 'https://www.cloudflare.com/cdn-cgi/trace', 'https://api.ipify.org'];
     for (const url of apis) {
       try {
         const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
@@ -78,19 +71,18 @@
 
   let mode = load('mode', 0);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
-  let notifyEnabled = load('notify', false);
+  let notifyEnabled = load('notify', false); 
   let longTimer = null;
 
   const initMonthClick = () => {
     const isSP = !!document.querySelector('.boxCalendar.month table');
-    const monthElem = isSP
+    const monthElem = isSP 
       ? document.querySelector('.boxCalendar.month .selectMonth li p.currentMonth')
       : document.querySelector('.boxInputSelect .cal table.vacancyCalTable tbody tr th.heading');
-
     if (monthElem && !monthElem.dataset.hasListener) {
       monthElem.style.cursor = 'pointer';
       monthElem.addEventListener('click', () => {
-        const loading = isSP
+        const loading = isSP 
           ? document.querySelectorAll('.boxCalendar.month table tbody tr td dl dd span.calLoad').length > 0
           : document.querySelectorAll('.boxInputSelect .cal table.vacancyCalTable tbody tr td dl dd span img.spinner').length > 0;
         if (!loading) document.getElementById('boxCalendarSelect')?.dispatchEvent(new Event('change'));
@@ -118,14 +110,14 @@
   };
   const updateNotify = () => { btnNotify.style.opacity = notifyEnabled ? '1' : '0.25'; save('notify', notifyEnabled); };
 
-  btnMain.onclick = () => {
+  btnMain.onclick = () => { 
     hidePopup(); clearTimeout(longTimer); longTimer = null;
-    mode = (mode + 1) % 4; updateMain(); if (mode !== 0) triggerSearch();
+    mode = (mode + 1) % 4; updateMain(); if (mode !== 0) triggerSearch(); 
   };
   btnNotify.onclick = () => { notifyEnabled = !notifyEnabled; updateNotify(); };
 
   const makeFilter = c => {
-    const b = makeBtn(LABEL[c], BTN_COLOR[c]);
+    const b = makeBtn(LABEL[c], STYLE[c].split(';')[0].split(':')[1]);
     const updateF = () => b.style.opacity = filters[c] ? 1 : 0.25;
     b.onclick = () => { filters[c] = !filters[c]; updateF(); save('filters', filters); };
     updateF(); return b;
@@ -141,11 +133,10 @@
     const now = new Date();
     const h = now.getHours();
     const m = now.getMinutes();
-
     if (h >= 3 && h < 5) {
-      let interval = 600000;
-      if (h === 4 && m === 59) interval = 1000;
-      else if (h === 4 && m >= 55) interval = 10000;
+      let interval = 600000; 
+      if (h === 4 && m === 59) interval = 1000; 
+      else if (h === 4 && m >= 55) interval = 10000; 
       longTimer = setTimeout(triggerSearch, interval);
       return;
     }
@@ -167,7 +158,6 @@
     const h = d.getHours();
     const m = d.getMinutes();
     const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
-
     const errStatus = errObj?.status || errObj?.statusText || "Error";
 
     if (errorTimestamps.length >= 10) {
@@ -175,9 +165,9 @@
       const ip = await getIP();
       const payload = {
         username: "📅 空室在庫ログ",
-        embeds: [{
-            title: `⚠️ ${errStatus} 通信エラー多発`,
-            color: DISCORD_COLOR.error,
+        embeds: [{ 
+            title: `🚫 ${errStatus} 通信エラー多発`, 
+            color: DISCORD_COLOR.error, 
             description: `時刻: ${tStrFullMs()} (${ip})\n${isStopping ? "自動停止" : "続行"}`
         }]
       };
@@ -185,10 +175,10 @@
       if (isStopping) {
         mode = 0; updateMain(); errorTimestamps = [];
         showPopup(`${errStatus} Error`);
-        return true;
+        return true; 
       }
     }
-    return false;
+    return false; 
   };
 
   if (window.$?.lifeobs?.ajax) {
@@ -200,7 +190,6 @@
           opt.data.split('&').forEach(pair => { const [k, v] = pair.split('='); params[k] = v; });
         } else { params = opt.data || {}; }
         const contextKey = `${params.hotelId || 'default'}_${params.useYearMonth || 'now'}`;
-
         const ok = opt.success;
         opt.success = resp => {
           const anyFound = logStock(resp, contextKey);
@@ -214,7 +203,6 @@
             if (anyFound) { mode = 0; updateMain(); showPopup("空室"); } else { triggerSearch(); }
           }
         };
-
         const err = opt.error;
         opt.error = async k => {
           const stopped = await handleErrorCount(k);
@@ -233,44 +221,48 @@
     const infos = resp.ecRoomStockInfos ?? {};
     const isFirstTime = !loadedKeys.has(contextKey);
     let vacancyDetected = false;
+    const nowObj = new Date();
     console.group(tStrMs());
     for (const g of Object.values(infos)) {
       for (const r of Object.values(g.roomStockInfos ?? {})) {
         const roomName = r.roomName || "不明な客室";
         for (const [roomCd, b] of Object.entries(r.roomBedStockRangeInfos ?? {})) {
           for (const d of (b.roomBedStockRange ?? [])) {
-            const dt = `${d.useDate.slice(0, 4)}/${d.useDate.slice(4, 6)}/${d.useDate.slice(6)}`;
+            const dtRaw = d.useDate; // YYYYMMDD
+            const useDateObj = new Date(dtRaw.slice(0, 4), dtRaw.slice(4, 6) - 1, dtRaw.slice(6));
+            const dt = `${dtRaw.slice(0, 4)}/${dtRaw.slice(4, 6)}/${dtRaw.slice(6)}`;
             const st = +d.saleStatus;
             const rm = d.remainStockNum ?? 0;
             const priceRank = d.priceFrameID || d.priceLevel || '--';
             const totalPrice = d.roomPriceTotal || 0;
             const commodityCd = d.commodityCd || roomCd || "不明";
             const stateKey = `${contextKey}__${commodityCd}__${dt}`;
-
             const prev = lastStateMap.get(stateKey);
 
             if (st === 0 && rm > 0) vacancyDetected = true;
 
             if (!isFirstTime && notifyEnabled && prev !== undefined && (prev.st !== st || prev.rm !== rm)) {
-              let changeTxt;
-              if (prev.st !== st) {
-                changeTxt = `${FULL_LABEL[prev.st]}→${FULL_LABEL[st]}`;
-              } else {
-                changeTxt = `${MARKS[prev.rm] || prev.rm}→${MARKS[rm] || rm}`;
+              // 4ヶ月先（122日以上先）かつ変化元が未販売（3）の場合は通知をスキップ
+              const diffDays = (useDateObj - nowObj) / (1000 * 60 * 60 * 24);
+              const isNewSale = (prev.st === 3 && diffDays >= 122);
+
+              if (!isNewSale) {
+                let changeTxt;
+                if (prev.st !== st) changeTxt = `${FULL_LABEL[prev.st]}→${FULL_LABEL[st]}`;
+                else changeTxt = `${MARKS[prev.rm] || prev.rm}→${MARKS[rm] || rm}`;
+                
+                const ip = await getIP();
+                const payload = {
+                  username: "📅 空室在庫ログ",
+                  embeds: [{
+                    title: `${TITLE_EMOJI[st] ?? ''} **${tStrSec()}**\n${dt}　${changeTxt}\n${roomName}`,
+                    color: DISCORD_COLOR[st] ?? 1,
+                    description: `時刻: ${tStrMs()} (${ip})\n在庫${MARKS[rm] || '◯'}　${totalPrice.toLocaleString()}円　[${priceRank}]`
+                  }]
+                };
+                sendDiscord(payload);
               }
-
-              const ip = await getIP();
-              const payload = {
-                username: "📅 空室在庫ログ",
-                embeds: [{
-                  title: `**${tStrSec()}**\n${dt}　${changeTxt}\n${roomName}`,
-                  color: DISCORD_COLOR[st] ?? 1,
-                  description: `時刻: ${tStrMs()} (${ip})\n在庫${MARKS[rm] || '◯'}　${totalPrice.toLocaleString()}円　[${priceRank}]`
-                }]
-              };
-              sendDiscord(payload);
             }
-
             lastStateMap.set(stateKey, { st, rm });
             if (filters[st]) console.log(`%c${dt}%c\t%c${LABEL[st]}　${rm}　${priceRank}`, '', '', STYLE[st]);
           }
