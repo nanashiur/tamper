@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      4.85
+// @version      4.95
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -23,13 +23,14 @@
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
-  const BTN_BG_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
+  const BTN_BG_COLOR = { 0: 'red', 1: 'black', 2: 'blue', 3: 'green' };
 
-  const MODE_STYLE = {
-    0: { t: '👆', c: '#000', f: '#fff' },
-    1: { t: '🐇', c: 'orange', f: '#fff' }, 
-    2: { t: '🐢', c: 'purple', f: '#fff' }, 
-    3: { t: '👁', c: 'pink', f: '#000' }
+  // コンパクトUI用の設定（ご指定の絵文字に変更）
+  const MODE_CONF = {
+    0: { txt: '👆', bg: '#000', fg: '#fff' },
+    1: { txt: '🏃‍♀️', bg: 'orange', fg: '#fff' }, 
+    2: { txt: '🚶', bg: 'purple', fg: '#fff' }, 
+    3: { txt: '👍', bg: 'pink', fg: '#000' }
   };
 
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
@@ -51,6 +52,7 @@
   // --- IP Caching System ---
   let cachedIP = 'unknown';
   let lastIPFetchTime = 0;
+
   const getIP = async () => {
     const now = Date.now();
     if (now - lastIPFetchTime < 60000 && cachedIP !== 'unknown') {
@@ -70,7 +72,7 @@
         }
       } catch (e) { continue; }
     }
-    return cachedIP;
+    return cachedIP; 
   };
 
   // --- Discord Webhook Queue System ---
@@ -112,6 +114,7 @@
   const loadedKeys = new Set();
   
   let consecutiveErrorCount = 0; 
+  let fatalErrorCount = 0;       
 
   let mode = load('mode', 0);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
@@ -135,42 +138,68 @@
     }
   };
 
+  // UI構築（コンパクト幅に調整）
   const makeBtn = (txt, bg, fg = '#fff') => Object.assign(document.createElement('div'), {
     textContent: txt,
-    style: `background:${bg};color:${fg};padding:4px 6px;margin-right:3px;cursor:pointer;border-radius:4px;font-size:12px;user-select:none;text-align:center;min-width:24px;line-height:1.2;`
+    style: `background-color:${bg} !important; color:${fg} !important; padding:4px 6px; cursor:pointer; border-radius:4px; font-size:14px; user-select:none; text-align:center; min-width:26px; line-height:1.2; font-weight:bold; transition:opacity 0.2s;`
   });
 
   const panel = Object.assign(document.createElement('div'), {
-    style: 'position:fixed;top:4px;left:50%;transform:translateX(-50%);display:flex;z-index:99999;background:rgba(255,255,255,0.8);padding:2px;border-radius:6px;box-shadow:0 2px 5px rgba(0,0,0,0.2);'
+    style: 'position:fixed;top:4px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:4px;z-index:99999;background:rgba(255,255,255,0.9);padding:6px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.3);'
   });
 
-  const btnMain = makeBtn('👆', '#000');
-  const btnNotify = makeBtn('🔔', 'purple');
+  // 左右中央揃え(center)から、左寄せ(flex-start)に変更
+  const row1 = Object.assign(document.createElement('div'), { style: 'display:flex; justify-content:flex-start; gap:4px;' });
+  const row2 = Object.assign(document.createElement('div'), { style: 'display:flex; justify-content:flex-start; gap:4px;' });
 
-  const updateMain = () => {
-    const s = MODE_STYLE[mode];
-    btnMain.textContent = s.t; btnMain.style.background = s.c; btnMain.style.color = s.f;
+  // === 上段（モード＆通知）の構築 ===
+  const modeBtns = [];
+  const updateModes = () => {
+    modeBtns.forEach((btn, i) => {
+      btn.style.opacity = (mode === i) ? '1' : '0.3';
+    });
     save('mode', mode);
   };
-  const updateNotify = () => { btnNotify.style.opacity = notifyEnabled ? '1' : '0.25'; save('notify', notifyEnabled); };
 
-  btnMain.onclick = () => { 
-    hidePopup(); clearTimeout(longTimer); longTimer = null;
-    consecutiveErrorCount = 0; 
-    mode = (mode + 1) % 4; updateMain(); if (mode !== 0) triggerSearch(); 
+  [0, 1, 2, 3].forEach(m => {
+    const conf = MODE_CONF[m];
+    const btn = makeBtn(conf.txt, conf.bg, conf.fg);
+    btn.onclick = () => {
+      if (mode === m) return; 
+      hidePopup(); clearTimeout(longTimer); longTimer = null;
+      consecutiveErrorCount = 0; fatalErrorCount = 0; 
+      mode = m; 
+      updateModes(); 
+      if (mode !== 0) triggerSearch(); 
+    };
+    modeBtns.push(btn);
+    row1.appendChild(btn);
+  });
+
+  // 通知ボタン（ベルの絵文字だけに変更）
+  const btnNotify = makeBtn('🔔', 'gray', '#fff'); 
+  const updateNotify = () => { 
+    btnNotify.style.opacity = notifyEnabled ? '1' : '0.3'; 
+    btnNotify.style.setProperty('background-color', notifyEnabled ? 'purple' : 'gray', 'important');
+    save('notify', notifyEnabled); 
   };
   btnNotify.onclick = () => { notifyEnabled = !notifyEnabled; updateNotify(); };
+  row1.appendChild(btnNotify);
 
+  // === 下段（1文字フィルタ）の構築 ===
   const makeFilter = c => {
-    const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff');
-    const updateF = () => b.style.opacity = filters[c] ? 1 : 0.25;
+    // FULL_LABEL ではなく LABEL（1文字）を使用
+    const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff'); 
+    const updateF = () => b.style.opacity = filters[c] ? '1' : '0.3';
     b.onclick = () => { filters[c] = !filters[c]; updateF(); save('filters', filters); };
     updateF(); return b;
   };
+  row2.append(makeFilter(0), makeFilter(1), makeFilter(2), makeFilter(3));
 
-  panel.append(btnMain, makeFilter(0), makeFilter(1), makeFilter(2), makeFilter(3), btnNotify);
+  // パネルへ組み込み
+  panel.append(row1, row2);
   document.body.appendChild(panel);
-  updateMain(); updateNotify();
+  updateModes(); updateNotify();
   initMonthClick();
 
   const triggerSearch = () => {
@@ -189,32 +218,35 @@
     if (sel && !document.querySelector('span.calLoad')) sel.dispatchEvent(new Event('change'));
   };
 
-  // 致命的エラー（10回）時の通知（全モード共通で10分後再開のアナウンス）
-  const handleFatalError = async (errObj) => {
+  const handleFatalError = async (errObj, targetInfoStr) => {
+    fatalErrorCount++; 
     const errStatus = errObj?.status || errObj?.statusText || "Error";
     const ip = await getIP();
-    
+    const icon = '🚫'.repeat(Math.min(fatalErrorCount, 10));
+
     const payload = {
       username: "📅 空室在庫ログ",
       embeds: [{ 
-        title: `🚫 ${errStatus} 通信エラー多発`, 
+        title: `${icon} ${errStatus} 通信エラー多発`, 
         color: DISCORD_COLOR.error, 
-        description: `時刻: ${tStrFullMs()} (${ip})\n10回連続でエラーが発生しました。\n10分後に現在のモードで自動再開します。` 
+        description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\n${consecutiveErrorCount}回連続でエラーが発生しました。\n10分後に現在のモードで自動再開します。` 
       }]
     };
     sendDiscord(payload);
   };
 
-  // バーストタイム用（続行）エラー通知
-  const handleBurstError = async (errObj) => {
+  const handleBurstError = async (errObj, targetInfoStr) => {
+    fatalErrorCount++;
     const errStatus = errObj?.status || errObj?.statusText || "Error";
     const ip = await getIP();
+    const icon = '🚫'.repeat(Math.min(fatalErrorCount, 10));
+
     const payload = {
       username: "📅 空室在庫ログ",
       embeds: [{ 
-        title: `⚠️ ${errStatus} 通信エラー多発`, 
+        title: `${icon} ${errStatus} 通信エラー多発`, 
         color: DISCORD_COLOR.error, 
-        description: `時刻: ${tStrFullMs()} (${ip})\nバーストタイムのため続行します。` 
+        description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\nバーストタイムのため続行します (${consecutiveErrorCount}回目)` 
       }]
     };
     sendDiscord(payload);
@@ -224,19 +256,56 @@
     const orig_ajax = window.$.lifeobs.ajax;
     window.$.lifeobs.ajax = function (opt) {
       if (opt.url && opt.url.includes('/hotel/api/queryHotelPriceStock/')) {
-        let params = {};
-        if (typeof opt.data === 'string') {
-          opt.data.split('&').forEach(pair => { const [k, v] = pair.split('='); params[k] = v; });
-        } else { params = opt.data || {}; }
-        const contextKey = `${params.hotelId || 'default'}_${params.useYearMonth || 'now'}`;
+        
+        let p_ym = '', p_hotel = '', p_room = '';
+        
+        if (opt.data) {
+          if (typeof opt.data === 'string') {
+            try {
+              const j = JSON.parse(opt.data);
+              p_ym = j.useYearMonth || j.useDate || '';
+              p_hotel = j.hotelId || j.searchHotelCD || '';
+              p_room = j.roomCd || j.hotelRoomCd || j.commodityCD || '';
+            } catch(e) {
+              const u = new URLSearchParams(opt.data);
+              p_ym = u.get('useYearMonth') || u.get('useDate') || '';
+              p_hotel = u.get('hotelId') || u.get('searchHotelCD') || '';
+              p_room = u.get('roomCd') || u.get('hotelRoomCd') || u.get('commodityCD') || '';
+            }
+          } else if (typeof opt.data === 'object') {
+            p_ym = opt.data.useYearMonth || opt.data.useDate || '';
+            p_hotel = opt.data.hotelId || opt.data.searchHotelCD || '';
+            p_room = opt.data.roomCd || opt.data.hotelRoomCd || opt.data.commodityCD || '';
+          }
+        }
+        
+        const curUrl = new URLSearchParams(window.location.search);
+        p_ym = p_ym || curUrl.get('useYearMonth') || curUrl.get('useDate') || '';
+        p_hotel = p_hotel || curUrl.get('searchHotelCD') || curUrl.get('hotelId') || '';
+        p_room = p_room || curUrl.get('hotelRoomCd') || curUrl.get('searchRoomName') || curUrl.get('roomCd') || curUrl.get('commodityCD') || '';
+
+        let yearMonthStr = '年月不明';
+        if (p_ym && p_ym.length >= 6) {
+          yearMonthStr = `${p_ym.slice(0, 4)}年${p_ym.slice(4, 6)}月`;
+        }
+        let hotelStr = p_hotel ? `ホテル:${p_hotel}` : '';
+        let roomStr = p_room ? `客室:${p_room}` : '';
+        const targetInfoStr = `[${yearMonthStr} ${hotelStr} ${roomStr}]`.trim().replace(/ +/g, ' ');
+
+        const contextKey = `${p_hotel || 'default'}_${p_ym || 'now'}`;
         
         const ok = opt.success;
         opt.success = resp => {
           consecutiveErrorCount = 0;
+          fatalErrorCount = 0; 
           hidePopup(); 
           
           logStock(resp, contextKey).then(anyFound => {
-            if (mode === 3 && anyFound) { mode = 0; updateMain(); showPopup("空室"); }
+            if (mode === 3 && anyFound) { 
+              mode = 0; 
+              updateModes(); 
+              showPopup("空室"); 
+            }
           });
           ok?.(resp);
           initMonthClick();
@@ -252,7 +321,6 @@
         opt.error = function(k) {
           consecutiveErrorCount++; 
 
-          // サイト標準処理（フリーズ解除の特効薬）は必ず呼ぶ
           if (window.RecentDaysPriceStockQuery?.prototype?.afterSystemErrorOccurred) {
             window.RecentDaysPriceStockQuery.prototype.afterSystemErrorOccurred(k);
           }
@@ -261,37 +329,32 @@
           const d = new Date();
           const h = d.getHours();
           const m = d.getMinutes();
-          // バーストタイム（10:59〜11:04）の判定
           const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
 
           if (isBurstTime) {
-            // ▼▼ バーストタイム仕様（止まらない） ▼▼
-            if (consecutiveErrorCount >= 10) {
-              handleBurstError(k);
-              consecutiveErrorCount = 0; // 通知を出しすぎないためにリセットして再集計
+            if (consecutiveErrorCount % 10 === 0) {
+              handleBurstError(k, targetInfoStr);
             } else {
               showPopup(`${errStatus} 通信エラー\nバーストタイム突撃中 ${consecutiveErrorCount} 回目`);
             }
             if (mode !== 0) {
               clearTimeout(longTimer);
-              longTimer = setTimeout(triggerSearch, 1500); // 1.5秒の高速リトライ
+              longTimer = setTimeout(triggerSearch, 1500); 
             }
           } else {
-            // ▼▼ 通常タイム仕様（10回で10分待機） ▼▼
-            if (consecutiveErrorCount < 10) {
+            if (consecutiveErrorCount % 10 !== 0) {
               showPopup(`${errStatus} 通信エラー\nリトライ ${consecutiveErrorCount} 回目`);
               if (mode !== 0) {
                 clearTimeout(longTimer);
-                longTimer = setTimeout(triggerSearch, 3000); // 3秒の安全リトライ
+                longTimer = setTimeout(triggerSearch, 3000); 
               }
             } else {
-              handleFatalError(k);
-              consecutiveErrorCount = 0; 
+              handleFatalError(k, targetInfoStr);
 
-              // 全モード共通：手動(0)以外なら10分間(600,000ms)待機して自動復帰
               if (mode !== 0) {
-                const icons = { 1: '🐇', 2: '🐢', 3: '👁' };
-                showPopup(`${errStatus} 通信エラー多発\n10分後に再開します (${icons[mode]})`);
+                const icons = { 1: '🏃‍♀️', 2: '🚶', 3: '👍' };
+                const iconStr = '🚫'.repeat(Math.min(fatalErrorCount, 10));
+                showPopup(`${iconStr}\n${errStatus} 通信エラー多発\n10分後に再開します (${icons[mode]})`);
                 clearTimeout(longTimer);
                 longTimer = setTimeout(triggerSearch, 600000);
               }
