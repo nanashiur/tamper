@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      4.74
+// @version      4.85
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -23,8 +23,6 @@
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
-  
-  // ボタン用の色設定を独立させて定義
   const BTN_BG_COLOR = { 0: 'red', 1: '#000', 2: 'blue', 3: 'green' };
 
   const MODE_STYLE = {
@@ -50,7 +48,14 @@
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
   };
 
+  // --- IP Caching System ---
+  let cachedIP = 'unknown';
+  let lastIPFetchTime = 0;
   const getIP = async () => {
+    const now = Date.now();
+    if (now - lastIPFetchTime < 60000 && cachedIP !== 'unknown') {
+      return cachedIP;
+    }
     const apis = ['https://inet-ip.info/ip', 'https://www.cloudflare.com/cdn-cgi/trace', 'https://api.ipify.org'];
     for (const url of apis) {
       try {
@@ -58,19 +63,55 @@
         let text = await resp.text();
         if (url.includes('cloudflare')) {
           const match = text.match(/ip=([^\s]+)/);
-          if (match) return match[1];
+          if (match) { cachedIP = match[1]; lastIPFetchTime = now; return cachedIP; }
         } else {
           text = text.trim();
-          if (text) return text;
+          if (text) { cachedIP = text; lastIPFetchTime = now; return cachedIP; }
         }
       } catch (e) { continue; }
     }
-    return 'unknown';
+    return cachedIP;
   };
+
+  // --- Discord Webhook Queue System ---
+  const discordQueue = [];
+  let isProcessingQueue = false;
+
+  const processDiscordQueue = async () => {
+    if (isProcessingQueue || discordQueue.length === 0) return;
+    isProcessingQueue = true;
+
+    while (discordQueue.length > 0) {
+      const payload = discordQueue[0];
+      try {
+        const resp = await fetch(WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (resp.status === 429) {
+          const rateLimitInfo = await resp.json();
+          const retryAfter = rateLimitInfo.retry_after || 1;
+          console.warn(`Discord Rate Limit: Waiting ${retryAfter}s...`);
+          await new Promise(r => setTimeout(r, retryAfter * 1000));
+          continue; 
+        }
+        discordQueue.shift();
+        await new Promise(r => setTimeout(r, 250));
+      } catch (e) {
+        console.error('Discord通知送信エラー', e);
+        discordQueue.shift();
+      }
+    }
+    isProcessingQueue = false;
+  };
+
+  const sendDiscord = (payload) => {
+    discordQueue.push(payload);
+    processDiscordQueue();
+  };
+  // --------------------------------------------------------
 
   const lastStateMap = new Map();
   const loadedKeys = new Set();
-  let errorTimestamps = [];
+  
+  let consecutiveErrorCount = 0; 
 
   let mode = load('mode', 0);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
@@ -115,12 +156,12 @@
 
   btnMain.onclick = () => { 
     hidePopup(); clearTimeout(longTimer); longTimer = null;
+    consecutiveErrorCount = 0; 
     mode = (mode + 1) % 4; updateMain(); if (mode !== 0) triggerSearch(); 
   };
   btnNotify.onclick = () => { notifyEnabled = !notifyEnabled; updateNotify(); };
 
   const makeFilter = c => {
-    // ボタン生成時に固定のカラーマップを使用
     const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff');
     const updateF = () => b.style.opacity = filters[c] ? 1 : 0.25;
     b.onclick = () => { filters[c] = !filters[c]; updateF(); save('filters', filters); };
@@ -148,55 +189,55 @@
     if (sel && !document.querySelector('span.calLoad')) sel.dispatchEvent(new Event('change'));
   };
 
-  const sendDiscord = async (payload) => {
-    try {
-      await fetch(WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    } catch (e) { console.error('Discord通知失敗', e); }
+  // 致命的エラー（10回）時の通知（全モード共通で10分後再開のアナウンス）
+  const handleFatalError = async (errObj) => {
+    const errStatus = errObj?.status || errObj?.statusText || "Error";
+    const ip = await getIP();
+    
+    const payload = {
+      username: "📅 空室在庫ログ",
+      embeds: [{ 
+        title: `🚫 ${errStatus} 通信エラー多発`, 
+        color: DISCORD_COLOR.error, 
+        description: `時刻: ${tStrFullMs()} (${ip})\n10回連続でエラーが発生しました。\n10分後に現在のモードで自動再開します。` 
+      }]
+    };
+    sendDiscord(payload);
   };
 
-  const handleErrorCount = async (errObj) => {
-    const now = Date.now();
-    errorTimestamps.push(now);
-    errorTimestamps = errorTimestamps.filter(t => now - t < 60000);
-    const d = new Date();
-    const h = d.getHours();
-    const m = d.getMinutes();
-    const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
+  // バーストタイム用（続行）エラー通知
+  const handleBurstError = async (errObj) => {
     const errStatus = errObj?.status || errObj?.statusText || "Error";
-
-    if (errorTimestamps.length >= 10) {
-      const isStopping = !isBurstTime;
-      const ip = await getIP();
-      const payload = {
-        username: "📅 空室在庫ログ",
-        embeds: [{ 
-            title: `🚫 ${errStatus} 通信エラー多発`, 
-            color: DISCORD_COLOR.error, 
-            description: `時刻: ${tStrFullMs()} (${ip})\n${isStopping ? "自動停止" : "続行"}`
-        }]
-      };
-      sendDiscord(payload);
-      if (isStopping) {
-        mode = 0; updateMain(); errorTimestamps = [];
-        showPopup(`${errStatus} Error`);
-        return true; 
-      }
-    }
-    return false; 
+    const ip = await getIP();
+    const payload = {
+      username: "📅 空室在庫ログ",
+      embeds: [{ 
+        title: `⚠️ ${errStatus} 通信エラー多発`, 
+        color: DISCORD_COLOR.error, 
+        description: `時刻: ${tStrFullMs()} (${ip})\nバーストタイムのため続行します。` 
+      }]
+    };
+    sendDiscord(payload);
   };
 
   if (window.$?.lifeobs?.ajax) {
-    const orig = $.lifeobs.ajax;
-    $.lifeobs.ajax = opt => {
+    const orig_ajax = window.$.lifeobs.ajax;
+    window.$.lifeobs.ajax = function (opt) {
       if (opt.url && opt.url.includes('/hotel/api/queryHotelPriceStock/')) {
         let params = {};
         if (typeof opt.data === 'string') {
           opt.data.split('&').forEach(pair => { const [k, v] = pair.split('='); params[k] = v; });
         } else { params = opt.data || {}; }
         const contextKey = `${params.hotelId || 'default'}_${params.useYearMonth || 'now'}`;
+        
         const ok = opt.success;
         opt.success = resp => {
-          const anyFound = logStock(resp, contextKey);
+          consecutiveErrorCount = 0;
+          hidePopup(); 
+          
+          logStock(resp, contextKey).then(anyFound => {
+            if (mode === 3 && anyFound) { mode = 0; updateMain(); showPopup("空室"); }
+          });
           ok?.(resp);
           initMonthClick();
           if (mode === 1) triggerSearch();
@@ -204,20 +245,61 @@
             const randomInterval = Math.floor(Math.random() * (660001 - 540000)) + 540000;
             longTimer = setTimeout(triggerSearch, randomInterval);
           } else if (mode === 3) {
-            if (anyFound) { mode = 0; updateMain(); showPopup("空室"); } else { triggerSearch(); }
+            triggerSearch();
           }
         };
-        const err = opt.error;
-        opt.error = async k => {
-          const stopped = await handleErrorCount(k);
+
+        opt.error = function(k) {
+          consecutiveErrorCount++; 
+
+          // サイト標準処理（フリーズ解除の特効薬）は必ず呼ぶ
           if (window.RecentDaysPriceStockQuery?.prototype?.afterSystemErrorOccurred) {
-             window.RecentDaysPriceStockQuery.prototype.afterSystemErrorOccurred(k);
+            window.RecentDaysPriceStockQuery.prototype.afterSystemErrorOccurred(k);
           }
-          if (!stopped && mode !== 0) setTimeout(triggerSearch, 1500);
-          err?.(k);
+
+          const errStatus = k?.status || "Error";
+          const d = new Date();
+          const h = d.getHours();
+          const m = d.getMinutes();
+          // バーストタイム（10:59〜11:04）の判定
+          const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
+
+          if (isBurstTime) {
+            // ▼▼ バーストタイム仕様（止まらない） ▼▼
+            if (consecutiveErrorCount >= 10) {
+              handleBurstError(k);
+              consecutiveErrorCount = 0; // 通知を出しすぎないためにリセットして再集計
+            } else {
+              showPopup(`${errStatus} 通信エラー\nバーストタイム突撃中 ${consecutiveErrorCount} 回目`);
+            }
+            if (mode !== 0) {
+              clearTimeout(longTimer);
+              longTimer = setTimeout(triggerSearch, 1500); // 1.5秒の高速リトライ
+            }
+          } else {
+            // ▼▼ 通常タイム仕様（10回で10分待機） ▼▼
+            if (consecutiveErrorCount < 10) {
+              showPopup(`${errStatus} 通信エラー\nリトライ ${consecutiveErrorCount} 回目`);
+              if (mode !== 0) {
+                clearTimeout(longTimer);
+                longTimer = setTimeout(triggerSearch, 3000); // 3秒の安全リトライ
+              }
+            } else {
+              handleFatalError(k);
+              consecutiveErrorCount = 0; 
+
+              // 全モード共通：手動(0)以外なら10分間(600,000ms)待機して自動復帰
+              if (mode !== 0) {
+                const icons = { 1: '🐇', 2: '🐢', 3: '👁' };
+                showPopup(`${errStatus} 通信エラー多発\n10分後に再開します (${icons[mode]})`);
+                clearTimeout(longTimer);
+                longTimer = setTimeout(triggerSearch, 600000);
+              }
+            }
+          }
         };
       }
-      return orig(opt);
+      return orig_ajax(opt);
     };
   }
 
@@ -226,6 +308,9 @@
     const isFirstTime = !loadedKeys.has(contextKey);
     let vacancyDetected = false;
     const nowObj = new Date();
+    
+    const pendingNotifications = [];
+
     console.group(tStrMs());
     for (const g of Object.values(infos)) {
       for (const r of Object.values(g.roomStockInfos ?? {})) {
@@ -254,16 +339,7 @@
                 if (prev.st !== st) changeTxt = `${FULL_LABEL[prev.st]}→${FULL_LABEL[st]}`;
                 else changeTxt = `${MARKS[prev.rm] || prev.rm}→${MARKS[rm] || rm}`;
                 
-                const ip = await getIP();
-                const payload = {
-                  username: "📅 空室在庫ログ",
-                  embeds: [{
-                    title: `${TITLE_EMOJI[st] ?? ''} **${tStrSec()}**\n${dt}　${changeTxt}\n${roomName}`,
-                    color: DISCORD_COLOR[st] ?? 1,
-                    description: `時刻: ${tStrMs()} (${ip})\n在庫${MARKS[rm] || '◯'}　${totalPrice.toLocaleString()}円　[${priceRank}]`
-                  }]
-                };
-                sendDiscord(payload);
+                pendingNotifications.push({ st, rm, dt, changeTxt, roomName, totalPrice, priceRank });
               }
             }
             lastStateMap.set(stateKey, { st, rm });
@@ -274,6 +350,21 @@
     }
     console.groupEnd();
     loadedKeys.add(contextKey);
+
+    if (pendingNotifications.length > 0) {
+      const currentIp = await getIP();
+      for (const item of pendingNotifications) {
+        sendDiscord({
+          username: "📅 空室在庫ログ",
+          embeds: [{
+            title: `${TITLE_EMOJI[item.st] ?? ''} **${tStrSec()}**\n${item.dt}　${item.changeTxt}\n${item.roomName}`,
+            color: DISCORD_COLOR[item.st] ?? 1,
+            description: `時刻: ${tStrMs()} (${currentIp})\n在庫${MARKS[item.rm] || '◯'}　${item.totalPrice.toLocaleString()}円　[${item.priceRank}]`
+          }]
+        });
+      }
+    }
+
     return vacancyDetected;
   }
 
@@ -281,8 +372,8 @@
   function showPopup(txt) {
     if (popupElem) popupElem.remove();
     popupElem = document.createElement('div');
-    popupElem.textContent = txt;
-    popupElem.style.cssText = `position:fixed;left:50%;bottom:15%;transform:translateX(-50%);padding:8px 15px;font-size:18px;font-weight:bold;color:#fff;background:rgba(128, 0, 128, 0.9);border:2px solid #fff;border-radius:12px;cursor:pointer;z-index:999999;user-select:none;box-shadow: 0 6px 30px rgba(0,0,0,0.8);text-align:center;`;
+    popupElem.innerText = txt; 
+    popupElem.style.cssText = `position:fixed;left:50%;bottom:15%;transform:translateX(-50%);padding:8px 15px;font-size:18px;font-weight:bold;color:#fff;background:rgba(128, 0, 128, 0.9);border:2px solid #fff;border-radius:12px;cursor:pointer;z-index:999999;user-select:none;box-shadow: 0 6px 30px rgba(0,0,0,0.8);text-align:center;white-space:pre-wrap;`;
     popupElem.onclick = () => { popupElem.remove(); popupElem = null; };
     document.body.appendChild(popupElem);
   }
