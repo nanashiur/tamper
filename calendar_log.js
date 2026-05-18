@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      4.95
+// @version      5.04
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -25,7 +25,7 @@
   const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
   const BTN_BG_COLOR = { 0: 'red', 1: 'black', 2: 'blue', 3: 'green' };
 
-  // コンパクトUI用の設定（ご指定の絵文字に変更）
+  // コンパクトUI用の設定
   const MODE_CONF = {
     0: { txt: '👆', bg: '#000', fg: '#fff' },
     1: { txt: '🏃‍♀️', bg: 'orange', fg: '#fff' }, 
@@ -47,6 +47,15 @@
   const tStrFullMs = () => {
     const d = new Date();
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
+  };
+  
+  // 時刻取得関数（HH:mm:ss）
+  const getClockStr = () => new Date().toTimeString().slice(0, 8);
+
+  // 数字を丸数字（①, ②...）に変換するヘルパー関数
+  const toCircled = (num) => {
+    if (num >= 1 && num <= 20) return String.fromCharCode(0x245F + num);
+    return `(${num})`; 
   };
 
   // --- IP Caching System ---
@@ -138,7 +147,7 @@
     }
   };
 
-  // UI構築（コンパクト幅に調整）
+  // UI構築
   const makeBtn = (txt, bg, fg = '#fff') => Object.assign(document.createElement('div'), {
     textContent: txt,
     style: `background-color:${bg} !important; color:${fg} !important; padding:4px 6px; cursor:pointer; border-radius:4px; font-size:14px; user-select:none; text-align:center; min-width:26px; line-height:1.2; font-weight:bold; transition:opacity 0.2s;`
@@ -148,9 +157,8 @@
     style: 'position:fixed;top:4px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:4px;z-index:99999;background:rgba(255,255,255,0.9);padding:6px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.3);'
   });
 
-  // 左右中央揃え(center)から、左寄せ(flex-start)に変更
-  const row1 = Object.assign(document.createElement('div'), { style: 'display:flex; justify-content:flex-start; gap:4px;' });
-  const row2 = Object.assign(document.createElement('div'), { style: 'display:flex; justify-content:flex-start; gap:4px;' });
+  const row1 = Object.assign(document.createElement('div'), { style: 'display:flex; justify-content:flex-start; align-items:center; gap:4px;' });
+  const row2 = Object.assign(document.createElement('div'), { style: 'display:flex; justify-content:flex-start; align-items:center; gap:4px;' });
 
   // === 上段（モード＆通知）の構築 ===
   const modeBtns = [];
@@ -176,7 +184,6 @@
     row1.appendChild(btn);
   });
 
-  // 通知ボタン（ベルの絵文字だけに変更）
   const btnNotify = makeBtn('🔔', 'gray', '#fff'); 
   const updateNotify = () => { 
     btnNotify.style.opacity = notifyEnabled ? '1' : '0.3'; 
@@ -186,9 +193,8 @@
   btnNotify.onclick = () => { notifyEnabled = !notifyEnabled; updateNotify(); };
   row1.appendChild(btnNotify);
 
-  // === 下段（1文字フィルタ）の構築 ===
+  // === 下段（フィルタ）の構築 ===
   const makeFilter = c => {
-    // FULL_LABEL ではなく LABEL（1文字）を使用
     const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff'); 
     const updateF = () => b.style.opacity = filters[c] ? '1' : '0.3';
     b.onclick = () => { filters[c] = !filters[c]; updateF(); save('filters', filters); };
@@ -201,6 +207,23 @@
   document.body.appendChild(panel);
   updateModes(); updateNotify();
   initMonthClick();
+
+  // ▼ ミニマルポップアップ機能（文字色 textColor を追加）
+  let popupElem = null;
+  function showPopup(txt, bgColor, textColor = '#fff') {
+    if (!popupElem) {
+      popupElem = document.createElement('div');
+      popupElem.style.cssText = `position:fixed;left:50%;bottom:15%;transform:translateX(-50%);padding:4px 12px;font-size:14px;font-weight:bold;border-radius:20px;z-index:999999;user-select:none;cursor:pointer;box-shadow:0 4px 10px rgba(0,0,0,0.5);text-align:center;white-space:pre-wrap;transition:background-color 0.1s, color 0.1s;`;
+      popupElem.onclick = hidePopup;
+      document.body.appendChild(popupElem);
+    }
+    popupElem.innerText = txt;
+    popupElem.style.backgroundColor = bgColor;
+    popupElem.style.color = textColor; // 背景色に合わせて文字色を変更
+  }
+  function hidePopup() { 
+    if (popupElem) { popupElem.remove(); popupElem = null; } 
+  }
 
   const triggerSearch = () => {
     clearTimeout(longTimer); longTimer = null;
@@ -298,13 +321,14 @@
         opt.success = resp => {
           consecutiveErrorCount = 0;
           fatalErrorCount = 0; 
-          hidePopup(); 
           
           logStock(resp, contextKey).then(anyFound => {
             if (mode === 3 && anyFound) { 
               mode = 0; 
               updateModes(); 
-              showPopup("空室"); 
+              showPopup(`🎯 空室発見!\n${getClockStr()}`, 'rgba(0, 102, 204, 0.9)'); 
+            } else {
+              showPopup(getClockStr(), 'rgba(0, 102, 204, 0.9)');
             }
           });
           ok?.(resp);
@@ -325,25 +349,29 @@
             window.RecentDaysPriceStockQuery.prototype.afterSystemErrorOccurred(k);
           }
 
-          const errStatus = k?.status || "Error";
-          const d = new Date();
-          const h = d.getHours();
-          const m = d.getMinutes();
+          const h = new Date().getHours();
+          const m = new Date().getMinutes();
           const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
+
+          // 色の定義
+          const bgRed = 'rgba(204, 0, 0, 0.9)'; // クールダウン用（赤）
+          const bgYellow = 'rgba(255, 204, 0, 0.9)'; // リトライ用（黄色）
+          const txtBlack = '#000'; // 黄色背景の時は文字を黒にして見やすく
 
           if (isBurstTime) {
             if (consecutiveErrorCount % 10 === 0) {
               handleBurstError(k, targetInfoStr);
-            } else {
-              showPopup(`${errStatus} 通信エラー\nバーストタイム突撃中 ${consecutiveErrorCount} 回目`);
             }
+            // バースト中は止まらないので常に黄色リトライ扱い
+            showPopup(`⚠️${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgYellow, txtBlack);
             if (mode !== 0) {
               clearTimeout(longTimer);
               longTimer = setTimeout(triggerSearch, 1500); 
             }
           } else {
             if (consecutiveErrorCount % 10 !== 0) {
-              showPopup(`${errStatus} 通信エラー\nリトライ ${consecutiveErrorCount} 回目`);
+              // ▼ 通常のリトライ（黄色背景＋黒文字）
+              showPopup(`⚠️${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgYellow, txtBlack);
               if (mode !== 0) {
                 clearTimeout(longTimer);
                 longTimer = setTimeout(triggerSearch, 3000); 
@@ -352,9 +380,8 @@
               handleFatalError(k, targetInfoStr);
 
               if (mode !== 0) {
-                const icons = { 1: '🏃‍♀️', 2: '🚶', 3: '👍' };
-                const iconStr = '🚫'.repeat(Math.min(fatalErrorCount, 10));
-                showPopup(`${iconStr}\n${errStatus} 通信エラー多発\n10分後に再開します (${icons[mode]})`);
+                // ▼ 10分クールダウン突入（赤背景＋白文字）
+                showPopup(`🚫${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgRed);
                 clearTimeout(longTimer);
                 longTimer = setTimeout(triggerSearch, 600000);
               }
@@ -430,15 +457,4 @@
 
     return vacancyDetected;
   }
-
-  let popupElem = null;
-  function showPopup(txt) {
-    if (popupElem) popupElem.remove();
-    popupElem = document.createElement('div');
-    popupElem.innerText = txt; 
-    popupElem.style.cssText = `position:fixed;left:50%;bottom:15%;transform:translateX(-50%);padding:8px 15px;font-size:18px;font-weight:bold;color:#fff;background:rgba(128, 0, 128, 0.9);border:2px solid #fff;border-radius:12px;cursor:pointer;z-index:999999;user-select:none;box-shadow: 0 6px 30px rgba(0,0,0,0.8);text-align:center;white-space:pre-wrap;`;
-    popupElem.onclick = () => { popupElem.remove(); popupElem = null; };
-    document.body.appendChild(popupElem);
-  }
-  function hidePopup() { if (popupElem) { popupElem.remove(); popupElem = null; } }
 })();
