@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      3.41
+// @version      4.20
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -14,163 +14,221 @@
   const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1484508249943445535/MhUkh4McvQTKXn5gQcFJ8kXMbAvqIebGq--unxE0oreYRTXbUVjsg1rOsZ8AJH7ljGQd';
 
   if (!document.querySelector('#reservationOfDateHid')) return;
-  const MARK_ID = '__restaurant_reload_running';
+  const MARK_ID = '__restaurant_reload_running_v4'; 
   if (document.getElementById(MARK_ID)) return;
 
-  let lastSearchStartTime = 0;
-  let isSearchPending = false;
-  let lastNotificationTime = 0; 
+  // 状態管理
+  const state = {
+    lastSearchStartTime: 0,
+    isSearchPending: false,
+    lastNotificationTime: 0,
+    errorCount: 0, 
+    autoOpen: localStorage.getItem('autoOpenTimeTabs') !== '0',
+    autoF5: localStorage.getItem('autoF520min') !== '0',
+    notifyEnabled: localStorage.getItem('notifyEnabled') !== '0',
+    searchStatus: localStorage.getItem('searchStatus') || 'L',
+    excludedTimes: JSON.parse(localStorage.getItem('excludedTimes') || '[]'),
+    waitSec: 15,
+    f5WaitSec: Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080,
+    nextActionTime: Date.now() + 15000 
+  };
 
-  let autoOpen = localStorage.getItem('autoOpenTimeTabs') !== '0';
-  let autoF5 = localStorage.getItem('autoF520min') !== '0';
-  let notifyEnabled = localStorage.getItem('notifyEnabled') !== '0';
-  let searchStatus = localStorage.getItem('searchStatus') || 'L'; 
-  let excludedTimes = JSON.parse(localStorage.getItem('excludedTimes') || '[]');
+  // ★連続エラーの許容回数を5回に変更
+  const ERROR_THRESHOLD = 5; 
 
-  function getRestaurantName() {
+  // --- ユーティリティ ---
+  function getRestaurantInfo() {
     const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
-    return nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
-  }
-
-  function getTargetDate() {
+    const name = nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
     const dateHid = document.querySelector('#reservationOfDateHid');
-    return dateHid ? ` [${dateHid.textContent.trim()}]` : '';
+    const dateStr = dateHid ? ` [${dateHid.textContent.trim()}]` : '';
+    return name + dateStr;
   }
 
   function sendDiscord(reasonText, isError = true) {
-    if (!notifyEnabled) return;
+    if (!state.notifyEnabled) return;
     const now = Date.now();
-    if (isError && now - lastNotificationTime < 60000) return;
+    // エラー時は1分間のクールタイム
+    if (isError && now - state.lastNotificationTime < 60000) return;
+    
     const colorCode = isError ? 16711680 : 16776960;
     const emoji = isError ? "🚫" : "🔔";
+    
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: "レストラン一般再検索",
         embeds: [{
-          title: `${emoji}${getRestaurantName()}${getTargetDate()}`,
+          title: `${emoji}${getRestaurantInfo()}`,
           description: reasonText,
           color: colorCode,
           timestamp: new Date().toISOString()
         }]
       })
-    }).then(() => { if (isError) lastNotificationTime = Date.now(); }).catch(e => console.error(e));
+    }).then(() => { if (isError) state.lastNotificationTime = Date.now(); }).catch(e => console.error(e));
   }
 
-  function addExclusionSwitches() {
-    document.querySelectorAll('tr').forEach(row => {
-      const th = row.querySelector('th');
-      const tdState = row.querySelector('.state');
-      if (!th || !tdState) return;
-      const timeStr = th.innerText.trim();
-      if (!/^\d{1,2}:\d{2}$/.test(timeStr)) return;
-      if (tdState.querySelector('.ex-switch')) return;
-
-      const isExcluded = excludedTimes.includes(timeStr);
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = 'ex-switch';
-      checkbox.checked = !isExcluded;
-      checkbox.style.cssText = 'margin-left: 10px; transform: scale(1.1); vertical-align: middle; cursor: pointer; position: relative; z-index: 100;';
-      
-      tdState.style.whiteSpace = 'nowrap';
-      checkbox.onclick = (e) => e.stopPropagation();
-      checkbox.onchange = (e) => {
-        if (!e.target.checked) {
-          if (!excludedTimes.includes(timeStr)) excludedTimes.push(timeStr);
-        } else {
-          excludedTimes = excludedTimes.filter(t => t !== timeStr);
-        }
-        localStorage.setItem('excludedTimes', JSON.stringify(excludedTimes));
-      };
-      tdState.appendChild(checkbox);
-    });
-  }
-
-  const observer = new MutationObserver(() => { addExclusionSwitches(); });
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  if (typeof $ !== "undefined") {
-    $(document).on("ajaxSend", (event, xhr, settings) => {
-      if (settings.url.includes("ajaxReservationOfDate")) {
-        lastSearchStartTime = Date.now();
-        isSearchPending = true;
-      }
-    });
-    $(document).on("ajaxComplete", (event, xhr, settings) => {
-      if (settings.url.includes("ajaxReservationOfDate")) {
-        isSearchPending = false;
-        if (xhr.status === 403) { sendDiscord("制限中。継続します。", true); return; }
-        const responseHtml = xhr.responseText;
-        if (!responseHtml) return;
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = responseHtml;
-        const availableSlots = [];
-        tempDiv.querySelectorAll('tr').forEach(row => {
-          if (row.querySelector('.state')?.textContent.includes('空席あり')) {
-            const time = row.querySelector('th')?.textContent.trim();
-            if (time && !excludedTimes.includes(time)) availableSlots.push(time);
-          }
-        });
-        if (availableSlots.length > 0) sendDiscord(`空席発見：${availableSlots.join(', ')}`, false);
-      }
-    });
-  }
-
-  const createPanel = (top, text, bg, onClick) => {
+  // --- UI構築 ---
+  const panels = {};
+  function createPanel(top, bg, onClick) {
     const p = document.createElement('div');
-    Object.assign(p.style, { position: 'fixed', top: top+'px', right: '10px', zIndex: '2147483647', padding: '8px 4px', borderRadius: '10px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', background: bg, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', opacity: '0.9', textAlign: 'center', width: '75px' });
-    p.textContent = text; p.onclick = onClick;
+    Object.assign(p.style, { position: 'fixed', top: `${top}px`, right: '10px', zIndex: '2147483647', padding: '8px 4px', borderRadius: '10px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', background: bg, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', opacity: '0.9', textAlign: 'center', width: '75px' });
+    p.onclick = onClick;
     document.body.appendChild(p);
     return p;
-  };
-
-  const mainPanel = createPanel(10, searchStatus, '#333', () => {
-    if (searchStatus === 'OFF') searchStatus = 'L';
-    else if (searchStatus === 'L') searchStatus = 'M';
-    else if (searchStatus === 'M') searchStatus = 'S';
-    else searchStatus = 'OFF';
-    localStorage.setItem('searchStatus', searchStatus);
-    lastNotificationTime = 0; updateMainPanel(); waitSec = 1; 
-  });
-
-  function updateMainPanel(isMaintenance = false) {
-    if (isMaintenance) { mainPanel.textContent = "Maint."; mainPanel.style.background = "#888"; return; }
-    mainPanel.textContent = (searchStatus === 'OFF') ? 'OFF' : `${searchStatus} ${waitSec}`;
-    const colors = { OFF: '#333', L: '#007bff', M: '#ff8c00', S: '#e83e8c' };
-    mainPanel.style.background = colors[searchStatus];
   }
 
-  const openPanel = createPanel(60, autoOpen ? 'TAB ON' : 'TAB OFF', autoOpen ? '#28a745' : '#333', () => {
-    autoOpen = !autoOpen; localStorage.setItem('autoOpenTimeTabs', autoOpen ? '1' : '0');
-    openPanel.style.background = autoOpen ? '#28a745' : '#333'; openPanel.textContent = autoOpen ? 'TAB ON' : 'TAB OFF';
+  function updatePanels(isMaintenance = false) {
+    if (isMaintenance) {
+      panels.main.textContent = "Maint.";
+      panels.main.style.background = "#888";
+    } else {
+      panels.main.textContent = state.searchStatus === 'OFF' ? 'OFF' : `${state.searchStatus} ${state.waitSec}`;
+      const colors = { OFF: '#333', L: '#007bff', M: '#ff8c00', S: '#e83e8c' };
+      panels.main.style.background = colors[state.searchStatus];
+    }
+    if (!state.autoF5) {
+      panels.f5.style.background = '#333';
+      panels.f5.textContent = 'F5 OFF';
+    } else {
+      const m = Math.floor(state.f5WaitSec / 60), s = state.f5WaitSec % 60;
+      panels.f5.style.background = '#6f42c1';
+      panels.f5.textContent = `F5 ${m}:${s.toString().padStart(2, '0')}`;
+    }
+  }
+
+  panels.main = createPanel(10, '#333', () => {
+    const nextStatus = { 'OFF': 'L', 'L': 'M', 'M': 'S', 'S': 'OFF' };
+    state.searchStatus = nextStatus[state.searchStatus];
+    localStorage.setItem('searchStatus', state.searchStatus);
+    state.lastNotificationTime = 0; 
+    setNextActionTime();
+    updatePanels();
   });
 
-  const notifyPanel = createPanel(60, notifyEnabled ? '🔔 ON' : '🔕 OFF', notifyEnabled ? '#ffc107' : '#333', () => {
-    notifyEnabled = !notifyEnabled; localStorage.setItem('notifyEnabled', notifyEnabled ? '1' : '0');
-    notifyPanel.style.background = notifyEnabled ? '#ffc107' : '#333'; 
-    notifyPanel.style.color = notifyEnabled ? '#000' : '#fff';
-    notifyPanel.textContent = notifyEnabled ? '🔔 ON' : '🔕 OFF';
+  panels.open = createPanel(60, state.autoOpen ? '#28a745' : '#333', () => {
+    state.autoOpen = !state.autoOpen;
+    localStorage.setItem('autoOpenTimeTabs', state.autoOpen ? '1' : '0');
+    panels.open.style.background = state.autoOpen ? '#28a745' : '#333';
+    panels.open.textContent = state.autoOpen ? 'TAB ON' : 'TAB OFF';
   });
-  notifyPanel.style.right = '90px';
+  panels.open.textContent = state.autoOpen ? 'TAB ON' : 'TAB OFF';
 
-  const f5Panel = createPanel(110, 'F5 OFF', '#333', () => {
-    autoF5 = !autoF5; localStorage.setItem('autoF520min', autoF5 ? '1' : '0'); updateF5Panel();
+  panels.notify = createPanel(60, state.notifyEnabled ? '#ffc107' : '#333', () => {
+    state.notifyEnabled = !state.notifyEnabled;
+    localStorage.setItem('notifyEnabled', state.notifyEnabled ? '1' : '0');
+    panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#333';
+    panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
+    panels.notify.textContent = state.notifyEnabled ? '🔔 ON' : '🔕 OFF';
   });
-  function updateF5Panel() {
-    if (!autoF5) { f5Panel.style.background = '#333'; f5Panel.textContent = 'F5 OFF'; }
-    else { const m = Math.floor(f5WaitSec / 60), s = f5WaitSec % 60; f5Panel.style.background = '#6f42c1'; f5Panel.textContent = `F5 ${m}:${s.toString().padStart(2, '0')}`; }
+  panels.notify.style.right = '90px';
+  panels.notify.textContent = state.notifyEnabled ? '🔔 ON' : '🔕 OFF';
+  panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
+
+  panels.f5 = createPanel(110, '#333', () => {
+    state.autoF5 = !state.autoF5;
+    localStorage.setItem('autoF520min', state.autoF5 ? '1' : '0');
+    updatePanels();
+  });
+
+  // --- 機能ロジック ---
+  function setNextActionTime() {
+    if (state.searchStatus === 'OFF') return;
+    const ranges = { S: [5, 6], M: [15, 11], L: [30, 11] };
+    const r = ranges[state.searchStatus];
+    state.waitSec = Math.floor(Math.random() * r[1]) + r[0];
+    state.nextActionTime = Date.now() + (state.waitSec * 1000);
   }
 
   function openAllTimeSlots() {
     const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
     targets.forEach((t, i) => setTimeout(() => t.click(), i * 250));
   }
-  
+
+  let debounceTimer;
+  function addExclusionSwitchesDebounced() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      document.querySelectorAll('tr').forEach(row => {
+        const th = row.querySelector('th');
+        const tdState = row.querySelector('.state');
+        if (!th || !tdState) return;
+        
+        const timeStr = th.innerText.trim();
+        if (!/^\d{1,2}:\d{2}$/.test(timeStr)) return;
+        if (tdState.querySelector('.ex-switch')) return;
+
+        const isExcluded = state.excludedTimes.includes(timeStr);
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'ex-switch';
+        checkbox.checked = !isExcluded;
+        checkbox.style.cssText = 'margin-left: 10px; transform: scale(1.1); vertical-align: middle; cursor: pointer; position: relative; z-index: 100;';
+        tdState.style.whiteSpace = 'nowrap';
+        
+        checkbox.onclick = (e) => e.stopPropagation();
+        checkbox.onchange = (e) => {
+          if (!e.target.checked && !state.excludedTimes.includes(timeStr)) {
+            state.excludedTimes.push(timeStr);
+          } else if (e.target.checked) {
+            state.excludedTimes = state.excludedTimes.filter(t => t !== timeStr);
+          }
+          localStorage.setItem('excludedTimes', JSON.stringify(state.excludedTimes));
+        };
+        tdState.appendChild(checkbox);
+      });
+    }, 200);
+  }
+
+  const observer = new MutationObserver(addExclusionSwitchesDebounced);
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  // Ajax監視
   if (typeof $ !== "undefined") {
+    $(document).on("ajaxSend", (event, xhr, settings) => {
+      if (settings.url.includes("ajaxReservationOfDate")) {
+        state.lastSearchStartTime = Date.now();
+        state.isSearchPending = true;
+      }
+    });
+    $(document).on("ajaxComplete", (event, xhr, settings) => {
+      if (settings.url.includes("ajaxReservationOfDate")) {
+        state.isSearchPending = false;
+        
+        // 403や500などのエラーステータスだった場合
+        if (xhr.status !== 200) { 
+          state.errorCount++;
+          if (state.errorCount >= ERROR_THRESHOLD) {
+            sendDiscord(`通信エラー連続${state.errorCount}回。制限中。`, true);
+          }
+          return; 
+        }
+
+        // 正常に通信できたらエラーカウントをリセット
+        state.errorCount = 0;
+        
+        const responseHtml = xhr.responseText;
+        if (!responseHtml) return;
+        
+        try {
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = responseHtml;
+          const availableSlots = [];
+          tempDiv.querySelectorAll('tr').forEach(row => {
+            if (row.querySelector('.state')?.textContent.includes('空席あり')) {
+              const time = row.querySelector('th')?.textContent.trim();
+              if (time && !state.excludedTimes.includes(time)) availableSlots.push(time);
+            }
+          });
+          if (availableSlots.length > 0) sendDiscord(`空席発見：${availableSlots.join(', ')}`, false);
+        } catch(e) {
+          console.error("解析エラー:", e);
+        }
+      }
+    });
     $(document).off("ajaxStop.restaurantReload").on("ajaxStop.restaurantReload", function() {
-      if (localStorage.getItem('autoOpenTimeTabs') !== '0') setTimeout(openAllTimeSlots, 300);
+      if (state.autoOpen) setTimeout(openAllTimeSlots, 300);
     });
   }
 
@@ -181,33 +239,56 @@
       const cur = $("#reservationOfDateHid").html();
       const prev = $.datepicker.parseDate("yymmdd", cur, {}).addDays(-1);
       $("#reservationOfDateHid").html($.datepicker.formatDate("yymmdd", prev, {}));
-      nextBtn.removeClass('hasNoData'); changeReservationDate('next', nextBtn[0]);
-      $.mobile.loading("hide"); lastNotificationTime = 0;
+      nextBtn.removeClass('hasNoData'); 
+      changeReservationDate('next', nextBtn[0]);
+      $.mobile.loading("hide"); 
+      state.lastNotificationTime = 0;
     }).css('cursor', 'pointer');
   };
-  reloadSP($('#reservationOfDateDisp1'));
-  document.querySelectorAll('section > div > h1:nth-child(1)').forEach(h => reloadSP(h));
+  
+  const targetDisp = document.querySelector('#reservationOfDateDisp1');
+  if (targetDisp) reloadSP($(targetDisp));
+  document.querySelectorAll('section > div > h1:nth-child(1)').forEach(h => reloadSP($(h)));
 
-  let waitSec = 15;
-  let f5WaitSec = Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080;
-  updateMainPanel(); updateF5Panel();
-  addExclusionSwitches();
+  // --- メインループ ---
+  updatePanels();
+  setNextActionTime();
 
   setInterval(() => {
-    const now = Date.now(), d = new Date(), secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
-    if (secTotal >= 10795 && secTotal <= 18005) { updateMainPanel(true); return; }
-    if (searchStatus !== 'OFF' && isSearchPending && (now - lastSearchStartTime > 120000)) {
-      sendDiscord("フリーズ：停止。", true); searchStatus = 'OFF'; updateMainPanel(); return;
+    const now = Date.now();
+    const d = new Date();
+    const secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+
+    if (secTotal >= 10795 && secTotal <= 18005) { 
+      updatePanels(true); 
+      return; 
     }
-    if (autoF5) { f5WaitSec--; updateF5Panel(); if (f5WaitSec <= 0) location.reload(); }
-    if (searchStatus === 'OFF') return;
-    waitSec--; updateMainPanel();
-    if (waitSec <= 0) {
+
+    if (state.searchStatus !== 'OFF' && state.isSearchPending && (now - state.lastSearchStartTime > 120000)) {
+      sendDiscord("フリーズ：応答がありません。停止しました。", true); 
+      state.searchStatus = 'OFF'; 
+      updatePanels(); 
+      return;
+    }
+
+    if (state.autoF5) { 
+      state.f5WaitSec--; 
+      updatePanels(); 
+      if (state.f5WaitSec <= 0) location.reload(); 
+    }
+
+    if (state.searchStatus === 'OFF') return;
+
+    state.waitSec = Math.ceil((state.nextActionTime - now) / 1000);
+    updatePanels();
+
+    if (now >= state.nextActionTime) {
       document.querySelector('#reservationOfDateDisp1')?.click();
-      const ranges = { S: [5, 6], M: [15, 11], L: [30, 11] };
-      const r = ranges[searchStatus]; waitSec = Math.floor(Math.random() * r[1]) + r[0];
+      setNextActionTime();
     }
   }, 1000);
 
-  const mark = document.createElement('div'); mark.id = MARK_ID; document.body.appendChild(mark);
+  const mark = document.createElement('div'); 
+  mark.id = MARK_ID; 
+  document.body.appendChild(mark);
 })();
