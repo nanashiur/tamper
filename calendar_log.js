@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      5.05
+// @version      5.08
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -52,9 +52,10 @@
   // 時刻取得関数（HH:mm:ss）
   const getClockStr = () => new Date().toTimeString().slice(0, 8);
 
-  // 数字を丸数字（①, ②...）に変換するヘルパー関数
+  // 数字を綺麗な丸数字（①〜㉟）に変換するヘルパー関数
   const toCircled = (num) => {
     if (num >= 1 && num <= 20) return String.fromCharCode(0x245F + num);
+    if (num >= 21 && num <= 35) return String.fromCharCode(0x3251 + num - 21);
     return `(${num})`; 
   };
 
@@ -125,7 +126,8 @@
   let consecutiveErrorCount = 0; 
   let fatalErrorCount = 0;       
 
-  let mode = load('mode', 0);
+  // ▼ ここを 0(手動) から 2(長期) に変更しました
+  let mode = load('mode', 2);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
   let notifyEnabled = load('notify', false); 
   let longTimer = null;
@@ -208,7 +210,7 @@
   updateModes(); updateNotify();
   initMonthClick();
 
-  // ▼ ミニマルポップアップ機能
+  // ミニマルポップアップ機能
   let popupElem = null;
   function showPopup(txt, bgColor, textColor = '#fff') {
     if (!popupElem) {
@@ -241,7 +243,6 @@
     if (sel && !document.querySelector('span.calLoad')) sel.dispatchEvent(new Event('change'));
   };
 
-  // ▼ エラー通知関数にカスタムメッセージ（customMsg）を渡せるように変更
   const handleFatalError = async (errObj, targetInfoStr, customMsg) => {
     fatalErrorCount++; 
     const errStatus = errObj?.status || errObj?.statusText || "Error";
@@ -259,7 +260,7 @@
     sendDiscord(payload);
   };
 
-  const handleBurstError = async (errObj, targetInfoStr) => {
+  const handleBurstError = async (errObj, targetInfoStr, customMsg) => {
     fatalErrorCount++;
     const errStatus = errObj?.status || errObj?.statusText || "Error";
     const ip = await getIP();
@@ -270,7 +271,7 @@
       embeds: [{ 
         title: `${icon} ${errStatus} 通信エラー多発`, 
         color: DISCORD_COLOR.error, 
-        description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\nバーストタイムのため続行します (${consecutiveErrorCount}回目)` 
+        description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\n${customMsg}` 
       }]
     };
     sendDiscord(payload);
@@ -354,13 +355,39 @@
           const m = new Date().getMinutes();
           const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
 
-          const bgRed = 'rgba(204, 0, 0, 0.9)'; // クールダウン用（赤）
-          const bgYellow = 'rgba(255, 204, 0, 0.9)'; // リトライ用（黄色）
+          const bgRed = 'rgba(204, 0, 0, 0.9)'; 
+          const bgYellow = 'rgba(255, 204, 0, 0.9)'; 
           const txtBlack = '#000'; 
 
+          // ユーザー指定の防衛フェーズ判定（10回、15回、20回、25回、30回）
+          let isCooldown = false;
+          let isStop = false;
+          let waitTime = 600000; // 10分
+          let msg = "10分後に現在のモードで自動再開します。";
+
+          if ([10, 15, 20].includes(consecutiveErrorCount)) {
+            isCooldown = true;
+          } else if (consecutiveErrorCount === 25) {
+            isCooldown = true;
+            waitTime = 1800000; // 30分に延長
+            msg = "30分間のロングクールダウンに入ります。";
+          } else if (consecutiveErrorCount >= 30) {
+            isStop = true;
+            msg = "完全ブロックの可能性が高いため、手動モードに変更して停止します。";
+          }
+
           if (isBurstTime) {
-            if (consecutiveErrorCount % 10 === 0) {
-              handleBurstError(k, targetInfoStr);
+            if (consecutiveErrorCount >= 30) {
+              handleBurstError(k, targetInfoStr, `バーストタイム中ですが連続${consecutiveErrorCount}回拒否されたため、安全のため自動停止（手動👆化）しました。`);
+              mode = 0;
+              updateModes();
+              showPopup(`🛑バーストブロック検知 ${getClockStr()}`, bgRed);
+              clearTimeout(longTimer);
+              return;
+            }
+
+            if (isCooldown || isStop) {
+              handleBurstError(k, targetInfoStr, `バーストタイム突撃中 (${consecutiveErrorCount}回目)`);
             }
             showPopup(`⚠️${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgYellow, txtBlack);
             if (mode !== 0) {
@@ -368,45 +395,28 @@
               longTimer = setTimeout(triggerSearch, 1500); 
             }
           } else {
-            // 通常のリトライ（1〜9, 11〜19, 21〜29...）
-            if (consecutiveErrorCount % 10 !== 0) {
+            // 通常時
+            if (isStop) {
+              handleFatalError(k, targetInfoStr, msg);
+              if (mode !== 0) {
+                mode = 0;
+                updateModes();
+                showPopup(`🛑${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgRed);
+                clearTimeout(longTimer);
+              }
+            } else if (isCooldown) {
+              handleFatalError(k, targetInfoStr, msg);
+              if (mode !== 0) {
+                showPopup(`🚫${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgRed);
+                clearTimeout(longTimer);
+                longTimer = setTimeout(triggerSearch, waitTime);
+              }
+            } else {
+              // 節目以外は3秒間隔で猶予の確認リトライ
               showPopup(`⚠️${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgYellow, txtBlack);
               if (mode !== 0) {
                 clearTimeout(longTimer);
                 longTimer = setTimeout(triggerSearch, 3000); 
-              }
-            } else {
-              // ▼ 10の倍数（クールダウン判定）
-              let msg = "10分後に現在のモードで自動再開します。";
-              let waitTime = 600000; // 10分
-              let isHardBlock = false;
-
-              if (consecutiveErrorCount === 40) {
-                // 40回目 (4回目の🚫): 30分のロングクールダウン
-                msg = "30分間のロングクールダウンに入ります。";
-                waitTime = 1800000; // 30分
-              } else if (consecutiveErrorCount >= 50) {
-                // 50回目以降 (5回目の🚫): 完全停止
-                msg = "完全ブロックの可能性が高いため、手動モードに変更して停止します。";
-                isHardBlock = true;
-              }
-
-              // Discordにエラー状況と次のアクションを通知
-              handleFatalError(k, targetInfoStr, msg);
-
-              if (mode !== 0) {
-                if (isHardBlock) {
-                  // 強制的に手動モード(0)へ移行し、タイマーを停止
-                  mode = 0;
-                  updateModes();
-                  showPopup(`🛑${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgRed);
-                  clearTimeout(longTimer);
-                } else {
-                  // 10分 または 30分 のクールダウンを実行
-                  showPopup(`🚫${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgRed);
-                  clearTimeout(longTimer);
-                  longTimer = setTimeout(triggerSearch, waitTime);
-                }
               }
             }
           }
