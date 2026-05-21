@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      4.20
+// @version      4.31
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -26,17 +26,14 @@
     autoOpen: localStorage.getItem('autoOpenTimeTabs') !== '0',
     autoF5: localStorage.getItem('autoF520min') !== '0',
     notifyEnabled: localStorage.getItem('notifyEnabled') !== '0',
-    searchStatus: localStorage.getItem('searchStatus') || 'L',
+    searchStatus: localStorage.getItem('searchStatus') || 'M',
     excludedTimes: JSON.parse(localStorage.getItem('excludedTimes') || '[]'),
     waitSec: 15,
-    f5WaitSec: Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080,
-    nextActionTime: Date.now() + 15000 
+    f5WaitSec: Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080
   };
 
-  // ★連続エラーの許容回数を5回に変更
   const ERROR_THRESHOLD = 5; 
 
-  // --- ユーティリティ ---
   function getRestaurantInfo() {
     const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
     const name = nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
@@ -48,7 +45,6 @@
   function sendDiscord(reasonText, isError = true) {
     if (!state.notifyEnabled) return;
     const now = Date.now();
-    // エラー時は1分間のクールタイム
     if (isError && now - state.lastNotificationTime < 60000) return;
     
     const colorCode = isError ? 16711680 : 16776960;
@@ -73,29 +69,49 @@
   const panels = {};
   function createPanel(top, bg, onClick) {
     const p = document.createElement('div');
-    Object.assign(p.style, { position: 'fixed', top: `${top}px`, right: '10px', zIndex: '2147483647', padding: '8px 4px', borderRadius: '10px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', background: bg, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', opacity: '0.9', textAlign: 'center', width: '75px' });
+    // 幅を縮小し、文字がなくても潰れないようminHeightを設定
+    Object.assign(p.style, { position: 'fixed', top: `${top}px`, right: '10px', zIndex: '2147483647', padding: '6px 0', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', background: bg, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', opacity: '0.9', textAlign: 'center', width: '50px', minHeight: '16px' });
     p.onclick = onClick;
     document.body.appendChild(p);
     return p;
   }
 
   function updatePanels(isMaintenance = false) {
+    // メインパネル: L/M/S の文字を削除、数字のみ
     if (isMaintenance) {
-      panels.main.textContent = "Maint.";
+      panels.main.textContent = "休止";
       panels.main.style.background = "#888";
     } else {
-      panels.main.textContent = state.searchStatus === 'OFF' ? 'OFF' : `${state.searchStatus} ${state.waitSec}`;
+      panels.main.textContent = state.searchStatus === 'OFF' ? 'OFF' : state.waitSec;
       const colors = { OFF: '#333', L: '#007bff', M: '#ff8c00', S: '#e83e8c' };
       panels.main.style.background = colors[state.searchStatus];
     }
+    
+    // F5パネル: "F5" の文字を削除、カウントのみ
     if (!state.autoF5) {
       panels.f5.style.background = '#333';
-      panels.f5.textContent = 'F5 OFF';
+      panels.f5.textContent = 'OFF';
     } else {
       const m = Math.floor(state.f5WaitSec / 60), s = state.f5WaitSec % 60;
       panels.f5.style.background = '#6f42c1';
-      panels.f5.textContent = `F5 ${m}:${s.toString().padStart(2, '0')}`;
+      panels.f5.textContent = `${m}:${s.toString().padStart(2, '0')}`;
     }
+
+    // TABパネル: 色でわかるため文字を完全削除
+    panels.open.style.background = state.autoOpen ? '#28a745' : '#333';
+    panels.open.textContent = ''; 
+
+    // 通知パネル: アイコンのみ
+    panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#333';
+    panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
+    panels.notify.textContent = state.notifyEnabled ? '🔔' : '🔕';
+  }
+
+  function resetWaitSec() {
+    if (state.searchStatus === 'OFF') return;
+    const ranges = { S: [5, 6], M: [15, 11], L: [30, 11] };
+    const r = ranges[state.searchStatus];
+    state.waitSec = Math.floor(Math.random() * r[1]) + r[0];
   }
 
   panels.main = createPanel(10, '#333', () => {
@@ -103,43 +119,28 @@
     state.searchStatus = nextStatus[state.searchStatus];
     localStorage.setItem('searchStatus', state.searchStatus);
     state.lastNotificationTime = 0; 
-    setNextActionTime();
+    resetWaitSec();
     updatePanels();
   });
 
-  panels.open = createPanel(60, state.autoOpen ? '#28a745' : '#333', () => {
+  panels.open = createPanel(60, '#333', () => {
     state.autoOpen = !state.autoOpen;
     localStorage.setItem('autoOpenTimeTabs', state.autoOpen ? '1' : '0');
-    panels.open.style.background = state.autoOpen ? '#28a745' : '#333';
-    panels.open.textContent = state.autoOpen ? 'TAB ON' : 'TAB OFF';
+    updatePanels();
   });
-  panels.open.textContent = state.autoOpen ? 'TAB ON' : 'TAB OFF';
 
-  panels.notify = createPanel(60, state.notifyEnabled ? '#ffc107' : '#333', () => {
+  panels.notify = createPanel(60, '#333', () => {
     state.notifyEnabled = !state.notifyEnabled;
     localStorage.setItem('notifyEnabled', state.notifyEnabled ? '1' : '0');
-    panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#333';
-    panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
-    panels.notify.textContent = state.notifyEnabled ? '🔔 ON' : '🔕 OFF';
+    updatePanels();
   });
-  panels.notify.style.right = '90px';
-  panels.notify.textContent = state.notifyEnabled ? '🔔 ON' : '🔕 OFF';
-  panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
+  panels.notify.style.right = '65px';
 
   panels.f5 = createPanel(110, '#333', () => {
     state.autoF5 = !state.autoF5;
     localStorage.setItem('autoF520min', state.autoF5 ? '1' : '0');
     updatePanels();
   });
-
-  // --- 機能ロジック ---
-  function setNextActionTime() {
-    if (state.searchStatus === 'OFF') return;
-    const ranges = { S: [5, 6], M: [15, 11], L: [30, 11] };
-    const r = ranges[state.searchStatus];
-    state.waitSec = Math.floor(Math.random() * r[1]) + r[0];
-    state.nextActionTime = Date.now() + (state.waitSec * 1000);
-  }
 
   function openAllTimeSlots() {
     const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
@@ -184,7 +185,6 @@
   const observer = new MutationObserver(addExclusionSwitchesDebounced);
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // Ajax監視
   if (typeof $ !== "undefined") {
     $(document).on("ajaxSend", (event, xhr, settings) => {
       if (settings.url.includes("ajaxReservationOfDate")) {
@@ -196,7 +196,6 @@
       if (settings.url.includes("ajaxReservationOfDate")) {
         state.isSearchPending = false;
         
-        // 403や500などのエラーステータスだった場合
         if (xhr.status !== 200) { 
           state.errorCount++;
           if (state.errorCount >= ERROR_THRESHOLD) {
@@ -205,7 +204,6 @@
           return; 
         }
 
-        // 正常に通信できたらエラーカウントをリセット
         state.errorCount = 0;
         
         const responseHtml = xhr.responseText;
@@ -243,6 +241,8 @@
       changeReservationDate('next', nextBtn[0]);
       $.mobile.loading("hide"); 
       state.lastNotificationTime = 0;
+      resetWaitSec(); 
+      updatePanels();
     }).css('cursor', 'pointer');
   };
   
@@ -251,8 +251,8 @@
   document.querySelectorAll('section > div > h1:nth-child(1)').forEach(h => reloadSP($(h)));
 
   // --- メインループ ---
+  resetWaitSec();
   updatePanels();
-  setNextActionTime();
 
   setInterval(() => {
     const now = Date.now();
@@ -279,12 +279,12 @@
 
     if (state.searchStatus === 'OFF') return;
 
-    state.waitSec = Math.ceil((state.nextActionTime - now) / 1000);
+    state.waitSec--;
     updatePanels();
 
-    if (now >= state.nextActionTime) {
+    if (state.waitSec <= 0) {
       document.querySelector('#reservationOfDateDisp1')?.click();
-      setNextActionTime();
+      resetWaitSec();
     }
   }, 1000);
 
