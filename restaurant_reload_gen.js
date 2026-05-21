@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      4.31
+// @version      4.32
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -69,15 +69,13 @@
   const panels = {};
   function createPanel(top, bg, onClick) {
     const p = document.createElement('div');
-    // 幅を縮小し、文字がなくても潰れないようminHeightを設定
-    Object.assign(p.style, { position: 'fixed', top: `${top}px`, right: '10px', zIndex: '2147483647', padding: '6px 0', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', background: bg, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', opacity: '0.9', textAlign: 'center', width: '50px', minHeight: '16px' });
+    Object.assign(p.style, { position: 'fixed', top: `${top}px`, right: '10px', zIndex: '2147483647', padding: '6px 0', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', background: bg, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', opacity: '0.9', textAlign: 'center', width: '50px', height: '28px', boxSizing: 'border-box' });
     p.onclick = onClick;
     document.body.appendChild(p);
     return p;
   }
 
   function updatePanels(isMaintenance = false) {
-    // メインパネル: L/M/S の文字を削除、数字のみ
     if (isMaintenance) {
       panels.main.textContent = "休止";
       panels.main.style.background = "#888";
@@ -87,7 +85,6 @@
       panels.main.style.background = colors[state.searchStatus];
     }
     
-    // F5パネル: "F5" の文字を削除、カウントのみ
     if (!state.autoF5) {
       panels.f5.style.background = '#333';
       panels.f5.textContent = 'OFF';
@@ -97,11 +94,9 @@
       panels.f5.textContent = `${m}:${s.toString().padStart(2, '0')}`;
     }
 
-    // TABパネル: 色でわかるため文字を完全削除
     panels.open.style.background = state.autoOpen ? '#28a745' : '#333';
     panels.open.textContent = ''; 
 
-    // 通知パネル: アイコンのみ
     panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#333';
     panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
     panels.notify.textContent = state.notifyEnabled ? '🔔' : '🔕';
@@ -127,6 +122,7 @@
     state.autoOpen = !state.autoOpen;
     localStorage.setItem('autoOpenTimeTabs', state.autoOpen ? '1' : '0');
     updatePanels();
+    if (state.autoOpen) openAllTimeSlots(); // 手動でONにした瞬間に開く
   });
 
   panels.notify = createPanel(60, '#333', () => {
@@ -142,9 +138,19 @@
     updatePanels();
   });
 
+  // ★修正：閉じているタブのみを判定して開くロジック
   function openAllTimeSlots() {
-    const targets = [...document.querySelectorAll('h1')].filter(h => /\d{1,2}:\d{2}/.test(h.textContent));
-    targets.forEach((t, i) => setTimeout(() => t.click(), i * 250));
+    const sections = document.querySelectorAll('section.reservationTime');
+    let delay = 0;
+    sections.forEach(sec => {
+      const h1 = sec.querySelector('h1');
+      const contents = sec.querySelector('.contents');
+      // contentsが見えない状態（＝閉じている）ならクリックして開く
+      if (h1 && contents && contents.style.display === 'none') {
+        setTimeout(() => h1.click(), delay * 200);
+        delay++;
+      }
+    });
   }
 
   let debounceTimer;
@@ -253,6 +259,9 @@
   // --- メインループ ---
   resetWaitSec();
   updatePanels();
+  
+  // 初期読み込み時にも確実にタブを開く
+  if (state.autoOpen) setTimeout(openAllTimeSlots, 1000);
 
   setInterval(() => {
     const now = Date.now();
