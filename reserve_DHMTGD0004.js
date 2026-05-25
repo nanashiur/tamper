@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004 set00
-// @version      26.09.23.1
+// @version      26.09.26.1
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,9 +16,9 @@
   // 【手動設定エリア】
   // ================================================================
   const TARGET       = 'HODHMTGD0004N';  
-  const FIX_DATE     = '20260923';       // 9/1に更新
-  const FIX_PF       = 'M17';            // M17に更新
-  const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1494882197474381835/JIR_jzaAbrFFvj7-qPP8FO8kmWVp6ufX8bmCpOpFRQ4kPZVX_lTTF6knh79I2dLvy6aD';
+  const FIX_DATE     = '20260926';       
+  const FIX_PF       = 'M20';            
+  const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1508596368111960080/IA4d4Zzctj8dfRiwTsPlKhzO2I80S-19h3zL7-iuRsmnoCI1kpwAvNJloo_mPFwbswnX';
   // ================================================================
 
   if (window.__tdr_combined_installed) return;
@@ -38,7 +38,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: "🏨 DHMTGD0004 set00",
+        username: "🏨 DHMTGD0004 set00", // [PRO]を削除
         embeds: [{
           title: "403エラー監視",
           color: 16762880, 
@@ -55,7 +55,6 @@
   const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled'; 
   const START_TIME_KEY = 'auto_click_start';
 
-  // デフォルト値を設定 (初回実行時のみ)
   if (localStorage.getItem(STORAGE_FIXED_KEY) === null) localStorage.setItem(STORAGE_FIXED_KEY, 'true');
   if (localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) === null) localStorage.setItem(STORAGE_TIMER_ON_MODE_KEY, '1');
 
@@ -196,10 +195,26 @@
       const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
       const isBurstTime = (h === 10 && m === 59 && s >= 50) || (h === 11 && m === 0 && s <= 20);
       TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
-      if (TIMER_OFF_ENABLED && h === 11 && m === 0 && s >= 35) { if (currentClickMode === 'FAST') { currentClickMode = 'STOP'; localStorage.setItem(STORAGE_CLICK_KEY, 'STOP'); updateClickUI(); } }
-      if (TIMER_ON_MODE > 0 && h === 10 && m === 59 && s >= randomTriggerSec && currentClickMode === 'STOP' && !IS_FORCED_STOP) { currentClickMode = 'FAST'; localStorage.setItem(STORAGE_CLICK_KEY, 'FAST'); updateClickUI(); }
+      
+      if (TIMER_OFF_ENABLED && h === 11 && m === 0 && s >= 35) { 
+        if (currentClickMode === 'FAST') { currentClickMode = 'STOP'; localStorage.setItem(STORAGE_CLICK_KEY, 'STOP'); updateClickUI(); } 
+      }
+      if (TIMER_ON_MODE > 0 && h === 10 && m === 59 && s >= randomTriggerSec && currentClickMode === 'STOP' && !IS_FORCED_STOP) { 
+        currentClickMode = 'FAST'; localStorage.setItem(STORAGE_CLICK_KEY, 'FAST'); updateClickUI(); 
+      }
+
       let isWaiting = false;
-      if (currentClickMode !== 'STOP' && !IS_FORCED_STOP) { const btn = document.querySelector('.js-reserve.button.next'); if (btn) { btn.click(); isWaiting = false; } else { isWaiting = true; } }
+      if (currentClickMode !== 'STOP' && !IS_FORCED_STOP) { 
+        const btn = document.querySelector('.js-reserve.button.next'); 
+        if (btn) { 
+          btn.disabled = false;
+          btn.classList.remove('is-disabled');
+          btn.click(); 
+          isWaiting = false; 
+        } else { 
+          isWaiting = true; 
+        } 
+      }
       updateClickUI(isWaiting, isBurstTime);
       let nextInterval = (currentClickMode === 'STOP' || IS_FORCED_STOP) ? 1000 : (isBurstTime ? 1000 : Math.random() * 1000 + 1500);
       setTimeout(loop, nextInterval);
