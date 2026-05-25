@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      5.08
+// @version      5.09
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -10,7 +10,8 @@
 (() => {
   'use strict';
 
-  const WEBHOOK_URL = 'https://discord.com/api/webhooks/1494882197474381835/JIR_jzaAbrFFvj7-qPP8FO8kmWVp6ufX8bmCpOpFRQ4kPZVX_lTTF6knh79I2dLvy6aD';
+  // ▼ ご指定の新しいWebhook URLに変更しました
+  const WEBHOOK_URL = 'https://discord.com/api/webhooks/1508596368111960080/IA4d4Zzctj8dfRiwTsPlKhzO2I80S-19h3zL7-iuRsmnoCI1kpwAvNJloo_mPFwbswnX';
 
   const save = (key, val) => localStorage.setItem(`cal_log_${key}`, JSON.stringify(val));
   const load = (key, def) => {
@@ -126,7 +127,6 @@
   let consecutiveErrorCount = 0; 
   let fatalErrorCount = 0;       
 
-  // ▼ ここを 0(手動) から 2(長期) に変更しました
   let mode = load('mode', 2);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
   let notifyEnabled = load('notify', false); 
@@ -466,7 +466,7 @@
               }
             }
             lastStateMap.set(stateKey, { st, rm });
-            if (filters[st]) console.log(`%c${dt}%c\t%c${LABEL[st]}　${rm}　${priceRank}`, '', '', STYLE[st]);
+            if (filters[st]) console.log(`%c${dt}%c\t%c${LABEL[st]} ${rm} ${priceRank}`, '', '', STYLE[st]);
           }
         }
       }
@@ -480,9 +480,9 @@
         sendDiscord({
           username: "📅 空室在庫ログ",
           embeds: [{
-            title: `${TITLE_EMOJI[item.st] ?? ''} **${tStrSec()}**\n${item.dt}　${item.changeTxt}\n${item.roomName}`,
+            title: `${TITLE_EMOJI[item.st] ?? ''} **${tStrSec()}**\n${item.dt} ${item.changeTxt}\n${item.roomName}`,
             color: DISCORD_COLOR[item.st] ?? 1,
-            description: `時刻: ${tStrMs()} (${currentIp})\n在庫${MARKS[item.rm] || '◯'}　${item.totalPrice.toLocaleString()}円　[${item.priceRank}]`
+            description: `時刻: ${tStrMs()} (${currentIp})\n在庫${MARKS[item.rm] || '◯'} ${item.totalPrice.toLocaleString()}円 [${item.priceRank}]`
           }]
         });
       }
