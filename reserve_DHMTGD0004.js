@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004 set00
-// @version      26.10.08.1
+// @version      26.10.08.0
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
