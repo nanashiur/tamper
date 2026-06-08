@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨 DHMTGD0004 set00
-// @version      26.10.05.1
+// @version      26.10.08.1
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve_DHMTGD0004.js
@@ -16,7 +16,7 @@
   // 【手動設定エリア】
   // ================================================================
   const TARGET       = 'HODHMTGD0004N';  
-  const FIX_DATE     = '20261005';       
+  const FIX_DATE     = '20261008';       
   const FIX_PF       = 'M28';            
   const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1508596368111960080/IA4d4Zzctj8dfRiwTsPlKhzO2I80S-19h3zL7-iuRsmnoCI1kpwAvNJloo_mPFwbswnX';
   // ================================================================
