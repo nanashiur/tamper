@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         🛋️ 部屋更新
-// @version      1.7
+// @namespace    http://tampermonkey.net/
+// @version      1.8
 // @match        https://reserve.tokyodisneyresort.jp/online/hotel/update/
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/room_update.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/room_update.js
@@ -13,10 +14,12 @@
   const startTime = Date.now();
   let running = sessionStorage.getItem('tdr-run') === '1';
   let clicked = false;
-  const WEBHOOK_URL = 'https://discord.com/api/webhooks/1484508249943445535/MhUkh4McvQTKXn5gQcFJ8kXMbAvqIebGq--unxE0oreYRTXbUVjsg1rOsZ8AJH7ljGQd';
 
   function sendDiscordNotification() {
-    fetch(WEBHOOK_URL, {
+    const url = window.TDR_WEBHOOKS?.hotel;
+    if (!url) return;
+
+    fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
