@@ -1,6 +1,5 @@
 // ==UserScript==
 // @name         ⏳️待合室タイマー
-// @namespace    http://tampermonkey.net/
 // @version      6.05
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_limit.js
