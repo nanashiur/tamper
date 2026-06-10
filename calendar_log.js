@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 空室在庫ログ
-// @version      5.09
+// @version      5.11
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -10,8 +10,11 @@
 (() => {
   'use strict';
 
-  // ▼ ご指定の新しいWebhook URLに変更しました
-  const WEBHOOK_URL = 'https://discord.com/api/webhooks/1508596368111960080/IA4d4Zzctj8dfRiwTsPlKhzO2I80S-19h3zL7-iuRsmnoCI1kpwAvNJloo_mPFwbswnX';
+  const SHARED_DATA_KEY = 'tdr_11am_reserve_data';
+
+  const getDiscordWebhookUrl = () => {
+    return window.TDR_WEBHOOKS?.hotel || '';
+  };
 
   const save = (key, val) => localStorage.setItem(`cal_log_${key}`, JSON.stringify(val));
   const load = (key, def) => {
@@ -26,20 +29,19 @@
   const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
   const BTN_BG_COLOR = { 0: 'red', 1: 'black', 2: 'blue', 3: 'green' };
 
-  // コンパクトUI用の設定
   const MODE_CONF = {
     0: { txt: '👆', bg: '#000', fg: '#fff' },
-    1: { txt: '🏃‍♀️', bg: 'orange', fg: '#fff' }, 
-    2: { txt: '🚶', bg: 'purple', fg: '#fff' }, 
+    1: { txt: '🏃‍♀️', bg: 'orange', fg: '#fff' },
+    2: { txt: '🚶', bg: 'purple', fg: '#fff' },
     3: { txt: '👍', bg: 'pink', fg: '#000' }
   };
 
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
 
   const pad = (x, len = 2) => String(x).padStart(len, '0');
-  const tStrSec = () => { 
-    const d = new Date(); 
-    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}`; 
+  const tStrSec = () => {
+    const d = new Date();
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}`;
   };
   const tStrMs = () => {
     const d = new Date();
@@ -49,18 +51,21 @@
     const d = new Date();
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
   };
-  
-  // 時刻取得関数（HH:mm:ss）
+
+  const getTargetUseDate = () => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 4);
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  };
+
   const getClockStr = () => new Date().toTimeString().slice(0, 8);
 
-  // 数字を綺麗な丸数字（①〜㉟）に変換するヘルパー関数
   const toCircled = (num) => {
     if (num >= 1 && num <= 20) return String.fromCharCode(0x245F + num);
     if (num >= 21 && num <= 35) return String.fromCharCode(0x3251 + num - 21);
-    return `(${num})`; 
+    return `(${num})`;
   };
 
-  // --- IP Caching System ---
   let cachedIP = 'unknown';
   let lastIPFetchTime = 0;
 
@@ -83,10 +88,9 @@
         }
       } catch (e) { continue; }
     }
-    return cachedIP; 
+    return cachedIP;
   };
 
-  // --- Discord Webhook Queue System ---
   const discordQueue = [];
   let isProcessingQueue = false;
 
@@ -96,15 +100,29 @@
 
     while (discordQueue.length > 0) {
       const payload = discordQueue[0];
+      const webhookUrl = getDiscordWebhookUrl();
+
+      if (!webhookUrl) {
+        console.warn('Discord Webhook未設定: window.TDR_WEBHOOKS.hotel を確認してください');
+        discordQueue.shift();
+        continue;
+      }
+
       try {
-        const resp = await fetch(WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const resp = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
         if (resp.status === 429) {
           const rateLimitInfo = await resp.json();
           const retryAfter = rateLimitInfo.retry_after || 1;
           console.warn(`Discord Rate Limit: Waiting ${retryAfter}s...`);
           await new Promise(r => setTimeout(r, retryAfter * 1000));
-          continue; 
+          continue;
         }
+
         discordQueue.shift();
         await new Promise(r => setTimeout(r, 250));
       } catch (e) {
@@ -112,6 +130,7 @@
         discordQueue.shift();
       }
     }
+
     isProcessingQueue = false;
   };
 
@@ -119,28 +138,27 @@
     discordQueue.push(payload);
     processDiscordQueue();
   };
-  // --------------------------------------------------------
 
   const lastStateMap = new Map();
   const loadedKeys = new Set();
-  
-  let consecutiveErrorCount = 0; 
-  let fatalErrorCount = 0;       
+
+  let consecutiveErrorCount = 0;
+  let fatalErrorCount = 0;
 
   let mode = load('mode', 2);
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
-  let notifyEnabled = load('notify', false); 
+  let notifyEnabled = load('notify', false);
   let longTimer = null;
 
   const initMonthClick = () => {
     const isSP = !!document.querySelector('.boxCalendar.month table');
-    const monthElem = isSP 
+    const monthElem = isSP
       ? document.querySelector('.boxCalendar.month .selectMonth li p.currentMonth')
       : document.querySelector('.boxInputSelect .cal table.vacancyCalTable tbody tr th.heading');
     if (monthElem && !monthElem.dataset.hasListener) {
       monthElem.style.cursor = 'pointer';
       monthElem.addEventListener('click', () => {
-        const loading = isSP 
+        const loading = isSP
           ? document.querySelectorAll('.boxCalendar.month table tbody tr td dl dd span.calLoad').length > 0
           : document.querySelectorAll('.boxInputSelect .cal table.vacancyCalTable tbody tr td dl dd span img.spinner').length > 0;
         if (!loading) document.getElementById('boxCalendarSelect')?.dispatchEvent(new Event('change'));
@@ -149,7 +167,6 @@
     }
   };
 
-  // UI構築
   const makeBtn = (txt, bg, fg = '#fff') => Object.assign(document.createElement('div'), {
     textContent: txt,
     style: `background-color:${bg} !important; color:${fg} !important; padding:4px 6px; cursor:pointer; border-radius:4px; font-size:14px; user-select:none; text-align:center; min-width:26px; line-height:1.2; font-weight:bold; transition:opacity 0.2s;`
@@ -162,7 +179,6 @@
   const row1 = Object.assign(document.createElement('div'), { style: 'display:flex; justify-content:flex-start; align-items:center; gap:4px;' });
   const row2 = Object.assign(document.createElement('div'), { style: 'display:flex; justify-content:flex-start; align-items:center; gap:4px;' });
 
-  // === 上段（モード＆通知）の構築 ===
   const modeBtns = [];
   const updateModes = () => {
     modeBtns.forEach((btn, i) => {
@@ -175,42 +191,39 @@
     const conf = MODE_CONF[m];
     const btn = makeBtn(conf.txt, conf.bg, conf.fg);
     btn.onclick = () => {
-      if (mode === m) return; 
+      if (mode === m) return;
       hidePopup(); clearTimeout(longTimer); longTimer = null;
-      consecutiveErrorCount = 0; fatalErrorCount = 0; 
-      mode = m; 
-      updateModes(); 
-      if (mode !== 0) triggerSearch(); 
+      consecutiveErrorCount = 0; fatalErrorCount = 0;
+      mode = m;
+      updateModes();
+      if (mode !== 0) triggerSearch();
     };
     modeBtns.push(btn);
     row1.appendChild(btn);
   });
 
-  const btnNotify = makeBtn('🔔', 'gray', '#fff'); 
-  const updateNotify = () => { 
-    btnNotify.style.opacity = notifyEnabled ? '1' : '0.3'; 
+  const btnNotify = makeBtn('🔔', 'gray', '#fff');
+  const updateNotify = () => {
+    btnNotify.style.opacity = notifyEnabled ? '1' : '0.3';
     btnNotify.style.setProperty('background-color', notifyEnabled ? 'purple' : 'gray', 'important');
-    save('notify', notifyEnabled); 
+    save('notify', notifyEnabled);
   };
   btnNotify.onclick = () => { notifyEnabled = !notifyEnabled; updateNotify(); };
   row1.appendChild(btnNotify);
 
-  // === 下段（フィルタ）の構築 ===
   const makeFilter = c => {
-    const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff'); 
+    const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff');
     const updateF = () => b.style.opacity = filters[c] ? '1' : '0.3';
     b.onclick = () => { filters[c] = !filters[c]; updateF(); save('filters', filters); };
     updateF(); return b;
   };
   row2.append(makeFilter(0), makeFilter(1), makeFilter(2), makeFilter(3));
 
-  // パネルへ組み込み
   panel.append(row1, row2);
   document.body.appendChild(panel);
   updateModes(); updateNotify();
   initMonthClick();
 
-  // ミニマルポップアップ機能
   let popupElem = null;
   function showPopup(txt, bgColor, textColor = '#fff') {
     if (!popupElem) {
@@ -223,8 +236,9 @@
     popupElem.style.backgroundColor = bgColor;
     popupElem.style.color = textColor;
   }
-  function hidePopup() { 
-    if (popupElem) { popupElem.remove(); popupElem = null; } 
+
+  function hidePopup() {
+    if (popupElem) { popupElem.remove(); popupElem = null; }
   }
 
   const triggerSearch = () => {
@@ -233,9 +247,9 @@
     const h = now.getHours();
     const m = now.getMinutes();
     if (h >= 3 && h < 5) {
-      let interval = 600000; 
-      if (h === 4 && m === 59) interval = 1000; 
-      else if (h === 4 && m >= 55) interval = 10000; 
+      let interval = 600000;
+      if (h === 4 && m === 59) interval = 1000;
+      else if (h === 4 && m >= 55) interval = 10000;
       longTimer = setTimeout(triggerSearch, interval);
       return;
     }
@@ -244,20 +258,19 @@
   };
 
   const handleFatalError = async (errObj, targetInfoStr, customMsg) => {
-    fatalErrorCount++; 
+    fatalErrorCount++;
     const errStatus = errObj?.status || errObj?.statusText || "Error";
     const ip = await getIP();
     const icon = '🚫'.repeat(Math.min(fatalErrorCount, 10));
 
-    const payload = {
+    sendDiscord({
       username: "📅 空室在庫ログ",
-      embeds: [{ 
-        title: `${icon} ${errStatus} 通信エラー多発`, 
-        color: DISCORD_COLOR.error, 
-        description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\n${consecutiveErrorCount}回連続でエラーが発生しました。\n${customMsg}` 
+      embeds: [{
+        title: `${icon} ${errStatus} 通信エラー多発`,
+        color: DISCORD_COLOR.error,
+        description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\n${consecutiveErrorCount}回連続でエラーが発生しました。\n${customMsg}`
       }]
-    };
-    sendDiscord(payload);
+    });
   };
 
   const handleBurstError = async (errObj, targetInfoStr, customMsg) => {
@@ -266,24 +279,23 @@
     const ip = await getIP();
     const icon = '🚫'.repeat(Math.min(fatalErrorCount, 10));
 
-    const payload = {
+    sendDiscord({
       username: "📅 空室在庫ログ",
-      embeds: [{ 
-        title: `${icon} ${errStatus} 通信エラー多発`, 
-        color: DISCORD_COLOR.error, 
-        description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\n${customMsg}` 
+      embeds: [{
+        title: `${icon} ${errStatus} 通信エラー多発`,
+        color: DISCORD_COLOR.error,
+        description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\n${customMsg}`
       }]
-    };
-    sendDiscord(payload);
+    });
   };
 
   if (window.$?.lifeobs?.ajax) {
     const orig_ajax = window.$.lifeobs.ajax;
     window.$.lifeobs.ajax = function (opt) {
       if (opt.url && opt.url.includes('/hotel/api/queryHotelPriceStock/')) {
-        
+
         let p_ym = '', p_hotel = '', p_room = '';
-        
+
         if (opt.data) {
           if (typeof opt.data === 'string') {
             try {
@@ -303,7 +315,7 @@
             p_room = opt.data.roomCd || opt.data.hotelRoomCd || opt.data.commodityCD || '';
           }
         }
-        
+
         const curUrl = new URLSearchParams(window.location.search);
         p_ym = p_ym || curUrl.get('useYearMonth') || curUrl.get('useDate') || '';
         p_hotel = p_hotel || curUrl.get('searchHotelCD') || curUrl.get('hotelId') || '';
@@ -318,17 +330,17 @@
         const targetInfoStr = `[${yearMonthStr} ${hotelStr} ${roomStr}]`.trim().replace(/ +/g, ' ');
 
         const contextKey = `${p_hotel || 'default'}_${p_ym || 'now'}`;
-        
+
         const ok = opt.success;
         opt.success = resp => {
           consecutiveErrorCount = 0;
-          fatalErrorCount = 0; 
-          
+          fatalErrorCount = 0;
+
           logStock(resp, contextKey).then(anyFound => {
-            if (mode === 3 && anyFound) { 
-              mode = 0; 
-              updateModes(); 
-              showPopup(`🎯 空室発見!\n${getClockStr()}`, 'rgba(0, 102, 204, 0.9)'); 
+            if (mode === 3 && anyFound) {
+              mode = 0;
+              updateModes();
+              showPopup(`🎯 空室発見!\n${getClockStr()}`, 'rgba(0, 102, 204, 0.9)');
             } else {
               showPopup(getClockStr(), 'rgba(0, 102, 204, 0.9)');
             }
@@ -345,7 +357,7 @@
         };
 
         opt.error = function(k) {
-          consecutiveErrorCount++; 
+          consecutiveErrorCount++;
 
           if (window.RecentDaysPriceStockQuery?.prototype?.afterSystemErrorOccurred) {
             window.RecentDaysPriceStockQuery.prototype.afterSystemErrorOccurred(k);
@@ -355,21 +367,20 @@
           const m = new Date().getMinutes();
           const isBurstTime = (h === 10 && m === 59) || (h === 11 && m >= 0 && m <= 4);
 
-          const bgRed = 'rgba(204, 0, 0, 0.9)'; 
-          const bgYellow = 'rgba(255, 204, 0, 0.9)'; 
-          const txtBlack = '#000'; 
+          const bgRed = 'rgba(204, 0, 0, 0.9)';
+          const bgYellow = 'rgba(255, 204, 0, 0.9)';
+          const txtBlack = '#000';
 
-          // ユーザー指定の防衛フェーズ判定（10回、15回、20回、25回、30回）
           let isCooldown = false;
           let isStop = false;
-          let waitTime = 600000; // 10分
+          let waitTime = 600000;
           let msg = "10分後に現在のモードで自動再開します。";
 
           if ([10, 15, 20].includes(consecutiveErrorCount)) {
             isCooldown = true;
           } else if (consecutiveErrorCount === 25) {
             isCooldown = true;
-            waitTime = 1800000; // 30分に延長
+            waitTime = 1800000;
             msg = "30分間のロングクールダウンに入ります。";
           } else if (consecutiveErrorCount >= 30) {
             isStop = true;
@@ -392,10 +403,9 @@
             showPopup(`⚠️${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgYellow, txtBlack);
             if (mode !== 0) {
               clearTimeout(longTimer);
-              longTimer = setTimeout(triggerSearch, 1500); 
+              longTimer = setTimeout(triggerSearch, 1500);
             }
           } else {
-            // 通常時
             if (isStop) {
               handleFatalError(k, targetInfoStr, msg);
               if (mode !== 0) {
@@ -412,11 +422,10 @@
                 longTimer = setTimeout(triggerSearch, waitTime);
               }
             } else {
-              // 節目以外は3秒間隔で猶予の確認リトライ
               showPopup(`⚠️${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgYellow, txtBlack);
               if (mode !== 0) {
                 clearTimeout(longTimer);
-                longTimer = setTimeout(triggerSearch, 3000); 
+                longTimer = setTimeout(triggerSearch, 3000);
               }
             }
           }
@@ -431,7 +440,8 @@
     const isFirstTime = !loadedKeys.has(contextKey);
     let vacancyDetected = false;
     const nowObj = new Date();
-    
+    const targetUseDate = getTargetUseDate();
+
     const pendingNotifications = [];
 
     console.group(tStrMs());
@@ -440,7 +450,7 @@
         const roomName = r.roomName || "不明な客室";
         for (const [roomCd, b] of Object.entries(r.roomBedStockRangeInfos ?? {})) {
           for (const d of (b.roomBedStockRange ?? [])) {
-            const dtRaw = d.useDate; 
+            const dtRaw = d.useDate;
             const useDateObj = new Date(dtRaw.slice(0, 4), dtRaw.slice(4, 6) - 1, dtRaw.slice(6));
             const dt = `${dtRaw.slice(0, 4)}/${dtRaw.slice(4, 6)}/${dtRaw.slice(6)}`;
             const st = +d.saleStatus;
@@ -450,6 +460,16 @@
             const commodityCd = d.commodityCd || roomCd || "不明";
             const stateKey = `${contextKey}__${commodityCd}__${dt}`;
             const prev = lastStateMap.get(stateKey);
+
+            if (dtRaw === targetUseDate) {
+              localStorage.setItem(SHARED_DATA_KEY, JSON.stringify({
+                TARGET: commodityCd,
+                FIX_DATE: dtRaw,
+                FIX_PF: priceRank,
+                roomName,
+                savedAt: Date.now()
+              }));
+            }
 
             if (st === 0 && rm > 0) vacancyDetected = true;
 
@@ -461,7 +481,7 @@
                 let changeTxt;
                 if (prev.st !== st) changeTxt = `${FULL_LABEL[prev.st]}→${FULL_LABEL[st]}`;
                 else changeTxt = `${MARKS[prev.rm] || prev.rm}→${MARKS[rm] || rm}`;
-                
+
                 pendingNotifications.push({ st, rm, dt, changeTxt, roomName, totalPrice, priceRank });
               }
             }
