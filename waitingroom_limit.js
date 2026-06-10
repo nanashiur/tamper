@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ⏳️待合室タイマー
-// @version      6.05
+// @version      6.09
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_limit.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_limit.js
