@@ -1,7 +1,6 @@
 // ==UserScript==
 // @name         🍴📱ショーレストラン再検索
-// @namespace    http://tampermonkey.net/
-// @version      1.60
+// @version      1.61
 // @match        https://reserve.tokyodisneyresort.jp/sp/showrestaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/showrestaurant_reload_gen.js
