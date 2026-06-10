@@ -1,6 +1,5 @@
 // ==UserScript==
 // @name         🛋️ 部屋更新
-// @namespace    http://tampermonkey.net/
 // @version      1.7
 // @match        https://reserve.tokyodisneyresort.jp/online/hotel/update/
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/room_update.js
