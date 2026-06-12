@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      4.46
+// @version      4.49
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -137,15 +137,26 @@
     return `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
   }
 
+  function formatSlotLines(availableSlots) {
+    const groups = {};
+    availableSlots.forEach(time => {
+      const hour = time.split(':')[0];
+      if (!groups[hour]) groups[hour] = [];
+      groups[hour].push(time);
+    });
+    return Object.keys(groups)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(hour => `⏰ ${groups[hour].join(' ')}`);
+  }
+
   function buildVacancyMessage(availableSlots, mealName) {
     const restaurantName = getRestaurantName();
     const displayDate = getDisplayDate();
     const lines = [
-      `⏱️ 検知日時: ${getDetectDateTime()}`,
-      `🏨 ${restaurantName}`,
+      `🍴 ${restaurantName}`,
       `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`
     ];
-    availableSlots.forEach(time => lines.push(`⏰ ${time}`));
+    lines.push(...formatSlotLines(availableSlots));
     return lines.join('\n');
   }
 
@@ -164,7 +175,7 @@
       body: JSON.stringify({
         username: "レストラン一般再検索",
         embeds: [{
-          title: isError ? `${emoji}${getRestaurantInfo()}` : "🔔 空席発見！",
+          title: isError ? `${emoji}${getRestaurantInfo()}` : `🔔${getDetectDateTime()}`,
           description: reasonText,
           color: colorCode
         }]
@@ -202,14 +213,14 @@
     }
 
     panels.open.style.background = state.autoOpen ? '#28a745' : '#333';
-    panels.open.textContent = '';
+    panels.open.textContent = 'TAB';
 
     panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#333';
     panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
     panels.notify.textContent = state.notifyEnabled ? '🔔' : '🔕';
 
     if (panels.reset) {
-      panels.reset.textContent = 'RESET';
+      panels.reset.textContent = 'リセット';
       panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#000';
     }
   }
@@ -230,33 +241,35 @@
     updatePanels();
   });
 
+  panels.notify = createPanel(50, '#333', () => {
+    state.notifyEnabled = !state.notifyEnabled;
+    localStorage.setItem('notifyEnabled', state.notifyEnabled ? '1' : '0');
+    updatePanels();
+  });
+
+  panels.reset = createPanel(90, '#000', () => {
+    state.excludedTimes = [];
+    localStorage.setItem('excludedTimes', '[]');
+    document.querySelectorAll('.ex-switch').forEach(cb => { cb.checked = true; });
+    updatePanels();
+  });
+  panels.reset.textContent = 'リセット';
+
+  panels.f5 = createPanel(10, '#333', () => {
+    state.autoF5 = !state.autoF5;
+    localStorage.setItem('autoF520min', state.autoF5 ? '1' : '0');
+    updatePanels();
+  });
+  panels.f5.style.right = '84px';
+
   panels.open = createPanel(50, '#333', () => {
     state.autoOpen = !state.autoOpen;
     localStorage.setItem('autoOpenTimeTabs', state.autoOpen ? '1' : '0');
     updatePanels();
     if (state.autoOpen) openAllTimeSlots(); // 手動でONにした瞬間に開く
   });
-
-  panels.notify = createPanel(50, '#333', () => {
-    state.notifyEnabled = !state.notifyEnabled;
-    localStorage.setItem('notifyEnabled', state.notifyEnabled ? '1' : '0');
-    updatePanels();
-  });
-  panels.notify.style.right = '84px';
-
-  panels.f5 = createPanel(90, '#333', () => {
-    state.autoF5 = !state.autoF5;
-    localStorage.setItem('autoF520min', state.autoF5 ? '1' : '0');
-    updatePanels();
-  });
-
-  panels.reset = createPanel(130, '#000', () => {
-    state.excludedTimes = [];
-    localStorage.setItem('excludedTimes', '[]');
-    document.querySelectorAll('.ex-switch').forEach(cb => { cb.checked = true; });
-    updatePanels();
-  });
-  panels.reset.textContent = 'RESET';
+  panels.open.style.right = '84px';
+  panels.open.textContent = 'TAB';
 
   // ★修正：閉じているタブのみを判定して開くロジック
   function openAllTimeSlots() {
