@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         🍴レストラン検索（宿泊特典）
-// @namespace    st.tdr
-// @version      1.3.1
-// @description  「時間の選択」画面で時間帯別再検索／「人数・時間の選択」で2回目以降は全時間帯再検索。右上パネルで30～50秒ランダム間隔の自動再検索ON/OFF（OFF時は「OFF」と表示）。
+// @name         🍴📱宿泊特典レストラン検索
+// @version      2.35
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
-// @grant        none
+// @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @connect      discord.com
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/priviledges_restaurant_reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/priviledges_restaurant_reload.js
 // ==/UserScript==
@@ -13,188 +13,518 @@
 (function () {
   'use strict';
 
-  const MARK_ID = '__privileges_restaurant_reload';
-  const ready = () =>
-    window.jQuery &&
-    window.controller && controller.getTimeInfo &&
-    window.timeGet && timeGet.refresh &&
-    window.setupAccordion &&
-    document.getElementById('timeContent') &&
-    document.getElementById('timeType');
+  const win = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
-  const boot = () => {
-    if (document.getElementById(MARK_ID)) return;
-    if (!ready()) { setTimeout(boot, 300); return; }
+  const ranges = {
+    S: [5, 6],
+    M: [15, 11],
+    L: [30, 21]
+  };
 
-    (function () {
-      const markingElemId = '__privileges_restaurant_reload';
-      if (document.getElementById(markingElemId)) return;
-      if (!document.getElementById('timeContent') || !document.getElementById('timeType')) return;
+  function getRandomWait(mode) {
+    const r = ranges[mode];
+    if (!r) return 15;
+    return Math.floor(Math.random() * r[1]) + r[0];
+  }
 
-      const markingElem = document.createElement('div');
-      markingElem.id = markingElemId;
-      markingElem.style.display = 'none';
-      document.body.appendChild(markingElem);
+  function loadExcludedTimes() {
+    try {
+      const arr = JSON.parse(localStorage.getItem('tdr_priv_excludedTimes') || '[]');
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
 
-      const getTextNode = ($target) => {
-        let result = '';
-        $($target).contents().each(function () {
-          if (this.nodeType === 3 && /\S/.test(this.data)) {
-            result += this.nodeValue;
-          }
-        });
-        return result;
-      };
+  const state = {
+    notifyEnabled: localStorage.getItem('tdr_priv_notifyEnabled') !== '0',
+    searchStatus: localStorage.getItem('tdr_priv_searchStatus') || 'OFF',
+    excludedTimes: loadExcludedTimes(),
+    waitSec: 15
+  };
 
-      let opened_headers = [];
-      const save_accordion_status = () => {
-        opened_headers = [];
-        $('#timeContent section.js-accordion header.open h1').each((i, el) => {
-          const headerText = getTextNode(el);
-          opened_headers.push(headerText);
-        });
-      };
+  if (!ranges[state.searchStatus] && state.searchStatus !== 'OFF') {
+    state.searchStatus = 'OFF';
+    localStorage.setItem('tdr_priv_searchStatus', 'OFF');
+  }
 
-      const timeRanges = document.querySelectorAll('#timeContent section h1#mealDivName');
-      timeRanges.forEach((el_timeRange) => {
-        el_timeRange.addEventListener('click', () => {
-          save_accordion_status();
-          const timeType = $("#timeType").val();
-          const el_sections = $(el_timeRange).closest(`section[class$=${timeType}]`).siblings(`section[class$=${timeType}]`);
-          el_sections.each((id, el) => {
-            for (const cls of el.classList) {
-              if (cls.endsWith(timeType)) {
-                $(el).removeClass(cls).addClass(`__${cls}`);
-              }
+  if (state.searchStatus !== 'OFF') {
+    state.waitSec = getRandomWait(state.searchStatus);
+  }
+
+  function getDiscordWebhookUrl() {
+    return win.TDR_WEBHOOKS?.restaurant || window.TDR_WEBHOOKS?.restaurant || '';
+  }
+
+  function boot() {
+    const $ = win.jQuery;
+
+    if (!$ || !document.body) {
+      setTimeout(boot, 300);
+      return;
+    }
+
+    if (win.__tdr_priv_restaurant_notify_installed) return;
+    win.__tdr_priv_restaurant_notify_installed = true;
+
+    win.lastClickedRestaurantTitle = "レストラン名不明";
+
+    $(document).on('click', '.js-selectContents, a.ui-link', function () {
+      const titleEl = $(this).closest('li').find('p.title');
+      if (titleEl.length) {
+        win.lastClickedRestaurantTitle = titleEl.text().trim();
+      }
+    });
+
+    const getTextNode = ($target) => {
+      let result = '';
+      $($target).contents().each(function () {
+        if (this.nodeType === 3 && /\S/.test(this.data)) {
+          result += this.nodeValue;
+        }
+      });
+      return result;
+    };
+
+    let opened_headers = [];
+
+    const save_accordion_status = () => {
+      opened_headers = [];
+      $('#timeContent section.js-accordion header.open h1').each((i, el) => {
+        opened_headers.push(getTextNode(el));
+      });
+    };
+
+    function getMealNameBySectionClass(sectionClass) {
+      if (!sectionClass) return '';
+
+      try {
+        const $section = $('#timeContent section').filter((_, el) => {
+          return el.classList && el.classList.contains(sectionClass);
+        }).first();
+
+        const text = $section.find('h1#mealDivName').first().text().trim();
+
+        if (text.includes('朝食') && text.includes('客室特典')) return '朝食・客室特典';
+        if (text.includes('朝食')) return '朝食';
+        if (text.includes('昼食')) return '昼食';
+        if (text.includes('夕食')) return '夕食';
+      } catch (e) {
+        console.error('食事区分取得エラー:', e);
+      }
+
+      return '';
+    }
+
+    function hookSetupAccordion() {
+      if (win.setupAccordion && !win.__hooked_setupAccordion) {
+        const orig_setupAccordion = win.setupAccordion;
+
+        win.setupAccordion = function () {
+          $('#timeContent section.js-accordion header').each((idx, el) => {
+            const headerCaption = $(el).find('h1');
+            if (opened_headers.includes(getTextNode(headerCaption))) {
+              $(el).addClass('open');
             }
           });
-          const task = controller.getTimeInfo();
-          task.done(() => {
-            el_sections.each((id, el) => {
-              for (const cls of el.classList) {
-                if (cls.startsWith('__')) {
-                  $(el).removeClass(cls).addClass(cls.replace(/^__/, ''));
-                }
-              }
-            });
-          });
-        });
-        el_timeRange.style.cursor = 'pointer';
-      });
 
-      const orig_timeGet_refresh = timeGet.refresh;
-      timeGet.refresh = function (b, a) {
-        if ($(`#timeContent section.${b}`).length) {
-          return orig_timeGet_refresh.apply(this, arguments);
-        } else {
-          const e = $.Deferred();
-          e.resolve();
-          return e.promise();
+          return orig_setupAccordion.apply(this, arguments);
+        };
+
+        win.__hooked_setupAccordion = true;
+      }
+    }
+
+    const hookTimer = setInterval(() => {
+      if (win.setupAccordion) {
+        hookSetupAccordion();
+        clearInterval(hookTimer);
+      }
+    }, 100);
+
+    function hookTimeGetRefreshForMeal() {
+      if (!win.timeGet || !win.timeGet.refresh || win.__hooked_timeGet_refresh_meal) return;
+
+      const origRefresh = win.timeGet.refresh;
+
+      win.timeGet.refresh = function (b, a) {
+        const mealName = getMealNameBySectionClass(b);
+        win.__tdr_currentMealName = mealName || '';
+
+        try {
+          return origRefresh.apply(this, arguments);
+        } finally {
+          setTimeout(() => {
+            win.__tdr_currentMealName = '';
+          }, 0);
         }
       };
 
-      const orig_setupAccordion = setupAccordion;
-      setupAccordion = function () {
-        $('#timeContent section.js-accordion header').each((idx, el) => {
-          const headerCaption = $(el).find('h1');
-          if (opened_headers.includes(getTextNode(headerCaption))) {
-            $(el).addClass('open');
-          }
-        });
-        orig_setupAccordion.apply(this, arguments);
-      };
+      win.__hooked_timeGet_refresh_meal = true;
+    }
 
-      document.querySelectorAll('#timeContent > header a.cancel, #timeContentMain > ul.listBtn01 a.back').forEach((el) => {
-        el.addEventListener('click', () => {
-          opened_headers = [];
-          if (!document.querySelector('#timeContent table tr.selected')) {
-            timeGet.isSearch = false;
+    $.ajaxPrefilter(function (options) {
+      if (!options || !options.url) return;
+      if (!String(options.url).includes('timeGet')) return;
+
+      const mealName = win.__tdr_currentMealName || '';
+
+      if (mealName) {
+        options.__tdrMealName = mealName;
+
+        const origBeforeSend = options.beforeSend;
+
+        options.beforeSend = function (jqXHR, settings) {
+          jqXHR.__tdrMealName = mealName;
+
+          if (typeof origBeforeSend === 'function') {
+            return origBeforeSend.apply(this, arguments);
           }
-        });
+        };
+      }
+    });
+
+    const mealHookTimer = setInterval(() => {
+      if (win.timeGet && win.timeGet.refresh) {
+        hookTimeGetRefreshForMeal();
+        clearInterval(mealHookTimer);
+      }
+    }, 100);
+
+    function getRawRestaurantName(ajaxOptions) {
+      let restaurantName = "レストラン名不明";
+
+      try {
+        if (ajaxOptions && ajaxOptions.data) {
+          const dataStr = typeof ajaxOptions.data === 'string'
+            ? ajaxOptions.data
+            : $.param(ajaxOptions.data);
+
+          const cdMatch = dataStr.match(/commodityCD=([^&]+)/);
+
+          if (cdMatch && cdMatch[1]) {
+            const targetTitle = $('input[name="commodityCD"][value="' + cdMatch[1] + '"]').closest('li').find('p.title');
+            if (targetTitle.length) {
+              return targetTitle.text().trim();
+            }
+          }
+        }
+
+        if (win.lastClickedRestaurantTitle && win.lastClickedRestaurantTitle !== "レストラン名不明") {
+          return win.lastClickedRestaurantTitle;
+        }
+
+        const visibleTitle = $('ul.timeDiv:visible').closest('li').find('p.title');
+        if (visibleTitle.length) {
+          return visibleTitle.first().text().trim();
+        }
+      } catch (e) {
+        console.error("レストラン名取得エラー:", e);
+      }
+
+      return restaurantName;
+    }
+
+    function getPageInfo(mealName) {
+      let dateStr = "日付不明";
+      let mealType = "";
+
+      try {
+        const pageText = $('#content').text() || $('body').text();
+        const dateMatch = pageText.match(/(\d{1,2})\s*[\/月]\s*(\d{1,2})/);
+
+        if (dateMatch) {
+          dateStr = `${dateMatch[1]}/${dateMatch[2]}`;
+        }
+
+        if (mealName) {
+          mealType = `【${mealName}】`;
+        }
+      } catch (e) {
+        console.error("情報取得エラー:", e);
+      }
+
+      return { date: dateStr, meal: mealType };
+    }
+
+    function sendDiscord(description) {
+      if (!state.notifyEnabled) return;
+
+      const url = getDiscordWebhookUrl();
+
+      if (!url) {
+        console.warn('TDR_WEBHOOKS.restaurant が未設定です');
+        return;
+      }
+
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: url,
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({
+          username: "宿泊特典レストラン検索 v2.35",
+          embeds: [
+            {
+              title: "🔔 空席発見！",
+              description: description,
+              color: 16776960
+            }
+          ]
+        }),
+        onload: function (res) {
+          console.log('Discord通知送信:', res.status);
+        },
+        onerror: function (err) {
+          console.error('Discord通知エラー:', err);
+        }
+      });
+    }
+
+    const panels = {};
+
+    function createPanel(top, bg, onClick) {
+      const p = document.createElement('div');
+
+      Object.assign(p.style, {
+        position: 'fixed',
+        top: `${top}px`,
+        right: '15px',
+        zIndex: '2147483647',
+        padding: '6px 0',
+        borderRadius: '8px',
+        fontSize: '13px',
+        fontWeight: 'bold',
+        cursor: 'pointer',
+        background: bg,
+        color: '#fff',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+        textAlign: 'center',
+        width: '86px',
+        height: '28px'
       });
 
-      // ====== 追加: 右上パネルで30～50秒ランダム間隔の自動再検索 ======
-      (function(){
-        const PANEL_ID = '__tdr_auto_search_panel';
-        if (document.getElementById(PANEL_ID)) return;
+      p.onclick = onClick;
+      document.body.appendChild(p);
+      return p;
+    }
 
-        const panel = document.createElement('div');
-        panel.id = PANEL_ID;
-        Object.assign(panel.style, {
-          position: 'fixed',
-          top: '10px',
-          right: '10px',
-          zIndex: '2147483647',
-          padding: '8px 12px',
-          borderRadius: '10px',
-          fontSize: '14px',
-          fontWeight: '600',
-          lineHeight: '1',
-          cursor: 'pointer',
-          userSelect: 'none',
-          background: '#333',
-          color: '#fff',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-          opacity: '0.9'
-        });
-        panel.textContent = 'OFF';
-        document.body.appendChild(panel);
+    function updatePanels() {
+      panels.main.textContent = state.searchStatus === 'OFF'
+        ? 'OFF'
+        : `${state.searchStatus}:${state.waitSec}s`;
 
-        let running = false;
-        let timer = null;
-        let nextAt = 0;
-        let intervalSec = 30;
+      panels.main.style.background = state.searchStatus === 'OFF'
+        ? '#444'
+        : { L: '#007bff', M: '#ff8c00', S: '#e83e8c' }[state.searchStatus];
 
-        const updatePanel = () => {
-          if (!running) {
-            panel.textContent = 'OFF';
-            panel.style.background = '#333';
-            return;
-          }
-          const remain = Math.max(0, Math.ceil((nextAt - Date.now())/1000));
-          panel.textContent = `${remain}s`;
-          panel.style.background = '#0064d2';
-        };
+      panels.notify.style.background = state.notifyEnabled ? '#f1c40f' : '#444';
+      panels.notify.textContent = state.notifyEnabled ? '🔔通知ON' : '🔕通知OFF';
 
-        const setNextInterval = () => {
-          intervalSec = Math.floor(Math.random() * 21) + 30; // 30～50秒
-          nextAt = Date.now() + intervalSec * 1000;
-        };
+      panels.reset.textContent = 'リセット';
+      panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#444';
+    }
 
-        const doFullSearch = () => {
-          try { save_accordion_status(); } catch(e) {}
-          const task = controller.getTimeInfo();
-          if (task && typeof task.always === 'function') task.always(()=>{});
-          setNextInterval();
-        };
+    panels.main = createPanel(15, '#444', () => {
+      const next = { OFF: 'L', L: 'M', M: 'S', S: 'OFF' };
+      state.searchStatus = next[state.searchStatus] || 'OFF';
 
-        const start = () => {
-          if (running) return;
-          running = true;
-          doFullSearch();
-          updatePanel();
-          timer = setInterval(() => {
-            const now = Date.now();
-            if (now >= nextAt) {
-              doFullSearch();
+      localStorage.setItem('tdr_priv_searchStatus', state.searchStatus);
+
+      if (state.searchStatus !== 'OFF') {
+        state.waitSec = getRandomWait(state.searchStatus);
+      }
+
+      updatePanels();
+    });
+
+    panels.notify = createPanel(50, '#444', () => {
+      state.notifyEnabled = !state.notifyEnabled;
+      localStorage.setItem('tdr_priv_notifyEnabled', state.notifyEnabled ? '1' : '0');
+      updatePanels();
+    });
+
+    panels.reset = createPanel(85, '#444', () => {
+      state.excludedTimes = [];
+      localStorage.removeItem('tdr_priv_excludedTimes');
+
+      document.querySelectorAll('.ex-switch-wrap').forEach(el => el.remove());
+
+      drawExclusionSwitches();
+      updatePanels();
+    });
+
+    function notifyIfVacant(responseText, ajaxOptions, jqXHR) {
+      try {
+        const parsed = JSON.parse(responseText);
+        const data = Array.isArray(parsed) ? parsed : [parsed];
+
+        let slotsMsg = "";
+
+        data.forEach(group => {
+          if (!group.timeGetDtoList) return;
+
+          group.timeGetDtoList.forEach(slot => {
+            if (String(slot.saleStatus) === "0") {
+              const time = slot.exhibitionTime || slot.time || '';
+
+              if (time && !state.excludedTimes.includes(time)) {
+                slotsMsg += `⏰ ${time}\n`;
+              }
             }
-            updatePanel();
-          }, 250);
-        };
-
-        const stop = () => {
-          running = false;
-          if (timer) { clearInterval(timer); timer = null; }
-          updatePanel();
-        };
-
-        panel.addEventListener('click', () => {
-          running ? stop() : start();
+          });
         });
-      })();
-      // ====== 追加ここまで ======
-    })();
-  };
+
+        if (!slotsMsg) return;
+
+        const detectedName = getRawRestaurantName(ajaxOptions);
+        const mealName = ajaxOptions.__tdrMealName || jqXHR.__tdrMealName || '';
+        const info = getPageInfo(mealName);
+
+        const now = new Date();
+        const timeStamp =
+          `${now.getHours().toString().padStart(2, '0')}:` +
+          `${now.getMinutes().toString().padStart(2, '0')}:` +
+          `${now.getSeconds().toString().padStart(2, '0')}`;
+
+        const finalMsg =
+          `🏨 【${detectedName}】 ${info.meal}\n` +
+          `📅 日付: ${info.date}\n\n` +
+          `${slotsMsg}\n` +
+          `⏱️ 検知時刻: ${timeStamp}`;
+
+        sendDiscord(finalMsg);
+      } catch (e) {
+        console.error('空席判定エラー:', e);
+      }
+    }
+
+    $(document).ajaxComplete(function (event, jqXHR, ajaxOptions) {
+      if (!ajaxOptions || !ajaxOptions.url) return;
+      if (!String(ajaxOptions.url).includes('timeGet')) return;
+
+      notifyIfVacant(jqXHR.responseText, ajaxOptions, jqXHR);
+    });
+
+    function attachMealBarClickEvents() {
+      $('h1#mealDivName').not('.click-hooked').each((_, el) => {
+        $(el)
+          .addClass('click-hooked')
+          .css({ cursor: 'pointer', userSelect: 'none' })
+          .on('click', function () {
+            save_accordion_status();
+
+            if (win.controller && typeof win.controller.getTimeInfo === 'function') {
+              win.controller.getTimeInfo();
+            }
+          });
+      });
+    }
+
+    function drawExclusionSwitches() {
+      $('#timeContentMain tbody[id="timeSliderTbody"] tr, #timeContent tbody[id="timeSliderTbody"] tr').each((_, tr) => {
+        const $tr = $(tr);
+        const $th = $tr.children('th').first();
+        const $state = $tr.children('td.state').first();
+
+        if (!$th.length || !$state.length) return;
+        if ($state.find('.ex-switch-wrap').length > 0) return;
+
+        const timeStr = $th
+          .text()
+          .replace(/\s+/g, '')
+          .trim();
+
+        if (!/^\d{1,2}:\d{2}$/.test(timeStr)) return;
+
+        const box = document.createElement('span');
+        box.className = 'ex-switch-wrap';
+        box.dataset.time = timeStr;
+
+        box.style.cssText = [
+          'display:inline-flex',
+          'align-items:center',
+          'justify-content:center',
+          'width:13px',
+          'height:13px',
+          'margin-left:8px',
+          'border:1px solid #4d7cff',
+          'border-radius:2px',
+          'font-size:11px',
+          'font-weight:bold',
+          'line-height:13px',
+          'cursor:pointer',
+          'user-select:none',
+          'vertical-align:middle',
+          'position:relative',
+          'z-index:2147483647',
+          'box-sizing:border-box'
+        ].join(';');
+
+        const render = () => {
+          const excluded = state.excludedTimes.includes(timeStr);
+
+          if (excluded) {
+            box.textContent = '';
+            box.style.background = '#fff';
+            box.style.borderColor = '#999';
+            box.style.color = '#fff';
+            box.title = `${timeStr} は通知除外中`;
+          } else {
+            box.textContent = '✓';
+            box.style.background = '#4d7cff';
+            box.style.borderColor = '#4d7cff';
+            box.style.color = '#fff';
+            box.title = `${timeStr} は通知対象`;
+          }
+        };
+
+        box.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (state.excludedTimes.includes(timeStr)) {
+            state.excludedTimes = state.excludedTimes.filter(t => t !== timeStr);
+          } else {
+            state.excludedTimes.push(timeStr);
+          }
+
+          localStorage.setItem('tdr_priv_excludedTimes', JSON.stringify(state.excludedTimes));
+          render();
+          updatePanels();
+        };
+
+        render();
+        $state.append(box);
+      });
+    }
+
+    new MutationObserver(() => {
+      attachMealBarClickEvents();
+      drawExclusionSwitches();
+    }).observe(document.body, { childList: true, subtree: true });
+
+    setInterval(() => {
+      if (state.searchStatus === 'OFF') return;
+
+      state.waitSec--;
+
+      if (state.waitSec <= 0) {
+        state.waitSec = getRandomWait(state.searchStatus);
+
+        save_accordion_status();
+
+        if (win.controller && typeof win.controller.getTimeInfo === 'function') {
+          win.controller.getTimeInfo();
+        }
+      }
+
+      updatePanels();
+    }, 1000);
+
+    updatePanels();
+    attachMealBarClickEvents();
+    drawExclusionSwitches();
+  }
 
   boot();
 })();
