@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         📅 空室在庫モニター
-// @version      5.13
-// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
+// @version      5.14
+// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @run-at       document-idle
