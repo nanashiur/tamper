@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🍴📱宿泊特典レストラン検索
-// @version      2.35
+// @name         🍴🏨宿泊特典レストラン検索
+// @version      2.37
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        unsafeWindow
@@ -191,19 +191,42 @@
       }
     }, 100);
 
+    function parseAjaxData(data) {
+      const obj = {};
+
+      try {
+        if (!data) return obj;
+
+        if (typeof data === 'string') {
+          const params = new URLSearchParams(data);
+          for (const [k, v] of params.entries()) {
+            obj[k] = v;
+          }
+          return obj;
+        }
+
+        if (typeof data === 'object') {
+          Object.keys(data).forEach(k => {
+            obj[k] = data[k];
+          });
+        }
+      } catch (e) {
+        console.error('ajax data parse error:', e);
+      }
+
+      return obj;
+    }
+
     function getRawRestaurantName(ajaxOptions) {
       let restaurantName = "レストラン名不明";
 
       try {
         if (ajaxOptions && ajaxOptions.data) {
-          const dataStr = typeof ajaxOptions.data === 'string'
-            ? ajaxOptions.data
-            : $.param(ajaxOptions.data);
+          const dataObj = parseAjaxData(ajaxOptions.data);
+          const commodityCD = dataObj.commodityCD || '';
 
-          const cdMatch = dataStr.match(/commodityCD=([^&]+)/);
-
-          if (cdMatch && cdMatch[1]) {
-            const targetTitle = $('input[name="commodityCD"][value="' + cdMatch[1] + '"]').closest('li').find('p.title');
+          if (commodityCD) {
+            const targetTitle = $('input[name="commodityCD"][value="' + commodityCD + '"]').closest('li').find('p.title');
             if (targetTitle.length) {
               return targetTitle.text().trim();
             }
@@ -225,26 +248,101 @@
       return restaurantName;
     }
 
-    function getPageInfo(mealName) {
-      let dateStr = "日付不明";
-      let mealType = "";
+    function getDetectDateTime() {
+      const d = new Date();
+      const h = d.getHours().toString().padStart(2, '0');
+      const m = d.getMinutes().toString().padStart(2, '0');
+      const s = d.getSeconds().toString().padStart(2, '0');
+      return `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
+    }
+
+    function formatUseDate(yyyymmdd) {
+      const raw = String(yyyymmdd || '').trim();
+      const m = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+      if (!m) return '';
+
+      const y = Number(m[1]);
+      const month = Number(m[2]);
+      const day = Number(m[3]);
+      const date = new Date(y, month - 1, day);
+      const week = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
+
+      return `${month}/${day}（${week}）`;
+    }
+
+    function normalizeDisplayDate(raw) {
+      const text = String(raw || '').replace(/\s+/g, ' ').trim();
+      if (!text) return '';
+
+      const jp = text.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日\s*[（(]([日月火水木金土])[）)]/);
+      if (jp) {
+        return `${Number(jp[2])}/${Number(jp[3])}（${jp[4]}）`;
+      }
+
+      const mdw = text.match(/(\d{1,2})\s*[\/月]\s*(\d{1,2})\s*(?:日)?\s*[（(]?([日月火水木金土])?[）)]?/);
+      if (mdw) {
+        return `${Number(mdw[1])}/${Number(mdw[2])}${mdw[3] ? `（${mdw[3]}）` : ''}`;
+      }
+
+      return text.replace(/\s*\((.)\)/, '（$1）');
+    }
+
+    function getDisplayDate(ajaxOptions) {
+      const selectors = [
+        '#reservationOfDateDisp1',
+        '#reservationOfDateDisp',
+        '#appointDateDisp',
+        '#useDateDisp'
+      ];
+
+      for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        const text = normalizeDisplayDate(el?.textContent || '');
+        if (text) return text;
+      }
+
+      const dataObj = parseAjaxData(ajaxOptions?.data);
+      if (dataObj.useDate) {
+        const formatted = formatUseDate(dataObj.useDate);
+        if (formatted) return formatted;
+      }
 
       try {
         const pageText = $('#content').text() || $('body').text();
-        const dateMatch = pageText.match(/(\d{1,2})\s*[\/月]\s*(\d{1,2})/);
-
-        if (dateMatch) {
-          dateStr = `${dateMatch[1]}/${dateMatch[2]}`;
-        }
-
-        if (mealName) {
-          mealType = `【${mealName}】`;
-        }
+        const text = normalizeDisplayDate(pageText);
+        if (text) return text;
       } catch (e) {
-        console.error("情報取得エラー:", e);
+        console.error("日付取得エラー:", e);
       }
 
-      return { date: dateStr, meal: mealType };
+      return "日付不明";
+    }
+
+    function formatSlotLines(availableSlots) {
+      const groups = {};
+
+      availableSlots.forEach(time => {
+        const hour = String(time).split(':')[0];
+        if (!groups[hour]) groups[hour] = [];
+        groups[hour].push(time);
+      });
+
+      return Object.keys(groups)
+        .sort((a, b) => Number(a) - Number(b))
+        .map(hour => `⏰ ${groups[hour].join(' ')}`);
+    }
+
+    function buildVacancyMessage(restaurantName, availableSlots, mealName, ajaxOptions) {
+      const displayDate = getDisplayDate(ajaxOptions);
+
+      const lines = [
+        `🍴 ${restaurantName}`,
+        `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`
+      ];
+
+      lines.push(...formatSlotLines(availableSlots));
+
+      return lines.join('\n');
     }
 
     function sendDiscord(description) {
@@ -262,10 +360,10 @@
         url: url,
         headers: { 'Content-Type': 'application/json' },
         data: JSON.stringify({
-          username: "宿泊特典レストラン検索 v2.35",
+          username: "🍴🏨宿泊特典レストラン検索",
           embeds: [
             {
-              title: "🔔 空席発見！",
+              title: `🔔${getDetectDateTime()}`,
               description: description,
               color: 16776960
             }
@@ -358,7 +456,7 @@
         const parsed = JSON.parse(responseText);
         const data = Array.isArray(parsed) ? parsed : [parsed];
 
-        let slotsMsg = "";
+        const availableSlots = [];
 
         data.forEach(group => {
           if (!group.timeGetDtoList) return;
@@ -367,30 +465,21 @@
             if (String(slot.saleStatus) === "0") {
               const time = slot.exhibitionTime || slot.time || '';
 
-              if (time && !state.excludedTimes.includes(time)) {
-                slotsMsg += `⏰ ${time}\n`;
+              if (time && !state.excludedTimes.includes(time) && !availableSlots.includes(time)) {
+                availableSlots.push(time);
               }
             }
           });
         });
 
-        if (!slotsMsg) return;
+        if (!availableSlots.length) return;
+
+        availableSlots.sort((a, b) => a.localeCompare(b));
 
         const detectedName = getRawRestaurantName(ajaxOptions);
         const mealName = ajaxOptions.__tdrMealName || jqXHR.__tdrMealName || '';
-        const info = getPageInfo(mealName);
 
-        const now = new Date();
-        const timeStamp =
-          `${now.getHours().toString().padStart(2, '0')}:` +
-          `${now.getMinutes().toString().padStart(2, '0')}:` +
-          `${now.getSeconds().toString().padStart(2, '0')}`;
-
-        const finalMsg =
-          `🏨 【${detectedName}】 ${info.meal}\n` +
-          `📅 日付: ${info.date}\n\n` +
-          `${slotsMsg}\n` +
-          `⏱️ 検知時刻: ${timeStamp}`;
+        const finalMsg = buildVacancyMessage(detectedName, availableSlots, mealName, ajaxOptions);
 
         sendDiscord(finalMsg);
       } catch (e) {
