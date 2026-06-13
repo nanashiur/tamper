@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      1.10
+// @version      1.40
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -12,11 +12,17 @@
 (() => {
   'use strict';
 
+  // ================================================================
+  // 【手動設定エリア】
+  // 3項目すべて入力されている場合のみ手動値を使用
+  // どれか1つでも空欄なら AUTO(localStorage) を使用
+  // ================================================================
   const TARGET_MANUAL   = '';
   const FIX_DATE_MANUAL = '';
   const FIX_PF_MANUAL   = '';
 
   const SHARED_DATA_KEY = 'tdr_11am_reserve_data';
+  // ================================================================
 
   const loadReserveData = () => {
     const manualComplete = TARGET_MANUAL && FIX_DATE_MANUAL && FIX_PF_MANUAL;
@@ -32,8 +38,10 @@
 
     try {
       const raw = localStorage.getItem(SHARED_DATA_KEY);
+
       if (raw) {
         const data = JSON.parse(raw);
+
         if (data.TARGET && data.FIX_DATE && data.FIX_PF) {
           return {
             source: 'AUTO',
@@ -68,6 +76,7 @@
   const errorHistory = [];
   let isNotified = false;
   let IS_FORCED_STOP = false;
+  let reserveRequestPending = false;
 
   const getHotelWebhook = () => {
     return window.TDR_WEBHOOKS?.hotel || '';
@@ -77,6 +86,7 @@
     if (isNotified) return;
 
     const webhook = getHotelWebhook();
+
     if (!webhook) {
       console.warn('ホテル用Webhookが未設定です');
       return;
@@ -108,8 +118,13 @@
   const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled';
   const START_TIME_KEY = 'auto_click_start';
 
-  if (localStorage.getItem(STORAGE_FIXED_KEY) === null) localStorage.setItem(STORAGE_FIXED_KEY, 'true');
-  if (localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) === null) localStorage.setItem(STORAGE_TIMER_ON_MODE_KEY, '1');
+  if (localStorage.getItem(STORAGE_FIXED_KEY) === null) {
+    localStorage.setItem(STORAGE_FIXED_KEY, 'true');
+  }
+
+  if (localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) === null) {
+    localStorage.setItem(STORAGE_TIMER_ON_MODE_KEY, '1');
+  }
 
   let FIXED_ENABLED = localStorage.getItem(STORAGE_FIXED_KEY) === 'true';
   let TIMER_ON_MODE = parseInt(localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) || '0', 10);
@@ -118,11 +133,16 @@
   let randomTriggerSec = 0;
 
   const generateRandomSec = (mode) => {
-    if (mode === 1) randomTriggerSec = Math.floor(Math.random() * 6) + 30;
-    else if (mode === 2) randomTriggerSec = Math.floor(Math.random() * 4) + 55;
+    if (mode === 1) {
+      randomTriggerSec = Math.floor(Math.random() * 6) + 20; // 20～25秒
+    } else if (mode === 2) {
+      randomTriggerSec = Math.floor(Math.random() * 4) + 55; // 55～58秒
+    }
   };
 
-  if (TIMER_ON_MODE > 0) generateRandomSec(TIMER_ON_MODE);
+  if (TIMER_ON_MODE > 0) {
+    generateRandomSec(TIMER_ON_MODE);
+  }
 
   const ALPHA_ON = 0.85;
   const ALPHA_OFF = 0.35;
@@ -147,21 +167,28 @@
 
   const rewriteBody = (orig) => {
     const p = new URLSearchParams(typeof orig === 'string' ? orig : '');
+
     p.set('commodityCD', PARTS.commodityCD);
     p.set('searchHotelCD', PARTS.searchHotelCD);
     p.set('roomLetterCD', PARTS.roomLetterCD);
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
+
     return p.toString();
   };
 
   const _open = XMLHttpRequest.prototype.open;
+
   XMLHttpRequest.prototype.open = function(m, u) {
     this.__u = u;
     this.__m = m;
 
     this.addEventListener('loadend', () => {
+      if (isReservePost(this.__u, this.__m)) {
+        reserveRequestPending = false;
+      }
+
       if (this.status === 403) {
         const now = Date.now();
         const d = new Date(now);
@@ -200,7 +227,13 @@
   };
 
   XMLHttpRequest.prototype.send = function(b) {
-    if (FIXED_ENABLED && DATA_SOURCE !== 'ERROR' && isReservePost(this.__u, this.__m)) {
+    const reservePost =
+      FIXED_ENABLED &&
+      DATA_SOURCE !== 'ERROR' &&
+      isReservePost(this.__u, this.__m);
+
+    if (reservePost) {
+      reserveRequestPending = true;
       b = rewriteBody(b);
     }
 
@@ -287,6 +320,7 @@
         timerOnEl.style.background = TIMER_ON_MODE === 1
           ? `rgba(234, 88, 12, ${ALPHA_ON})`
           : `rgba(147, 51, 234, ${ALPHA_ON})`;
+
         timerOnEl.textContent = `${randomTriggerSec}s`;
       }
 
@@ -295,7 +329,11 @@
 
     timerOnEl.addEventListener('click', () => {
       TIMER_ON_MODE = (TIMER_ON_MODE + 1) % 3;
-      if (TIMER_ON_MODE > 0) generateRandomSec(TIMER_ON_MODE);
+
+      if (TIMER_ON_MODE > 0) {
+        generateRandomSec(TIMER_ON_MODE);
+      }
+
       updateTimerOnUI();
     });
 
@@ -361,6 +399,9 @@
       } else if (currentClickMode === 'STOP') {
         clickEl.textContent = '停止';
         clickEl.style.background = CLICK_MODES.STOP.color;
+      } else if (reserveRequestPending) {
+        clickEl.textContent = '通信';
+        clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
       } else if (isBurst) {
         clickEl.textContent = '全開';
         clickEl.style.background = 'rgba(255, 0, 0, 1)';
@@ -433,10 +474,14 @@
         const btn = document.querySelector('.js-reserve.button.next');
 
         if (btn) {
-          btn.disabled = false;
-          btn.classList.remove('is-disabled');
-          btn.click();
-          isWaiting = false;
+          if (!reserveRequestPending) {
+            btn.disabled = false;
+            btn.classList.remove('is-disabled');
+            btn.click();
+            isWaiting = false;
+          } else {
+            isWaiting = true;
+          }
         } else {
           isWaiting = true;
         }
@@ -447,9 +492,9 @@
       const nextInterval =
         currentClickMode === 'STOP' || IS_FORCED_STOP || DATA_SOURCE === 'ERROR'
           ? 1000
-          : isBurstTime
-            ? 1000
-            : Math.random() * 1000 + 1500;
+          : reserveRequestPending
+            ? 100
+            : 100;
 
       setTimeout(loop, nextInterval);
     })();
