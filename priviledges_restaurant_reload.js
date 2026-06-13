@@ -1,11 +1,9 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.37
+// @version      2.40
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
-// @grant        unsafeWindow
-// @grant        GM_xmlhttpRequest
-// @connect      discord.com
+// @grant        none
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/priviledges_restaurant_reload.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/priviledges_restaurant_reload.js
 // ==/UserScript==
@@ -13,7 +11,7 @@
 (function () {
   'use strict';
 
-  const win = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+  const win = window;
 
   const ranges = {
     S: [5, 6],
@@ -53,7 +51,7 @@
   }
 
   function getDiscordWebhookUrl() {
-    return win.TDR_WEBHOOKS?.restaurant || window.TDR_WEBHOOKS?.restaurant || '';
+    return win.TDR_WEBHOOKS?.restaurant || '';
   }
 
   function boot() {
@@ -336,7 +334,7 @@
       const displayDate = getDisplayDate(ajaxOptions);
 
       const lines = [
-        `🍴 ${restaurantName}`,
+        `🍴🏨 ${restaurantName}`,
         `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`
       ];
 
@@ -355,11 +353,10 @@
         return;
       }
 
-      GM_xmlhttpRequest({
+      fetch(url, {
         method: 'POST',
-        url: url,
         headers: { 'Content-Type': 'application/json' },
-        data: JSON.stringify({
+        body: JSON.stringify({
           username: "🍴🏨宿泊特典レストラン検索",
           embeds: [
             {
@@ -368,14 +365,8 @@
               color: 16776960
             }
           ]
-        }),
-        onload: function (res) {
-          console.log('Discord通知送信:', res.status);
-        },
-        onerror: function (err) {
-          console.error('Discord通知エラー:', err);
-        }
-      });
+        })
+      }).catch(e => console.error('Discord通知エラー:', e));
     }
 
     const panels = {};
@@ -386,19 +377,25 @@
       Object.assign(p.style, {
         position: 'fixed',
         top: `${top}px`,
-        right: '15px',
+        right: '0px',
         zIndex: '2147483647',
-        padding: '6px 0',
-        borderRadius: '8px',
-        fontSize: '13px',
+        width: '60px',
+        height: '35px',
+        padding: '0',
+        borderRadius: '8px 0 0 8px',
+        fontSize: '18px',
         fontWeight: 'bold',
         cursor: 'pointer',
         background: bg,
         color: '#fff',
         boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+        opacity: '0.95',
         textAlign: 'center',
-        width: '86px',
-        height: '28px'
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box',
+        userSelect: 'none'
       });
 
       p.onclick = onClick;
@@ -409,20 +406,22 @@
     function updatePanels() {
       panels.main.textContent = state.searchStatus === 'OFF'
         ? 'OFF'
-        : `${state.searchStatus}:${state.waitSec}s`;
+        : String(state.waitSec);
 
       panels.main.style.background = state.searchStatus === 'OFF'
-        ? '#444'
+        ? '#000'
         : { L: '#007bff', M: '#ff8c00', S: '#e83e8c' }[state.searchStatus];
 
-      panels.notify.style.background = state.notifyEnabled ? '#f1c40f' : '#444';
-      panels.notify.textContent = state.notifyEnabled ? '🔔通知ON' : '🔕通知OFF';
+      panels.notify.textContent = '🔔';
+      panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#000';
+      panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
 
-      panels.reset.textContent = 'リセット';
-      panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#444';
+      panels.reset.textContent = '🗑️';
+      panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#000';
+      panels.reset.style.color = '#fff';
     }
 
-    panels.main = createPanel(15, '#444', () => {
+    panels.main = createPanel(0, '#000', () => {
       const next = { OFF: 'L', L: 'M', M: 'S', S: 'OFF' };
       state.searchStatus = next[state.searchStatus] || 'OFF';
 
@@ -435,13 +434,13 @@
       updatePanels();
     });
 
-    panels.notify = createPanel(50, '#444', () => {
+    panels.notify = createPanel(35, '#000', () => {
       state.notifyEnabled = !state.notifyEnabled;
       localStorage.setItem('tdr_priv_notifyEnabled', state.notifyEnabled ? '1' : '0');
       updatePanels();
     });
 
-    panels.reset = createPanel(85, '#444', () => {
+    panels.reset = createPanel(70, '#000', () => {
       state.excludedTimes = [];
       localStorage.removeItem('tdr_priv_excludedTimes');
 
