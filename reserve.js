@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      1.40
+// @version      1.50
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -23,6 +23,18 @@
 
   const SHARED_DATA_KEY = 'tdr_11am_reserve_data';
   // ================================================================
+
+  const CHECK_INTERVAL_STOP_MS = 1000;
+  const CHECK_INTERVAL_PENDING_MS = 150;
+  const CHECK_INTERVAL_READY_MS = 50;
+
+  const ERROR_WINDOW_MS = 120000;
+  const ERROR_LIMIT_COUNT = 20;
+
+  const isMaintenanceTime = (d = new Date()) => {
+    const h = d.getHours();
+    return h >= 3 && h < 5;
+  };
 
   const loadReserveData = () => {
     const manualComplete = TARGET_MANUAL && FIX_DATE_MANUAL && FIX_PF_MANUAL;
@@ -198,11 +210,11 @@
 
         errorHistory.push(now);
 
-        while (errorHistory.length > 0 && errorHistory[0] < now - 120000) {
+        while (errorHistory.length > 0 && errorHistory[0] < now - ERROR_WINDOW_MS) {
           errorHistory.shift();
         }
 
-        if (errorHistory.length >= 20) {
+        if (errorHistory.length >= ERROR_LIMIT_COUNT) {
           TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
 
           if (!TIMER_OFF_ENABLED && isCriticalTime) {
@@ -389,7 +401,7 @@
       backdropFilter: 'blur(4px)'
     });
 
-    const updateClickUI = (isWaiting = false, isBurst = false) => {
+    const updateClickUI = (isWaiting = false, isBurst = false, isMaint = false) => {
       if (DATA_SOURCE === 'ERROR') {
         clickEl.textContent = 'ERR';
         clickEl.style.background = `rgba(0, 0, 0, ${ALPHA_ON})`;
@@ -399,6 +411,9 @@
       } else if (currentClickMode === 'STOP') {
         clickEl.textContent = '停止';
         clickEl.style.background = CLICK_MODES.STOP.color;
+      } else if (isMaint) {
+        clickEl.textContent = '保守';
+        clickEl.style.background = `rgba(75, 85, 99, ${ALPHA_ON})`;
       } else if (reserveRequestPending) {
         clickEl.textContent = '通信';
         clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
@@ -425,7 +440,7 @@
 
       currentClickMode = currentClickMode === 'STOP' ? 'FAST' : 'STOP';
       localStorage.setItem(STORAGE_CLICK_KEY, currentClickMode);
-      updateClickUI();
+      updateClickUI(false, false, isMaintenanceTime());
     });
 
     container.appendChild(fixedEl);
@@ -439,6 +454,7 @@
       const h = now.getHours();
       const m = now.getMinutes();
       const s = now.getSeconds();
+      const isMaint = isMaintenanceTime(now);
 
       const isBurstTime =
         (h === 10 && m === 59 && s >= 50) ||
@@ -450,7 +466,7 @@
         if (currentClickMode === 'FAST') {
           currentClickMode = 'STOP';
           localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
-          updateClickUI();
+          updateClickUI(false, isBurstTime, isMaint);
         }
       }
 
@@ -465,12 +481,17 @@
       ) {
         currentClickMode = 'FAST';
         localStorage.setItem(STORAGE_CLICK_KEY, 'FAST');
-        updateClickUI();
+        updateClickUI(false, isBurstTime, isMaint);
       }
 
       let isWaiting = false;
 
-      if (currentClickMode !== 'STOP' && !IS_FORCED_STOP && DATA_SOURCE !== 'ERROR') {
+      if (
+        currentClickMode !== 'STOP' &&
+        !IS_FORCED_STOP &&
+        DATA_SOURCE !== 'ERROR' &&
+        !isMaint
+      ) {
         const btn = document.querySelector('.js-reserve.button.next');
 
         if (btn) {
@@ -487,14 +508,14 @@
         }
       }
 
-      updateClickUI(isWaiting, isBurstTime);
+      updateClickUI(isWaiting, isBurstTime, isMaint);
 
       const nextInterval =
-        currentClickMode === 'STOP' || IS_FORCED_STOP || DATA_SOURCE === 'ERROR'
-          ? 1000
+        currentClickMode === 'STOP' || IS_FORCED_STOP || DATA_SOURCE === 'ERROR' || isMaint
+          ? CHECK_INTERVAL_STOP_MS
           : reserveRequestPending
-            ? 100
-            : 100;
+            ? CHECK_INTERVAL_PENDING_MS
+            : CHECK_INTERVAL_READY_MS;
 
       setTimeout(loop, nextInterval);
     })();
