@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      1.50
+// @version      1.60
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -14,8 +14,15 @@
 
   // ================================================================
   // 【手動設定エリア】
-  // 3項目すべて入力されている場合のみ手動値を使用
-  // どれか1つでも空欄なら AUTO(localStorage) を使用
+  // 入力した項目だけ手動値を優先
+  // 空欄の項目は AUTO(localStorage) から補完
+  //
+  // 例：
+  // const TARGET_MANUAL   = '';
+  // const FIX_DATE_MANUAL = '20260902';
+  // const FIX_PF_MANUAL   = '';
+  //
+  // → 部屋コードとランクはAUTO、日付だけ手動
   // ================================================================
   const TARGET_MANUAL   = '';
   const FIX_DATE_MANUAL = '';
@@ -36,35 +43,46 @@
     return h >= 3 && h < 5;
   };
 
-  const loadReserveData = () => {
-    const manualComplete = TARGET_MANUAL && FIX_DATE_MANUAL && FIX_PF_MANUAL;
+  const cleanValue = (v) => {
+    if (v === undefined || v === null) return '';
+    return String(v).trim();
+  };
 
-    if (manualComplete) {
-      return {
-        source: 'MANUAL',
-        TARGET: TARGET_MANUAL,
-        FIX_DATE: FIX_DATE_MANUAL,
-        FIX_PF: FIX_PF_MANUAL
-      };
-    }
+  const loadReserveData = () => {
+    let auto = {};
 
     try {
       const raw = localStorage.getItem(SHARED_DATA_KEY);
 
       if (raw) {
-        const data = JSON.parse(raw);
-
-        if (data.TARGET && data.FIX_DATE && data.FIX_PF) {
-          return {
-            source: 'AUTO',
-            TARGET: String(data.TARGET),
-            FIX_DATE: String(data.FIX_DATE),
-            FIX_PF: String(data.FIX_PF)
-          };
-        }
+        auto = JSON.parse(raw) || {};
       }
     } catch (e) {
       console.error('共有データ読込失敗:', e);
+    }
+
+    const manualTarget = cleanValue(TARGET_MANUAL);
+    const manualDate   = cleanValue(FIX_DATE_MANUAL);
+    const manualPf     = cleanValue(FIX_PF_MANUAL);
+
+    const autoTarget = cleanValue(auto.TARGET);
+    const autoDate   = cleanValue(auto.FIX_DATE);
+    const autoPf     = cleanValue(auto.FIX_PF);
+
+    const TARGET   = manualTarget || autoTarget;
+    const FIX_DATE = manualDate   || autoDate;
+    const FIX_PF   = manualPf     || autoPf;
+
+    const hasManual = !!(manualTarget || manualDate || manualPf);
+    const allManual = !!(manualTarget && manualDate && manualPf);
+
+    if (TARGET && FIX_DATE && FIX_PF) {
+      return {
+        source: allManual ? 'MANUAL' : hasManual ? 'MIX' : 'AUTO',
+        TARGET: TARGET,
+        FIX_DATE: FIX_DATE,
+        FIX_PF: FIX_PF
+      };
     }
 
     return {
