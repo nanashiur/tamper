@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      1.60
+// @version      1.87
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -35,8 +35,7 @@
   const CHECK_INTERVAL_PENDING_MS = 150;
   const CHECK_INTERVAL_READY_MS = 50;
 
-  const ERROR_WINDOW_MS = 120000;
-  const ERROR_LIMIT_COUNT = 20;
+  const CONSECUTIVE_ERROR_LIMIT = 20;
 
   const isMaintenanceTime = (d = new Date()) => {
     const h = d.getHours();
@@ -103,13 +102,73 @@
   if (window.__tdr_11am_reserve_installed) return;
   window.__tdr_11am_reserve_installed = true;
 
-  const errorHistory = [];
   let isNotified = false;
   let IS_FORCED_STOP = false;
   let reserveRequestPending = false;
 
+  let consecutiveErrorCount = 0;
+  let totalErrorCount = 0;
+  let errorPopupEl = null;
+
   const getHotelWebhook = () => {
     return window.TDR_WEBHOOKS?.hotel || '';
+  };
+
+  const getPanelPopupPosition = () => {
+    const panel = document.getElementById('tdr-integrated-panel');
+
+    if (!panel) {
+      return {
+        top: 72,
+        left: 8
+      };
+    }
+
+    const rect = panel.getBoundingClientRect();
+
+    return {
+      top: Math.ceil(rect.bottom + 6),
+      left: Math.ceil(rect.left)
+    };
+  };
+
+  const showErrorPopup = () => {
+    if (errorPopupEl) errorPopupEl.remove();
+
+    const pos = getPanelPopupPosition();
+
+    errorPopupEl = document.createElement('div');
+
+    errorPopupEl.innerHTML = [
+      `<div>${consecutiveErrorCount}/${CONSECUTIVE_ERROR_LIMIT}</div>`,
+      `<div>${totalErrorCount}</div>`
+    ].join('');
+
+    Object.assign(errorPopupEl.style, {
+      position: 'fixed',
+      top: `${pos.top}px`,
+      left: `${pos.left}px`,
+      zIndex: '2147483647',
+      background: 'rgba(127, 29, 29, 0.92)',
+      color: '#fff',
+      padding: '5px 7px',
+      borderRadius: '6px',
+      fontSize: '12px',
+      fontWeight: '700',
+      fontFamily: 'sans-serif',
+      lineHeight: '1.25',
+      boxShadow: '0 2px 10px rgba(0,0,0,0.35)',
+      cursor: 'pointer',
+      userSelect: 'none',
+      textAlign: 'center'
+    });
+
+    errorPopupEl.addEventListener('click', () => {
+      errorPopupEl.remove();
+      errorPopupEl = null;
+    });
+
+    (document.body || document.documentElement).appendChild(errorPopupEl);
   };
 
   const sendDiscordNotification = (count, forced = true) => {
@@ -125,7 +184,10 @@
     isNotified = true;
 
     const statusMsg = forced ? '動作を停止しました。' : '重要時間帯のため動作を続行します。';
-    const description = `直近2分間に **${count}回** の403を検知しました。\n\n**【ステータス】: ${statusMsg}**`;
+    const description =
+      `403を **${count}回連続** で検知しました。\n` +
+      `通算403回数: **${totalErrorCount}回**\n\n` +
+      `**【ステータス】: ${statusMsg}**`;
 
     fetch(webhook, {
       method: 'POST',
@@ -134,7 +196,7 @@
         username: '🏨11時予約',
         embeds: [{
           title: '403エラー監視',
-          color: 16762880,
+          color: 16776960,
           description: description,
           timestamp: new Date().toISOString()
         }]
@@ -146,7 +208,66 @@
   const STORAGE_CLICK_KEY = 'auto_click_mode';
   const STORAGE_TIMER_ON_MODE_KEY = 'tdr_11am_timer_on_mode';
   const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled';
+  const STORAGE_RELOAD_DATE_KEY = 'tdr_10am_reload_date';
+  const STORAGE_RELOAD_SEC_KEY = 'tdr_10am_reload_sec';
   const START_TIME_KEY = 'auto_click_start';
+
+  const getTodayKey = () => {
+    const d = new Date();
+
+    return [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0')
+    ].join('');
+  };
+
+  const getReloadSec = () => {
+    const today = getTodayKey();
+
+    try {
+      const raw = localStorage.getItem(STORAGE_RELOAD_SEC_KEY);
+      const saved = raw ? JSON.parse(raw) : null;
+
+      if (
+        saved &&
+        saved.date === today &&
+        Number.isInteger(saved.sec) &&
+        saved.sec >= 0 &&
+        saved.sec <= 59
+      ) {
+        return saved.sec;
+      }
+    } catch (e) {
+      console.error('10時再読込秒数の読込失敗:', e);
+    }
+
+    const sec = Math.floor(Math.random() * 60);
+
+    localStorage.setItem(
+      STORAGE_RELOAD_SEC_KEY,
+      JSON.stringify({ date: today, sec })
+    );
+
+    return sec;
+  };
+
+  const checkTenReload = () => {
+    const today = getTodayKey();
+
+    if (localStorage.getItem(STORAGE_RELOAD_DATE_KEY) === today) return;
+
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    const s = now.getSeconds();
+    const reloadSec = getReloadSec();
+
+    if (h === 10 && m === 0 && s >= reloadSec) {
+      localStorage.setItem(STORAGE_RELOAD_DATE_KEY, today);
+      location.reload();
+    }
+  };
 
   if (localStorage.getItem(STORAGE_FIXED_KEY) === null) {
     localStorage.setItem(STORAGE_FIXED_KEY, 'true');
@@ -215,33 +336,40 @@
     this.__m = m;
 
     this.addEventListener('loadend', () => {
-      if (isReservePost(this.__u, this.__m)) {
+      const reservePostResult = isReservePost(this.__u, this.__m);
+
+      if (reservePostResult) {
         reserveRequestPending = false;
       }
 
-      if (this.status === 403) {
+      const status = this.status;
+
+      if (status === 403) {
+        consecutiveErrorCount++;
+        totalErrorCount++;
+        showErrorPopup();
+
         const now = Date.now();
         const d = new Date(now);
         const h = d.getHours();
         const min = d.getMinutes();
         const isCriticalTime = (h === 10 && min === 59) || (h === 11 && min < 5);
 
-        errorHistory.push(now);
-
-        while (errorHistory.length > 0 && errorHistory[0] < now - ERROR_WINDOW_MS) {
-          errorHistory.shift();
-        }
-
-        if (errorHistory.length >= ERROR_LIMIT_COUNT) {
+        if (consecutiveErrorCount >= CONSECUTIVE_ERROR_LIMIT) {
           TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
 
           if (!TIMER_OFF_ENABLED && isCriticalTime) {
-            sendDiscordNotification(errorHistory.length, false);
+            sendDiscordNotification(consecutiveErrorCount, false);
           } else {
             IS_FORCED_STOP = true;
             localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
-            sendDiscordNotification(errorHistory.length, true);
+            sendDiscordNotification(consecutiveErrorCount, true);
           }
+        }
+      } else if (reservePostResult && status === 200) {
+        if (consecutiveErrorCount > 0) {
+          consecutiveErrorCount = 0;
+          isNotified = false;
         }
       }
     });
@@ -288,13 +416,18 @@
 
     const code = PARTS.searchHotelCD;
 
+    const HOTEL_COLORS = {
+      DHM: [22, 163, 74],    // ミラコスタ：緑
+      FSH: [236, 72, 153],   // ファンタジースプリングス：ピンク
+      TDH: [234, 179, 8],    // ディズニーランドホテル：黄色
+      DAH: [37, 99, 235],    // アンバサダーホテル：青
+      TSH: [234, 88, 12],    // トイ・ストーリーホテル：オレンジ
+      DCH: [14, 165, 233]    // セレブレーションホテル：水色
+    };
+
     const baseRGB = DATA_SOURCE === 'ERROR'
       ? [0, 0, 0]
-      : code === 'DHM'
-        ? [22, 163, 74]
-        : code === 'FSH'
-          ? [236, 72, 153]
-          : [234, 88, 12];
+      : HOTEL_COLORS[code] || [234, 88, 12];
 
     const rgba = (a) => `rgba(${baseRGB[0]}, ${baseRGB[1]}, ${baseRGB[2]}, ${a})`;
 
@@ -453,7 +586,7 @@
       if (IS_FORCED_STOP) {
         IS_FORCED_STOP = false;
         isNotified = false;
-        errorHistory.length = 0;
+        consecutiveErrorCount = 0;
       }
 
       currentClickMode = currentClickMode === 'STOP' ? 'FAST' : 'STOP';
@@ -468,6 +601,8 @@
     parent.appendChild(container);
 
     (function loop() {
+      checkTenReload();
+
       const now = new Date();
       const h = now.getHours();
       const m = now.getMinutes();
