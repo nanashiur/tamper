@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      4.49
+// @version      4.57
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -25,16 +25,20 @@
     errorCount: 0,
     autoOpen: localStorage.getItem('autoOpenTimeTabs') !== '0',
     autoF5: localStorage.getItem('autoF520min') !== '0',
+    autoReserve: localStorage.getItem('autoReserveClick') === '1',
     notifyEnabled: localStorage.getItem('notifyEnabled') !== '0',
     searchStatus: localStorage.getItem('searchStatus') || 'M',
     excludedTimes: JSON.parse(localStorage.getItem('excludedTimes') || '[]'),
+    autoReserveNotifyHistory: JSON.parse(localStorage.getItem('autoReserveNotifyHistory') || '{}'),
     waitSec: 15,
     f5WaitSec: Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080,
     lastClickedMealName: '',
-    commodityMealMap: {}
+    commodityMealMap: {},
+    autoReserveLockUntil: 0
   };
 
   const ERROR_THRESHOLD = 5;
+  const AUTO_RESERVE_NOTIFY_COOLDOWN = 30000;
 
   function getRestaurantInfo() {
     const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
@@ -160,6 +164,35 @@
     return lines.join('\n');
   }
 
+  function buildAutoReserveMessage(time, mealName) {
+    const restaurantName = getRestaurantName();
+    const displayDate = getDisplayDate();
+    return [
+      `🍴 ${restaurantName}`,
+      `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`,
+      `🖱️ 自動予約クリック試行`,
+      `⏰ ${time}`
+    ].join('\n');
+  }
+
+  function shouldNotifyAutoReserve(time, mealName) {
+    const now = Date.now();
+    const key = `${getRestaurantName()}|${getDisplayDate()}|${mealName || ''}|${time}`;
+    Object.keys(state.autoReserveNotifyHistory).forEach(k => {
+      if (now - state.autoReserveNotifyHistory[k] > AUTO_RESERVE_NOTIFY_COOLDOWN) {
+        delete state.autoReserveNotifyHistory[k];
+      }
+    });
+    const last = state.autoReserveNotifyHistory[key] || 0;
+    if (now - last <= AUTO_RESERVE_NOTIFY_COOLDOWN) {
+      localStorage.setItem('autoReserveNotifyHistory', JSON.stringify(state.autoReserveNotifyHistory));
+      return false;
+    }
+    state.autoReserveNotifyHistory[key] = now;
+    localStorage.setItem('autoReserveNotifyHistory', JSON.stringify(state.autoReserveNotifyHistory));
+    return true;
+  }
+
   function sendDiscord(reasonText, isError = true) {
     if (!state.notifyEnabled) return;
     if (!DISCORD_WEBHOOK_URL) return;
@@ -181,6 +214,118 @@
         }]
       })
     }).then(() => { if (isError) state.lastNotificationTime = Date.now(); }).catch(e => console.error(e));
+  }
+
+  function sendAutoReserveDiscord(time, mealName) {
+    // 自動予約通知は通常通知ON/OFFを見ない
+    if (!DISCORD_WEBHOOK_URL) return;
+    fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({
+        username: "レストラン一般再検索",
+        embeds: [{
+          title: `✅${getDetectDateTime()}`,
+          description: buildAutoReserveMessage(time, mealName),
+          color: 5763719
+        }]
+      })
+    }).catch(e => console.error(e));
+  }
+
+  function isVisible(el) {
+    return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  }
+
+  function clickConsentNext(dialog, attempt = 0) {
+    const nextBtn = dialog.querySelector('#btnNext') || [...dialog.querySelectorAll('button, a, input[type="button"], input[type="submit"]')].find(el => {
+      const text = (el.textContent || el.value || '').replace(/\s+/g, '').trim();
+      return text.includes('次へ');
+    });
+    if (!nextBtn) return;
+
+    const disabled = nextBtn.disabled ||
+      nextBtn.getAttribute('disabled') !== null ||
+      nextBtn.classList.contains('nextDisabled') ||
+      nextBtn.classList.contains('ui-disabled') ||
+      nextBtn.closest('.ui-disabled');
+
+    if (!disabled) {
+      nextBtn.click();
+      return;
+    }
+
+    const checkbox = dialog.querySelector('#accept') || dialog.querySelector('input[type="checkbox"]');
+    if (checkbox?.checked && attempt >= 10) {
+      nextBtn.disabled = false;
+      nextBtn.removeAttribute('disabled');
+      nextBtn.classList.remove('nextDisabled', 'ui-disabled');
+      nextBtn.click();
+      return;
+    }
+
+    if (attempt < 30) setTimeout(() => clickConsentNext(dialog, attempt + 1), 100);
+  }
+
+  function handleConsentDialog(attempt = 0) {
+    const dialog = document.querySelector('#noticeMessage') || [...document.querySelectorAll('.ui-dialog, .ui-popup, [role="dialog"], [data-role="dialog"], #jqmDialog')].find(el => {
+      const text = (el.textContent || '').replace(/\s+/g, '');
+      return isVisible(el) && text.includes('同意する') && text.includes('次へ');
+    });
+    if (!dialog || !isVisible(dialog)) {
+      if (attempt < 30) setTimeout(() => handleConsentDialog(attempt + 1), 100);
+      return;
+    }
+
+    const checkbox = dialog.querySelector('#accept') || dialog.querySelector('input[type="checkbox"]');
+    const label = dialog.querySelector('label[for="accept"]') || [...dialog.querySelectorAll('label')].find(el => (el.textContent || '').includes('同意する'));
+
+    if (checkbox && !checkbox.checked) {
+      if (label) label.click();
+      else checkbox.click();
+
+      checkbox.checked = true;
+      checkbox.setAttribute('checked', 'checked');
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+
+      if (window.jQuery) {
+        try {
+          const $cb = jQuery(checkbox);
+          $cb.prop('checked', true);
+          if ($cb.checkboxradio) $cb.checkboxradio('refresh');
+          $cb.trigger('change');
+        } catch(e) {
+          console.error(e);
+        }
+      }
+    }
+
+    setTimeout(() => clickConsentNext(dialog), 200);
+  }
+
+  function tryAutoReserveClick(attempt = 0) {
+    if (!state.autoReserve) return;
+    if (Date.now() < state.autoReserveLockUntil) return;
+    refreshCommodityMealMap(document);
+    const rows = [...document.querySelectorAll('section.reservationTime tr')];
+    for (const row of rows) {
+      const stateText = row.querySelector('.state')?.textContent || '';
+      const time = row.querySelector('th')?.textContent.trim();
+      const link = row.querySelector('td.btn a[onclick*="toOrderForDate"]');
+      if (!stateText.includes('空席あり') || !time || state.excludedTimes.includes(time) || !link) continue;
+      state.autoReserveLockUntil = Date.now() + 3000;
+      const meal = getMealNameFromRow(row, document);
+      const notify = shouldNotifyAutoReserve(time, meal);
+      if (notify) sendAutoReserveDiscord(time, meal);
+      setTimeout(() => {
+        link.click();
+        setTimeout(() => handleConsentDialog(), 150);
+      }, notify ? 80 : 0);
+      return;
+    }
+    if (attempt < 5) setTimeout(() => tryAutoReserveClick(attempt + 1), 100);
   }
 
   // --- UI構築 ---
@@ -214,6 +359,9 @@
 
     panels.open.style.background = state.autoOpen ? '#28a745' : '#333';
     panels.open.textContent = 'TAB';
+
+    panels.reserve.style.background = state.autoReserve ? '#dc3545' : '#333';
+    panels.reserve.textContent = '👆️';
 
     panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#333';
     panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
@@ -266,19 +414,25 @@
     state.autoOpen = !state.autoOpen;
     localStorage.setItem('autoOpenTimeTabs', state.autoOpen ? '1' : '0');
     updatePanels();
-    if (state.autoOpen) openAllTimeSlots(); // 手動でONにした瞬間に開く
+    if (state.autoOpen) openAllTimeSlots();
   });
   panels.open.style.right = '84px';
   panels.open.textContent = 'TAB';
 
-  // ★修正：閉じているタブのみを判定して開くロジック
+  panels.reserve = createPanel(90, '#333', () => {
+    state.autoReserve = !state.autoReserve;
+    localStorage.setItem('autoReserveClick', state.autoReserve ? '1' : '0');
+    updatePanels();
+  });
+  panels.reserve.style.right = '84px';
+  panels.reserve.textContent = '👆️';
+
   function openAllTimeSlots() {
     const sections = document.querySelectorAll('section.reservationTime');
     let delay = 0;
     sections.forEach(sec => {
       const h1 = sec.querySelector('h1');
       const contents = sec.querySelector('.contents');
-      // contentsが見えない状態（＝閉じている）ならクリックして開く
       if (h1 && contents && contents.style.display === 'none') {
         setTimeout(() => h1.click(), delay * 200);
         delay++;
@@ -374,9 +528,14 @@
               }
             }
           });
-          Object.entries(slotsByMeal).forEach(([meal, slots]) => {
-            if (slots.length > 0) sendDiscord(buildVacancyMessage(slots, meal), false);
-          });
+          const hasVacancy = Object.values(slotsByMeal).some(slots => slots.length > 0);
+          if (hasVacancy && state.autoReserve) {
+            setTimeout(() => tryAutoReserveClick(), 0);
+          } else {
+            Object.entries(slotsByMeal).forEach(([meal, slots]) => {
+              if (slots.length > 0) sendDiscord(buildVacancyMessage(slots, meal), false);
+            });
+          }
         } catch(e) {
           console.error("解析エラー:", e);
         }
@@ -429,12 +588,10 @@
   if (targetDisp) reloadSP($(targetDisp));
   document.querySelectorAll('section > div > h1:nth-child(1)').forEach(h => reloadSP($(h), true));
 
-  // --- メインループ ---
   refreshCommodityMealMap(document);
   resetWaitSec();
   updatePanels();
 
-  // 初期読み込み時にも確実にタブを開く
   if (state.autoOpen) setTimeout(openAllTimeSlots, 1000);
 
   setInterval(() => {
