@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      1.87
+// @version      2.09
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -18,11 +18,11 @@
   // 空欄の項目は AUTO(localStorage) から補完
   //
   // 例：
-  // const TARGET_MANUAL   = '';
-  // const FIX_DATE_MANUAL = '20260902';
-  // const FIX_PF_MANUAL   = '';
+  // const TARGET_MANUAL   = 'HODAHRDD0001N';
+  // const FIX_DATE_MANUAL = '20260101';
+  // const FIX_PF_MANUAL   = 'M10';
   //
-  // → 部屋コードとランクはAUTO、日付だけ手動
+  // → 部屋コード・日付・ランクをすべて手動指定
   // ================================================================
   const TARGET_MANUAL   = '';
   const FIX_DATE_MANUAL = '';
@@ -34,8 +34,10 @@
   const CHECK_INTERVAL_STOP_MS = 1000;
   const CHECK_INTERVAL_PENDING_MS = 150;
   const CHECK_INTERVAL_READY_MS = 50;
+  const RESERVE_PENDING_TIMEOUT_MS = 5000;
 
   const CONSECUTIVE_ERROR_LIMIT = 20;
+  const RESERVE_ERROR_STATUSES = new Set([403, 435]);
 
   const isMaintenanceTime = (d = new Date()) => {
     const h = d.getHours();
@@ -104,11 +106,39 @@
 
   let isNotified = false;
   let IS_FORCED_STOP = false;
+
   let reserveRequestPending = false;
+  let reserveRequestPendingAt = 0;
+  let reserveRequestPendingCount = 0;
 
   let consecutiveErrorCount = 0;
   let totalErrorCount = 0;
   let errorPopupEl = null;
+
+  const markReservePendingStart = () => {
+    reserveRequestPendingCount++;
+    reserveRequestPending = true;
+    reserveRequestPendingAt = Date.now();
+  };
+
+  const markReservePendingEnd = () => {
+    reserveRequestPendingCount = Math.max(0, reserveRequestPendingCount - 1);
+    reserveRequestPending = reserveRequestPendingCount > 0;
+
+    if (!reserveRequestPending) {
+      reserveRequestPendingAt = 0;
+    }
+  };
+
+  const isReservePendingTimedOut = () => {
+    return reserveRequestPending &&
+      reserveRequestPendingAt > 0 &&
+      Date.now() - reserveRequestPendingAt >= RESERVE_PENDING_TIMEOUT_MS;
+  };
+
+  const canSendReserve = () => {
+    return !reserveRequestPending || isReservePendingTimedOut();
+  };
 
   const getHotelWebhook = () => {
     return window.TDR_WEBHOOKS?.hotel || '';
@@ -185,8 +215,8 @@
 
     const statusMsg = forced ? '動作を停止しました。' : '重要時間帯のため動作を続行します。';
     const description =
-      `403を **${count}回連続** で検知しました。\n` +
-      `通算403回数: **${totalErrorCount}回**\n\n` +
+      `reserve/403・435を **${count}回連続** で検知しました。\n` +
+      `通算reserveエラー回数: **${totalErrorCount}回**\n\n` +
       `**【ステータス】: ${statusMsg}**`;
 
     fetch(webhook, {
@@ -195,7 +225,7 @@
       body: JSON.stringify({
         username: '🏨11時予約',
         embeds: [{
-          title: '403エラー監視',
+          title: 'reserveエラー監視',
           color: 16776960,
           description: description,
           timestamp: new Date().toISOString()
@@ -208,6 +238,7 @@
   const STORAGE_CLICK_KEY = 'auto_click_mode';
   const STORAGE_TIMER_ON_MODE_KEY = 'tdr_11am_timer_on_mode';
   const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled';
+  const STORAGE_RELOAD_ENABLED_KEY = 'tdr_10am_reload_enabled';
   const STORAGE_RELOAD_DATE_KEY = 'tdr_10am_reload_date';
   const STORAGE_RELOAD_SEC_KEY = 'tdr_10am_reload_sec';
   const START_TIME_KEY = 'auto_click_start';
@@ -253,6 +284,8 @@
   };
 
   const checkTenReload = () => {
+    if (localStorage.getItem(STORAGE_RELOAD_ENABLED_KEY) !== 'true') return;
+
     const today = getTodayKey();
 
     if (localStorage.getItem(STORAGE_RELOAD_DATE_KEY) === today) return;
@@ -277,9 +310,14 @@
     localStorage.setItem(STORAGE_TIMER_ON_MODE_KEY, '1');
   }
 
+  if (localStorage.getItem(STORAGE_RELOAD_ENABLED_KEY) === null) {
+    localStorage.setItem(STORAGE_RELOAD_ENABLED_KEY, 'false');
+  }
+
   let FIXED_ENABLED = localStorage.getItem(STORAGE_FIXED_KEY) === 'true';
   let TIMER_ON_MODE = parseInt(localStorage.getItem(STORAGE_TIMER_ON_MODE_KEY) || '0', 10);
   let TIMER_OFF_ENABLED = localStorage.getItem(STORAGE_TIMER_OFF_KEY) === 'true';
+  let RELOAD_ENABLED = localStorage.getItem(STORAGE_RELOAD_ENABLED_KEY) === 'true';
 
   let randomTriggerSec = 0;
 
@@ -339,12 +377,12 @@
       const reservePostResult = isReservePost(this.__u, this.__m);
 
       if (reservePostResult) {
-        reserveRequestPending = false;
+        markReservePendingEnd();
       }
 
       const status = this.status;
 
-      if (status === 403) {
+      if (reservePostResult && RESERVE_ERROR_STATUSES.has(status)) {
         consecutiveErrorCount++;
         totalErrorCount++;
         showErrorPopup();
@@ -391,7 +429,7 @@
       isReservePost(this.__u, this.__m);
 
     if (reservePost) {
-      reserveRequestPending = true;
+      markReservePendingStart();
       b = rewriteBody(b);
     }
 
@@ -413,6 +451,48 @@
       flexDirection: 'column',
       width: 'fit-content'
     });
+
+    const reloadPanel = document.createElement('div');
+
+    reloadPanel.id = 'tdr-10am-reload-panel';
+
+    Object.assign(reloadPanel.style, {
+      position: 'fixed',
+      top: '0',
+      right: '0',
+      zIndex: '2147483647',
+      color: '#fff',
+      padding: '3px 6px',
+      fontSize: '11px',
+      fontWeight: '700',
+      fontFamily: 'sans-serif',
+      lineHeight: '1.15',
+      textAlign: 'center',
+      cursor: 'pointer',
+      borderRadius: '0 0 0 4px',
+      backdropFilter: 'blur(4px)',
+      userSelect: 'none'
+    });
+
+    const updateReloadPanel = () => {
+      RELOAD_ENABLED = localStorage.getItem(STORAGE_RELOAD_ENABLED_KEY) === 'true';
+
+      reloadPanel.innerHTML = RELOAD_ENABLED
+        ? '10F5<br>ON'
+        : '10F5<br>OFF';
+
+      reloadPanel.style.background = RELOAD_ENABLED
+        ? `rgba(59, 130, 246, ${ALPHA_ON})`
+        : `rgba(0, 0, 0, ${ALPHA_OFF})`;
+    };
+
+    reloadPanel.addEventListener('click', () => {
+      RELOAD_ENABLED = !RELOAD_ENABLED;
+      localStorage.setItem(STORAGE_RELOAD_ENABLED_KEY, RELOAD_ENABLED ? 'true' : 'false');
+      updateReloadPanel();
+    });
+
+    updateReloadPanel();
 
     const code = PARTS.searchHotelCD;
 
@@ -553,6 +633,8 @@
     });
 
     const updateClickUI = (isWaiting = false, isBurst = false, isMaint = false) => {
+      const pendingWaiting = reserveRequestPending && !isReservePendingTimedOut();
+
       if (DATA_SOURCE === 'ERROR') {
         clickEl.textContent = 'ERR';
         clickEl.style.background = `rgba(0, 0, 0, ${ALPHA_ON})`;
@@ -565,7 +647,7 @@
       } else if (isMaint) {
         clickEl.textContent = '保守';
         clickEl.style.background = `rgba(75, 85, 99, ${ALPHA_ON})`;
-      } else if (reserveRequestPending) {
+      } else if (pendingWaiting) {
         clickEl.textContent = '通信';
         clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
       } else if (isBurst) {
@@ -599,6 +681,7 @@
     container.appendChild(timerOffEl);
     container.appendChild(clickEl);
     parent.appendChild(container);
+    parent.appendChild(reloadPanel);
 
     (function loop() {
       checkTenReload();
@@ -648,7 +731,7 @@
         const btn = document.querySelector('.js-reserve.button.next');
 
         if (btn) {
-          if (!reserveRequestPending) {
+          if (canSendReserve()) {
             btn.disabled = false;
             btn.classList.remove('is-disabled');
             btn.click();
@@ -663,10 +746,12 @@
 
       updateClickUI(isWaiting, isBurstTime, isMaint);
 
+      const pendingWaiting = reserveRequestPending && !isReservePendingTimedOut();
+
       const nextInterval =
         currentClickMode === 'STOP' || IS_FORCED_STOP || DATA_SOURCE === 'ERROR' || isMaint
           ? CHECK_INTERVAL_STOP_MS
-          : reserveRequestPending
+          : pendingWaiting
             ? CHECK_INTERVAL_PENDING_MS
             : CHECK_INTERVAL_READY_MS;
 
