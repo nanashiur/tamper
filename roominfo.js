@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      1.38
+// @version      1.50
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -28,10 +28,11 @@
   let countdownTimer = null;
   let notifiedThisPage = false;
   let autoAgreeRunning = false;
+  let autoAdvanceNotified = false;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  console.log('[ℹ️客室情報画面] v1.38 起動');
+  console.log('[ℹ️客室情報画面] v1.50 起動');
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.hotel || '';
@@ -250,7 +251,7 @@
     return { error: false, date, room };
   }
 
-  async function notifyDiscord(data) {
+  async function notifyDiscord(data, note = '') {
     const webhookUrl = getDiscordWebhookUrl();
 
     if (!webhookUrl) {
@@ -258,14 +259,21 @@
       return;
     }
 
+    const lines = [
+      `**${data.date || '-'}**`,
+      `**${data.room || '-'}**`
+    ];
+
+    if (note) {
+      lines.push('');
+      lines.push(`**${note}**`);
+    }
+
     const payload = {
       username: 'ℹ️客室情報画面',
       embeds: [
         {
-          description: [
-            `**${data.date || '-'}**`,
-            `**${data.room || '-'}**`
-          ].join('\n'),
+          description: lines.join('\n'),
           color: 0x00ff66
         }
       ],
@@ -280,7 +288,8 @@
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        keepalive: true
       });
 
       console.log('[ℹ️客室情報画面] Discord通知送信:', res.status);
@@ -349,6 +358,17 @@
     return cb.checked;
   }
 
+  async function notifyAutoAdvance() {
+    if (autoAdvanceNotified) return;
+    if (!getNotifyEnabled()) return;
+
+    const data = parseRoomInfo();
+    if (!data?.date || !data?.room) return;
+
+    autoAdvanceNotified = true;
+    await notifyDiscord(data, '25分経過');
+  }
+
   async function autoAgreeAndNext() {
     if (autoAgreeRunning) return;
     autoAgreeRunning = true;
@@ -371,6 +391,7 @@
 
       const btn = findNextButton();
       if (btn && !isButtonDisabled(btn)) {
+        await notifyAutoAdvance();
         console.log('[ℹ️客室情報画面] 自動で次へ進みます');
         btn.click();
         return;
@@ -449,7 +470,7 @@
     }
 
     notifiedThisPage = true;
-    notifyDiscord(data);
+    notifyDiscord(data, '仮予約');
   }
 
   function tick() {
