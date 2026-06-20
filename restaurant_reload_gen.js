@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      4.57
+// @version      4.58
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -528,13 +528,17 @@
               }
             }
           });
+
           const hasVacancy = Object.values(slotsByMeal).some(slots => slots.length > 0);
-          if (hasVacancy && state.autoReserve) {
-            setTimeout(() => tryAutoReserveClick(), 0);
-          } else {
+
+          if (hasVacancy) {
             Object.entries(slotsByMeal).forEach(([meal, slots]) => {
               if (slots.length > 0) sendDiscord(buildVacancyMessage(slots, meal), false);
             });
+
+            if (state.autoReserve) {
+              setTimeout(() => tryAutoReserveClick(), 0);
+            }
           }
         } catch(e) {
           console.error("解析エラー:", e);
