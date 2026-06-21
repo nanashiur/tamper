@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      2.09
+// @version      2.10
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -34,7 +34,7 @@
   const CHECK_INTERVAL_STOP_MS = 1000;
   const CHECK_INTERVAL_PENDING_MS = 150;
   const CHECK_INTERVAL_READY_MS = 50;
-  const RESERVE_PENDING_TIMEOUT_MS = 5000;
+  const CLICK_CYCLE_TIMEOUT_MS = 5000;
 
   const CONSECUTIVE_ERROR_LIMIT = 20;
   const RESERVE_ERROR_STATUSES = new Set([403, 435]);
@@ -107,37 +107,37 @@
   let isNotified = false;
   let IS_FORCED_STOP = false;
 
-  let reserveRequestPending = false;
-  let reserveRequestPendingAt = 0;
-  let reserveRequestPendingCount = 0;
+  let clickCyclePending = false;
+  let clickCyclePendingAt = 0;
+  let clickCyclePendingCount = 0;
 
   let consecutiveErrorCount = 0;
   let totalErrorCount = 0;
   let errorPopupEl = null;
 
-  const markReservePendingStart = () => {
-    reserveRequestPendingCount++;
-    reserveRequestPending = true;
-    reserveRequestPendingAt = Date.now();
+  const markClickCycleStart = () => {
+    clickCyclePendingCount++;
+    clickCyclePending = true;
+    clickCyclePendingAt = Date.now();
   };
 
-  const markReservePendingEnd = () => {
-    reserveRequestPendingCount = Math.max(0, reserveRequestPendingCount - 1);
-    reserveRequestPending = reserveRequestPendingCount > 0;
+  const markClickCycleEnd = () => {
+    clickCyclePendingCount = Math.max(0, clickCyclePendingCount - 1);
+    clickCyclePending = clickCyclePendingCount > 0;
 
-    if (!reserveRequestPending) {
-      reserveRequestPendingAt = 0;
+    if (!clickCyclePending) {
+      clickCyclePendingAt = 0;
     }
   };
 
-  const isReservePendingTimedOut = () => {
-    return reserveRequestPending &&
-      reserveRequestPendingAt > 0 &&
-      Date.now() - reserveRequestPendingAt >= RESERVE_PENDING_TIMEOUT_MS;
+  const isClickCycleTimedOut = () => {
+    return clickCyclePending &&
+      clickCyclePendingAt > 0 &&
+      Date.now() - clickCyclePendingAt >= CLICK_CYCLE_TIMEOUT_MS;
   };
 
-  const canSendReserve = () => {
-    return !reserveRequestPending || isReservePendingTimedOut();
+  const canClickReserve = () => {
+    return !clickCyclePending || isClickCycleTimedOut();
   };
 
   const getHotelWebhook = () => {
@@ -377,7 +377,7 @@
       const reservePostResult = isReservePost(this.__u, this.__m);
 
       if (reservePostResult) {
-        markReservePendingEnd();
+        markClickCycleEnd();
       }
 
       const status = this.status;
@@ -429,7 +429,6 @@
       isReservePost(this.__u, this.__m);
 
     if (reservePost) {
-      markReservePendingStart();
       b = rewriteBody(b);
     }
 
@@ -633,7 +632,7 @@
     });
 
     const updateClickUI = (isWaiting = false, isBurst = false, isMaint = false) => {
-      const pendingWaiting = reserveRequestPending && !isReservePendingTimedOut();
+      const cycleWaiting = clickCyclePending && !isClickCycleTimedOut();
 
       if (DATA_SOURCE === 'ERROR') {
         clickEl.textContent = 'ERR';
@@ -647,7 +646,7 @@
       } else if (isMaint) {
         clickEl.textContent = '保守';
         clickEl.style.background = `rgba(75, 85, 99, ${ALPHA_ON})`;
-      } else if (pendingWaiting) {
+      } else if (cycleWaiting) {
         clickEl.textContent = '通信';
         clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
       } else if (isBurst) {
@@ -731,7 +730,8 @@
         const btn = document.querySelector('.js-reserve.button.next');
 
         if (btn) {
-          if (canSendReserve()) {
+          if (canClickReserve()) {
+            markClickCycleStart();
             btn.disabled = false;
             btn.classList.remove('is-disabled');
             btn.click();
@@ -746,12 +746,12 @@
 
       updateClickUI(isWaiting, isBurstTime, isMaint);
 
-      const pendingWaiting = reserveRequestPending && !isReservePendingTimedOut();
+      const cycleWaiting = clickCyclePending && !isClickCycleTimedOut();
 
       const nextInterval =
         currentClickMode === 'STOP' || IS_FORCED_STOP || DATA_SOURCE === 'ERROR' || isMaint
           ? CHECK_INTERVAL_STOP_MS
-          : pendingWaiting
+          : cycleWaiting
             ? CHECK_INTERVAL_PENDING_MS
             : CHECK_INTERVAL_READY_MS;
 
