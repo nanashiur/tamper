@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      2.10
+// @version      2.11
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -34,7 +34,6 @@
   const CHECK_INTERVAL_STOP_MS = 1000;
   const CHECK_INTERVAL_PENDING_MS = 150;
   const CHECK_INTERVAL_READY_MS = 50;
-  const CLICK_CYCLE_TIMEOUT_MS = 5000;
 
   const CONSECUTIVE_ERROR_LIMIT = 20;
   const RESERVE_ERROR_STATUSES = new Set([403, 435]);
@@ -108,36 +107,21 @@
   let IS_FORCED_STOP = false;
 
   let clickCyclePending = false;
-  let clickCyclePendingAt = 0;
-  let clickCyclePendingCount = 0;
 
   let consecutiveErrorCount = 0;
   let totalErrorCount = 0;
   let errorPopupEl = null;
 
-  const markClickCycleStart = () => {
-    clickCyclePendingCount++;
+  const lockClickCycle = () => {
     clickCyclePending = true;
-    clickCyclePendingAt = Date.now();
   };
 
-  const markClickCycleEnd = () => {
-    clickCyclePendingCount = Math.max(0, clickCyclePendingCount - 1);
-    clickCyclePending = clickCyclePendingCount > 0;
-
-    if (!clickCyclePending) {
-      clickCyclePendingAt = 0;
-    }
-  };
-
-  const isClickCycleTimedOut = () => {
-    return clickCyclePending &&
-      clickCyclePendingAt > 0 &&
-      Date.now() - clickCyclePendingAt >= CLICK_CYCLE_TIMEOUT_MS;
+  const clearClickCycle = () => {
+    clickCyclePending = false;
   };
 
   const canClickReserve = () => {
-    return !clickCyclePending || isClickCycleTimedOut();
+    return !clickCyclePending;
   };
 
   const getHotelWebhook = () => {
@@ -377,7 +361,7 @@
       const reservePostResult = isReservePost(this.__u, this.__m);
 
       if (reservePostResult) {
-        markClickCycleEnd();
+        clearClickCycle();
       }
 
       const status = this.status;
@@ -496,12 +480,12 @@
     const code = PARTS.searchHotelCD;
 
     const HOTEL_COLORS = {
-      DHM: [22, 163, 74],    // ミラコスタ：緑
-      FSH: [236, 72, 153],   // ファンタジースプリングス：ピンク
-      TDH: [234, 179, 8],    // ディズニーランドホテル：黄色
-      DAH: [37, 99, 235],    // アンバサダーホテル：青
-      TSH: [234, 88, 12],    // トイ・ストーリーホテル：オレンジ
-      DCH: [14, 165, 233]    // セレブレーションホテル：水色
+      DHM: [22, 163, 74],
+      FSH: [236, 72, 153],
+      TDH: [234, 179, 8],
+      DAH: [37, 99, 235],
+      TSH: [234, 88, 12],
+      DCH: [14, 165, 233]
     };
 
     const baseRGB = DATA_SOURCE === 'ERROR'
@@ -632,8 +616,6 @@
     });
 
     const updateClickUI = (isWaiting = false, isBurst = false, isMaint = false) => {
-      const cycleWaiting = clickCyclePending && !isClickCycleTimedOut();
-
       if (DATA_SOURCE === 'ERROR') {
         clickEl.textContent = 'ERR';
         clickEl.style.background = `rgba(0, 0, 0, ${ALPHA_ON})`;
@@ -646,7 +628,7 @@
       } else if (isMaint) {
         clickEl.textContent = '保守';
         clickEl.style.background = `rgba(75, 85, 99, ${ALPHA_ON})`;
-      } else if (cycleWaiting) {
+      } else if (clickCyclePending) {
         clickEl.textContent = '通信';
         clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
       } else if (isBurst) {
@@ -654,7 +636,7 @@
         clickEl.style.background = 'rgba(255, 0, 0, 1)';
       } else if (isWaiting) {
         clickEl.textContent = '待機';
-        clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
+        clickEl.style.background = `rgba(14, 116, 144, ${ALPHA_ON})`;
       } else {
         clickEl.textContent = '稼働';
         clickEl.style.background = CLICK_MODES.FAST.color;
@@ -668,6 +650,7 @@
         IS_FORCED_STOP = false;
         isNotified = false;
         consecutiveErrorCount = 0;
+        clearClickCycle();
       }
 
       currentClickMode = currentClickMode === 'STOP' ? 'FAST' : 'STOP';
@@ -731,13 +714,11 @@
 
         if (btn) {
           if (canClickReserve()) {
-            markClickCycleStart();
+            lockClickCycle();
             btn.disabled = false;
             btn.classList.remove('is-disabled');
             btn.click();
             isWaiting = false;
-          } else {
-            isWaiting = true;
           }
         } else {
           isWaiting = true;
@@ -746,12 +727,10 @@
 
       updateClickUI(isWaiting, isBurstTime, isMaint);
 
-      const cycleWaiting = clickCyclePending && !isClickCycleTimedOut();
-
       const nextInterval =
         currentClickMode === 'STOP' || IS_FORCED_STOP || DATA_SOURCE === 'ERROR' || isMaint
           ? CHECK_INTERVAL_STOP_MS
-          : cycleWaiting
+          : clickCyclePending
             ? CHECK_INTERVAL_PENDING_MS
             : CHECK_INTERVAL_READY_MS;
 
