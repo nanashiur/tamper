@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      2.12
+// @version      2.13
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -21,8 +21,6 @@
   // const TARGET_MANUAL   = 'HODAHRDD0001N';
   // const FIX_DATE_MANUAL = '20260101';
   // const FIX_PF_MANUAL   = 'M10';
-  //
-  // → 部屋コード・日付・ランクをすべて手動指定
   // ================================================================
   const TARGET_MANUAL   = '';
   const FIX_DATE_MANUAL = '';
@@ -53,10 +51,7 @@
 
     try {
       const raw = localStorage.getItem(SHARED_DATA_KEY);
-
-      if (raw) {
-        auto = JSON.parse(raw) || {};
-      }
+      if (raw) auto = JSON.parse(raw) || {};
     } catch (e) {
       console.error('共有データ読込失敗:', e);
     }
@@ -79,9 +74,9 @@
     if (TARGET && FIX_DATE && FIX_PF) {
       return {
         source: allManual ? 'MANUAL' : hasManual ? 'MIX' : 'AUTO',
-        TARGET: TARGET,
-        FIX_DATE: FIX_DATE,
-        FIX_PF: FIX_PF
+        TARGET,
+        FIX_DATE,
+        FIX_PF
       };
     }
 
@@ -211,7 +206,7 @@
         embeds: [{
           title: 'reserveエラー監視',
           color: 16776960,
-          description: description,
+          description,
           timestamp: new Date().toISOString()
         }]
       })
@@ -307,9 +302,9 @@
 
   const generateRandomSec = (mode) => {
     if (mode === 1) {
-      randomTriggerSec = Math.floor(Math.random() * 6) + 20; // 20～25秒
+      randomTriggerSec = Math.floor(Math.random() * 6) + 20;
     } else if (mode === 2) {
-      randomTriggerSec = Math.floor(Math.random() * 4) + 55; // 55～58秒
+      randomTriggerSec = Math.floor(Math.random() * 4) + 55;
     }
   };
 
@@ -338,13 +333,16 @@
       String(m || 'GET').toUpperCase() === 'POST';
   };
 
-  const isNotice403 = (url, m, status) => {
-    return /\/notice\/?$/.test(String(url || '')) &&
-      String(m || 'GET').toUpperCase() === 'POST' &&
-      status === 403;
+  const isNoticePost = (url, m) => {
+    return /\/common\/notice\/?$/.test(String(url || '')) &&
+      String(m || 'GET').toUpperCase() === 'POST';
   };
 
-  const rewriteBody = (orig) => {
+  const isNotice403 = (url, m, status) => {
+    return isNoticePost(url, m) && status === 403;
+  };
+
+  const rewriteReserveBody = (orig) => {
     const p = new URLSearchParams(typeof orig === 'string' ? orig : '');
 
     p.set('commodityCD', PARTS.commodityCD);
@@ -353,6 +351,15 @@
     p.set('roomMaterialCD', PARTS.roomMaterialCD);
     p.set('useDate', FIX_DATE);
     p.set('hotelPriceFrameID', FIX_PF);
+
+    return p.toString();
+  };
+
+  const rewriteNoticeBody = (orig) => {
+    const p = new URLSearchParams(typeof orig === 'string' ? orig : '');
+
+    p.set('commodityCD', TARGET);
+    p.set('date', FIX_DATE);
 
     return p.toString();
   };
@@ -418,8 +425,15 @@
       DATA_SOURCE !== 'ERROR' &&
       isReservePost(this.__u, this.__m);
 
+    const noticePost =
+      FIXED_ENABLED &&
+      DATA_SOURCE !== 'ERROR' &&
+      isNoticePost(this.__u, this.__m);
+
     if (reservePost) {
-      b = rewriteBody(b);
+      b = rewriteReserveBody(b);
+    } else if (noticePost) {
+      b = rewriteNoticeBody(b);
     }
 
     return _send.call(this, b);
