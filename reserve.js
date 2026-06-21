@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      2.11
+// @version      2.12
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -35,7 +35,7 @@
   const CHECK_INTERVAL_PENDING_MS = 150;
   const CHECK_INTERVAL_READY_MS = 50;
 
-  const CONSECUTIVE_ERROR_LIMIT = 20;
+  const CONSECUTIVE_ERROR_LIMIT = 9;
   const RESERVE_ERROR_STATUSES = new Set([403, 435]);
 
   const isMaintenanceTime = (d = new Date()) => {
@@ -338,6 +338,12 @@
       String(m || 'GET').toUpperCase() === 'POST';
   };
 
+  const isNotice403 = (url, m, status) => {
+    return /\/notice\/?$/.test(String(url || '')) &&
+      String(m || 'GET').toUpperCase() === 'POST' &&
+      status === 403;
+  };
+
   const rewriteBody = (orig) => {
     const p = new URLSearchParams(typeof orig === 'string' ? orig : '');
 
@@ -358,13 +364,13 @@
     this.__m = m;
 
     this.addEventListener('loadend', () => {
+      const status = this.status;
       const reservePostResult = isReservePost(this.__u, this.__m);
+      const notice403Result = isNotice403(this.__u, this.__m, status);
 
-      if (reservePostResult) {
+      if (reservePostResult || notice403Result) {
         clearClickCycle();
       }
-
-      const status = this.status;
 
       if (reservePostResult && RESERVE_ERROR_STATUSES.has(status)) {
         consecutiveErrorCount++;
@@ -597,7 +603,9 @@
 
     updateTimerOffUI();
 
-    let currentClickMode = localStorage.getItem(STORAGE_CLICK_KEY) || 'STOP';
+    let currentClickMode = 'STOP';
+    localStorage.setItem(STORAGE_CLICK_KEY, 'STOP');
+
     const startTime = parseInt(localStorage.getItem(START_TIME_KEY) || Date.now(), 10);
     localStorage.setItem(START_TIME_KEY, startTime);
 
@@ -622,12 +630,12 @@
       } else if (IS_FORCED_STOP) {
         clickEl.textContent = CLICK_MODES.FORCED.label;
         clickEl.style.background = CLICK_MODES.FORCED.color;
-      } else if (currentClickMode === 'STOP') {
-        clickEl.textContent = '停止';
-        clickEl.style.background = CLICK_MODES.STOP.color;
       } else if (isMaint) {
         clickEl.textContent = '保守';
         clickEl.style.background = `rgba(75, 85, 99, ${ALPHA_ON})`;
+      } else if (currentClickMode === 'STOP') {
+        clickEl.textContent = '停止';
+        clickEl.style.background = CLICK_MODES.STOP.color;
       } else if (clickCyclePending) {
         clickEl.textContent = '通信';
         clickEl.style.background = `rgba(128, 0, 128, ${ALPHA_ON})`;
