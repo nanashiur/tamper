@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         📅 空室在庫モニター
-// @version      5.14
+// @name         📅 客室指定在庫モニター
+// @version      5.15
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_NAME = '📅 空室在庫モニター';
+  const SCRIPT_NAME = '📅 客室指定在庫モニター';
   const SHARED_DATA_KEY = 'tdr_11am_reserve_data';
 
   const getDiscordWebhookUrl = () => {
@@ -69,6 +69,14 @@
     if (num >= 1 && num <= 20) return String.fromCharCode(0x245F + num);
     if (num >= 21 && num <= 35) return String.fromCharCode(0x3251 + num - 21);
     return `(${num})`;
+  };
+
+  const stockMark = n => n > 0 ? (MARKS[n] || toCircled(n)) : '';
+
+  const statusWithStock = (st, rm) => {
+    return st === 0
+      ? `${FULL_LABEL[st]}${stockMark(rm)}`
+      : FULL_LABEL[st];
   };
 
   const initCalendarStartPlus4 = () => {
@@ -693,13 +701,7 @@
               const isNewSale = (prev.st === 3 && diffDays >= 122);
 
               if (!isNewSale) {
-                let changeTxt;
-
-                if (prev.st !== st) {
-                  changeTxt = `${FULL_LABEL[prev.st]}→${FULL_LABEL[st]}`;
-                } else {
-                  changeTxt = `${MARKS[prev.rm] || prev.rm}→${MARKS[rm] || rm}`;
-                }
+                const changeTxt = `${statusWithStock(prev.st, prev.rm)}→${statusWithStock(st, rm)}`;
 
                 pendingNotifications.push({
                   st,
@@ -735,7 +737,7 @@
           embeds: [{
             title: `${TITLE_EMOJI[item.st] ?? ''} **${tStrSec()}**\n${item.dt} ${item.changeTxt}\n${item.roomName}`,
             color: DISCORD_COLOR[item.st] ?? 1,
-            description: `時刻: ${tStrMs()} (${currentIp})\n在庫${MARKS[item.rm] || '◯'} ${item.totalPrice.toLocaleString()}円 [${item.priceRank}]`
+            description: `時刻: ${tStrMs()} (${currentIp})\n${item.totalPrice.toLocaleString()}円 [${item.priceRank}]`
           }]
         });
       }
