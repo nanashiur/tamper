@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      2.13
+// @version      2.14
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -217,9 +217,9 @@
   const STORAGE_CLICK_KEY = 'auto_click_mode';
   const STORAGE_TIMER_ON_MODE_KEY = 'tdr_11am_timer_on_mode';
   const STORAGE_TIMER_OFF_KEY = 'tdr_11am_timer_off_enabled';
+  const STORAGE_TIMER_TRIGGER_TIME_KEY = 'tdr_11am_timer_trigger_time';
   const STORAGE_RELOAD_ENABLED_KEY = 'tdr_10am_reload_enabled';
-  const STORAGE_RELOAD_DATE_KEY = 'tdr_10am_reload_date';
-  const STORAGE_RELOAD_SEC_KEY = 'tdr_10am_reload_sec';
+  const STORAGE_RELOAD_DATE_KEY = 'tdr_1030_reload_date';
   const START_TIME_KEY = 'auto_click_start';
 
   const getTodayKey = () => {
@@ -232,35 +232,19 @@
     ].join('');
   };
 
-  const getReloadSec = () => {
-    const today = getTodayKey();
-
-    try {
-      const raw = localStorage.getItem(STORAGE_RELOAD_SEC_KEY);
-      const saved = raw ? JSON.parse(raw) : null;
-
-      if (
-        saved &&
-        saved.date === today &&
-        Number.isInteger(saved.sec) &&
-        saved.sec >= 0 &&
-        saved.sec <= 59
-      ) {
-        return saved.sec;
-      }
-    } catch (e) {
-      console.error('10時再読込秒数の読込失敗:', e);
+  const saveTimerTriggerTime = (mode, sec) => {
+    if (!mode || !Number.isInteger(sec)) {
+      localStorage.setItem(STORAGE_TIMER_TRIGGER_TIME_KEY, 'OFF');
+      return;
     }
 
-    const sec = Math.floor(Math.random() * 60);
-
     localStorage.setItem(
-      STORAGE_RELOAD_SEC_KEY,
-      JSON.stringify({ date: today, sec })
+      STORAGE_TIMER_TRIGGER_TIME_KEY,
+      `10時59分${sec}秒`
     );
-
-    return sec;
   };
+
+  const reloadSec = Math.floor(Math.random() * 60);
 
   const checkTenReload = () => {
     if (localStorage.getItem(STORAGE_RELOAD_ENABLED_KEY) !== 'true') return;
@@ -273,9 +257,8 @@
     const h = now.getHours();
     const m = now.getMinutes();
     const s = now.getSeconds();
-    const reloadSec = getReloadSec();
 
-    if (h === 10 && m === 0 && s >= reloadSec) {
+    if (h === 10 && m === 30 && s >= reloadSec) {
       localStorage.setItem(STORAGE_RELOAD_DATE_KEY, today);
       location.reload();
     }
@@ -302,14 +285,21 @@
 
   const generateRandomSec = (mode) => {
     if (mode === 1) {
-      randomTriggerSec = Math.floor(Math.random() * 6) + 20;
+      randomTriggerSec = Math.floor(Math.random() * 10) + 40;
+      saveTimerTriggerTime(mode, randomTriggerSec);
     } else if (mode === 2) {
-      randomTriggerSec = Math.floor(Math.random() * 4) + 55;
+      randomTriggerSec = Math.floor(Math.random() * 10) + 50;
+      saveTimerTriggerTime(mode, randomTriggerSec);
+    } else {
+      randomTriggerSec = 0;
+      saveTimerTriggerTime(0, null);
     }
   };
 
   if (TIMER_ON_MODE > 0) {
     generateRandomSec(TIMER_ON_MODE);
+  } else {
+    saveTimerTriggerTime(0, null);
   }
 
   const ALPHA_ON = 0.85;
@@ -457,7 +447,7 @@
 
     const reloadPanel = document.createElement('div');
 
-    reloadPanel.id = 'tdr-10am-reload-panel';
+    reloadPanel.id = 'tdr-1030-reload-panel';
 
     Object.assign(reloadPanel.style, {
       position: 'fixed',
@@ -465,11 +455,11 @@
       right: '0',
       zIndex: '2147483647',
       color: '#fff',
-      padding: '3px 6px',
-      fontSize: '11px',
+      padding: '2px 5px',
+      fontSize: '10px',
       fontWeight: '700',
       fontFamily: 'sans-serif',
-      lineHeight: '1.15',
+      lineHeight: '1',
       textAlign: 'center',
       cursor: 'pointer',
       borderRadius: '0 0 0 4px',
@@ -480,9 +470,7 @@
     const updateReloadPanel = () => {
       RELOAD_ENABLED = localStorage.getItem(STORAGE_RELOAD_ENABLED_KEY) === 'true';
 
-      reloadPanel.innerHTML = RELOAD_ENABLED
-        ? '10F5<br>ON'
-        : '10F5<br>OFF';
+      reloadPanel.textContent = RELOAD_ENABLED ? 'ON' : 'OFF';
 
       reloadPanel.style.background = RELOAD_ENABLED
         ? `rgba(59, 130, 246, ${ALPHA_ON})`
@@ -562,12 +550,14 @@
       if (TIMER_ON_MODE === 0) {
         timerOnEl.style.background = `rgba(0, 0, 0, ${ALPHA_OFF})`;
         timerOnEl.textContent = 'OFF';
+        saveTimerTriggerTime(0, null);
       } else {
         timerOnEl.style.background = TIMER_ON_MODE === 1
           ? `rgba(234, 88, 12, ${ALPHA_ON})`
           : `rgba(147, 51, 234, ${ALPHA_ON})`;
 
         timerOnEl.textContent = `${randomTriggerSec}s`;
+        saveTimerTriggerTime(TIMER_ON_MODE, randomTriggerSec);
       }
 
       localStorage.setItem(STORAGE_TIMER_ON_MODE_KEY, TIMER_ON_MODE);
@@ -575,11 +565,7 @@
 
     timerOnEl.addEventListener('click', () => {
       TIMER_ON_MODE = (TIMER_ON_MODE + 1) % 3;
-
-      if (TIMER_ON_MODE > 0) {
-        generateRandomSec(TIMER_ON_MODE);
-      }
-
+      generateRandomSec(TIMER_ON_MODE);
       updateTimerOnUI();
     });
 
