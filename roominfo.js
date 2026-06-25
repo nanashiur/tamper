@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      1.61
+// @version      1.84
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -15,6 +15,7 @@
 
   const STORAGE_KEY_NOTIFY = 'tdr_roominfo_notify_enabled';
   const LAST_ROOMINFO_KEY = 'tdr_roominfo_last_data';
+  const STORAGE_TIMER_TRIGGER_TIME_KEY = 'tdr_11am_timer_trigger_time';
 
   const PHASE_25 = '25';
   const PHASE_1 = '1';
@@ -36,8 +37,10 @@
   let autoAdvanceNotified = false;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const SCRIPT_START_DATE = new Date();
+  const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v1.61 起動');
+  console.log('[ℹ️客室情報画面] v1.84 起動');
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.hotel || '';
@@ -82,6 +85,27 @@
 
   function getText() {
     return document.body ? document.body.innerText || '' : '';
+  }
+
+  function formatTimeText(d) {
+    return `${d.getHours()}時${String(d.getMinutes()).padStart(2, '0')}分${String(d.getSeconds()).padStart(2, '0')}秒`;
+  }
+
+  function getLoadTimeText() {
+    const saved = String(localStorage.getItem(STORAGE_TIMER_TRIGGER_TIME_KEY) || '').trim();
+    return saved && saved !== 'OFF' ? saved : '不明';
+  }
+
+  function isStartTimeInLoadWindow() {
+    const d = SCRIPT_START_DATE;
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const s = d.getSeconds();
+
+    return (
+      (h === 10 && m === 59 && s >= 40) ||
+      (h === 11 && m === 0 && s <= 40)
+    );
   }
 
   function isErrorPage(text) {
@@ -276,7 +300,7 @@
     };
   }
 
-  async function notifyDiscord(data, note = '', color = COLOR_NORMAL) {
+  async function notifyDiscord(data, note = '', color = COLOR_NORMAL, mode = 'start') {
     const webhookUrl = getDiscordWebhookUrl();
 
     if (!webhookUrl) {
@@ -286,12 +310,20 @@
 
     const lines = [
       `**${data.date || '-'}**`,
-      `**${data.room || '-'}**`
+      `**${data.room || '-'}**`,
+      ''
     ];
 
-    if (note) {
-      lines.push('');
-      lines.push(`**${note}**`);
+    if (note) lines.push(`**${note}**`);
+
+    if (mode === 'move') {
+      lines.push(`**移動：${formatTimeText(new Date())}**`);
+    } else {
+      const startLine = isStartTimeInLoadWindow()
+        ? `開始：${SCRIPT_START_TIME_TEXT}　（読込：${getLoadTimeText()}）`
+        : `開始：${SCRIPT_START_TIME_TEXT}`;
+
+      lines.push(`**${startLine}**`);
     }
 
     const payload = {
@@ -339,7 +371,7 @@
       return;
     }
 
-    notifyDiscord(makeErrorRoomInfo(), 'エラー', COLOR_ERROR);
+    notifyDiscord(makeErrorRoomInfo(), 'エラー', COLOR_ERROR, 'start');
   }
 
   function isVisible(el) {
@@ -409,7 +441,7 @@
     if (!data?.date || !data?.room) return;
 
     autoAdvanceNotified = true;
-    await notifyDiscord(data, '25分経過', COLOR_NORMAL);
+    await notifyDiscord(data, '25分経過', COLOR_NORMAL, 'move');
   }
 
   async function autoAgreeAndNext() {
@@ -513,7 +545,7 @@
     }
 
     notifiedThisPage = true;
-    notifyDiscord(data, '仮予約', COLOR_NORMAL);
+    notifyDiscord(data, '仮予約', COLOR_NORMAL, 'start');
   }
 
   function tick() {
