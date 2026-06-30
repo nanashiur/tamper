@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      2.15
+// @version      2.16
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -23,8 +23,8 @@
   // const FIX_PF_MANUAL   = 'M10';
   // ================================================================
   const TARGET_MANUAL   = '';
-  const FIX_DATE_MANUAL = '';
-  const FIX_PF_MANUAL   = '';
+  const FIX_DATE_MANUAL = '20261031';
+  const FIX_PF_MANUAL   = 'M30';
 
   const SHARED_DATA_KEY = 'tdr_11am_reserve_data';
   // ================================================================
