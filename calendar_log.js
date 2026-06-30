@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 客室指定在庫モニター
-// @version      5.15
+// @version      5.16
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -57,9 +57,14 @@
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
   };
 
+  const getTargetMonthOffset = () => {
+    const now = new Date();
+    return now.getDate() === 1 && now.getHours() < 11 ? 3 : 4;
+  };
+
   const getTargetUseDate = () => {
     const d = new Date();
-    d.setMonth(d.getMonth() + 4);
+    d.setMonth(d.getMonth() + getTargetMonthOffset());
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
   };
 
@@ -87,7 +92,7 @@
     const curM = now.getMonth() + 1;
 
     let tgtY = curY;
-    let tgtM = curM + 4;
+    let tgtM = curM + getTargetMonthOffset();
     tgtY += Math.floor((tgtM - 1) / 12);
     tgtM = ((tgtM - 1) % 12) + 1;
 
