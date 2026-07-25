@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      2.55
+// @version      2.56
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -285,7 +285,7 @@
 
   const generateRandomSec = (mode) => {
     if (mode === 1) {
-      randomTriggerSec = Math.floor(Math.random() * 5) + 39; // 39〜43秒
+      randomTriggerSec = Math.floor(Math.random() * 5) + 29; // 29〜33秒
       saveTimerTriggerTime(mode, randomTriggerSec);
     } else if (mode === 2) {
       randomTriggerSec = Math.floor(Math.random() * 5) + 34; // 34〜38秒
