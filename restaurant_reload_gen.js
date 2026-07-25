@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      4.61
+// @version      4.62
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -28,6 +28,8 @@
   const PUBLIC_IP_TIMEOUT = 4000;
   const AJAX_BATCH_SETTLE_MS = 500;
   const ERROR_RELOAD_NOTIFY_THRESHOLD = 3;
+  const FREEZE_TIMEOUT_MS = 120000;
+  const FREEZE_RELOAD_DELAY_MS = 60000;
 
   function isAccessDeniedPage() {
     const title = document.title || '';
@@ -68,11 +70,8 @@
 
   function shouldNotifyAccessDenied(reference) {
     const now = Date.now();
-    const lastTime = Number(
-      localStorage.getItem('accessDeniedLastNotifyTime') || '0'
-    );
-    const lastReference =
-      localStorage.getItem('accessDeniedLastReference') || '';
+    const lastTime = Number(localStorage.getItem('accessDeniedLastNotifyTime') || '0');
+    const lastReference = localStorage.getItem('accessDeniedLastReference') || '';
     const currentReference = reference || location.href;
 
     if (
@@ -82,14 +81,8 @@
       return false;
     }
 
-    localStorage.setItem(
-      'accessDeniedLastNotifyTime',
-      String(now)
-    );
-    localStorage.setItem(
-      'accessDeniedLastReference',
-      currentReference
-    );
+    localStorage.setItem('accessDeniedLastNotifyTime', String(now));
+    localStorage.setItem('accessDeniedLastReference', currentReference);
     return true;
   }
 
@@ -103,13 +96,8 @@
     const h = d.getHours().toString().padStart(2, '0');
     const m = d.getMinutes().toString().padStart(2, '0');
     const s = d.getSeconds().toString().padStart(2, '0');
-    const detectedAt =
-      `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
-
-    const errorReloadCount = Math.max(
-      0,
-      Number(localStorage.getItem('errorReloadCount')) || 0
-    );
+    const detectedAt = `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
+    const errorReloadCount = Math.max(0, Number(localStorage.getItem('errorReloadCount')) || 0);
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -147,41 +135,21 @@
     lastSearchStartTime: 0,
     isSearchPending: false,
     lastNotificationTime: 0,
-    autoOpen:
-      localStorage.getItem('autoOpenTimeTabs') !== '0',
-    autoF5:
-      localStorage.getItem('autoF520min') !== '0',
-    autoReserve:
-      localStorage.getItem('autoReserveClick') === '1',
-    notifyEnabled:
-      localStorage.getItem('notifyEnabled') !== '0',
-    searchStatus:
-      localStorage.getItem('searchStatus') || 'M',
-    excludedTimes:
-      JSON.parse(
-        localStorage.getItem('excludedTimes') || '[]'
-      ),
-    autoReserveNotifyHistory:
-      JSON.parse(
-        localStorage.getItem(
-          'autoReserveNotifyHistory'
-        ) || '{}'
-      ),
+    autoOpen: localStorage.getItem('autoOpenTimeTabs') !== '0',
+    autoF5: localStorage.getItem('autoF520min') !== '0',
+    autoReserve: localStorage.getItem('autoReserveClick') === '1',
+    notifyEnabled: localStorage.getItem('notifyEnabled') !== '0',
+    searchStatus: localStorage.getItem('searchStatus') || 'M',
+    excludedTimes: JSON.parse(localStorage.getItem('excludedTimes') || '[]'),
+    autoReserveNotifyHistory: JSON.parse(localStorage.getItem('autoReserveNotifyHistory') || '{}'),
     waitSec: 15,
-    f5WaitSec:
-      Math.floor(
-        Math.random() * (1320 - 1080 + 1)
-      ) + 1080,
+    f5WaitSec: createF5WaitSec(),
     lastClickedMealName: '',
     commodityMealMap: {},
     autoReserveLockUntil: 0,
-    errorReloadCount: Math.max(
-      0,
-      Number(
-        localStorage.getItem('errorReloadCount')
-      ) || 0
-    ),
+    errorReloadCount: Math.max(0, Number(localStorage.getItem('errorReloadCount')) || 0),
     errorReloadScheduled: false,
+    freezeReloadScheduled: false,
     ajaxPendingCount: 0,
     ajaxStatuses: [],
     ajaxBatchFinalizeTimer: null
@@ -189,452 +157,198 @@
 
   const AUTO_RESERVE_NOTIFY_COOLDOWN = 30000;
 
+  function createF5WaitSec() {
+    return Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080;
+  }
+
   function getRestaurantInfo() {
-    const nameEl = document.querySelector(
-      '.box04 .name, .p-restaurantDetail__name'
-    );
-
-    const name = nameEl
-      ? nameEl.textContent.trim()
-      : document.title
-          .split('｜')[0]
-          .replace(
-            /レストラン空き状況確認|予約・購入|詳細/g,
-            ''
-          )
-          .trim();
-
-    const dateHid =
-      document.querySelector('#reservationOfDateHid');
-
-    const dateStr = dateHid
-      ? ` [${dateHid.textContent.trim()}]`
-      : '';
-
+    const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
+    const name = nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
+    const dateHid = document.querySelector('#reservationOfDateHid');
+    const dateStr = dateHid ? ` [${dateHid.textContent.trim()}]` : '';
     return name + dateStr;
   }
 
   function getRestaurantName() {
-    const nameEl = document.querySelector(
-      '.box04 .name, .p-restaurantDetail__name'
-    );
-
-    return nameEl
-      ? nameEl.textContent.trim()
-      : document.title
-          .split('｜')[0]
-          .replace(
-            /レストラン空き状況確認|予約・購入|詳細/g,
-            ''
-          )
-          .trim();
+    const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
+    return nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
   }
 
   function getDisplayDate() {
-    const dateEl =
-      document.querySelector('#reservationOfDateDisp1');
-
-    const raw = dateEl
-      ? dateEl.textContent.trim()
-      : '';
-
+    const dateEl = document.querySelector('#reservationOfDateDisp1');
+    const raw = dateEl ? dateEl.textContent.trim() : '';
     return raw.replace(/\s*\((.)\)/, '（$1）');
   }
 
   function normalizeMealName(text) {
-    const t = (text || '')
-      .replace(/\s+/g, '')
-      .trim();
-
+    const t = (text || '').replace(/\s+/g, '').trim();
     if (t.includes('朝食')) return '朝食';
     if (t.includes('昼食')) return '昼食';
     if (t.includes('夕食')) return '夕食';
-
     return '';
   }
 
   function refreshCommodityMealMap(root = document) {
     if (!root || !root.querySelectorAll) return;
-
     root.querySelectorAll('section').forEach(section => {
-      const meal = normalizeMealName(
-        section.querySelector(
-          'h1.hdg03, h1'
-        )?.textContent || ''
-      );
-
+      const meal = normalizeMealName(section.querySelector('h1.hdg03, h1')?.textContent || '');
       if (!meal) return;
-
-      section
-        .querySelectorAll('.commodityCD')
-        .forEach(input => {
-          const code = input.value?.trim();
-
-          if (code) {
-            state.commodityMealMap[code] = meal;
-          }
-        });
+      section.querySelectorAll('.commodityCD').forEach(input => {
+        const code = input.value?.trim();
+        if (code) state.commodityMealMap[code] = meal;
+      });
     });
   }
 
   function getCommodityFromRow(row) {
-    const onclick =
-      row
-        .querySelector(
-          'a[onclick*="toOrderForDate"]'
-        )
-        ?.getAttribute('onclick') || '';
-
-    const m = onclick.match(
-      /toOrderForDate\(\s*["']toOrderForm["']\s*,\s*["']([^"']+)["']/
-    );
-
+    const onclick = row.querySelector('a[onclick*="toOrderForDate"]')?.getAttribute('onclick') || '';
+    const m = onclick.match(/toOrderForDate\(\s*["']toOrderForm["']\s*,\s*["']([^"']+)["']/);
     return m ? m[1] : '';
   }
 
   function getMealNameFromCommodity(commodity) {
     if (!commodity) return '';
-
-    if (state.commodityMealMap[commodity]) {
-      return state.commodityMealMap[commodity];
-    }
-
+    if (state.commodityMealMap[commodity]) return state.commodityMealMap[commodity];
     if (/^XXXRB/.test(commodity)) return '朝食';
     if (/^XXXRL/.test(commodity)) return '昼食';
     if (/^XXXRD/.test(commodity)) return '夕食';
-
     return '';
   }
 
   function getMealName(tempDiv) {
-    const conditionRows = [
-      ...document.querySelectorAll(
-        '.conditionBox tr'
-      )
-    ];
-
+    const conditionRows = [...document.querySelectorAll('.conditionBox tr')];
     for (const row of conditionRows) {
       const th = row.querySelector('th');
       const td = row.querySelector('td');
-
-      if (
-        th &&
-        td &&
-        th.textContent.includes('時間帯')
-      ) {
-        const meal =
-          normalizeMealName(td.textContent);
-
+      if (th && td && th.textContent.includes('時間帯')) {
+        const meal = normalizeMealName(td.textContent);
         if (meal) return meal;
       }
     }
-
-    const mealVal =
-      document
-        .querySelector(
-          'input[name="mealDivInform"]'
-        )
-        ?.value?.trim();
-
-    const mealFromValue = {
-      '1': '朝食',
-      '2': '昼食',
-      '3': '夕食'
-    }[mealVal];
-
+    const mealVal = document.querySelector('input[name="mealDivInform"]')?.value?.trim();
+    const mealFromValue = { '1': '朝食', '2': '昼食', '3': '夕食' }[mealVal];
     if (mealFromValue) return mealFromValue;
-
-    const tempMealVal =
-      tempDiv
-        .querySelector(
-          'input[name="mealDivInform"]'
-        )
-        ?.value?.trim();
-
-    const tempMealFromValue = {
-      '1': '朝食',
-      '2': '昼食',
-      '3': '夕食'
-    }[tempMealVal];
-
-    if (tempMealFromValue) {
-      return tempMealFromValue;
-    }
-
-    const h1s = [
-      ...tempDiv.querySelectorAll(
-        'h1.hdg03, h1'
-      )
-    ];
-
+    const tempMealVal = tempDiv.querySelector('input[name="mealDivInform"]')?.value?.trim();
+    const tempMealFromValue = { '1': '朝食', '2': '昼食', '3': '夕食' }[tempMealVal];
+    if (tempMealFromValue) return tempMealFromValue;
+    const h1s = [...tempDiv.querySelectorAll('h1.hdg03, h1')];
     for (const h1 of h1s) {
-      const meal =
-        normalizeMealName(h1.textContent);
-
+      const meal = normalizeMealName(h1.textContent);
       if (meal) return meal;
     }
-
     return '';
   }
 
   function getMealNameFromRow(row, tempDiv) {
-    const commodity =
-      getCommodityFromRow(row);
-
-    const mealByCommodity =
-      getMealNameFromCommodity(commodity);
-
-    if (mealByCommodity) {
-      return mealByCommodity;
-    }
-
+    const commodity = getCommodityFromRow(row);
+    const mealByCommodity = getMealNameFromCommodity(commodity);
+    if (mealByCommodity) return mealByCommodity;
     const section = row.closest('section');
-
     if (section) {
-      const h1 =
-        section.querySelector(
-          'h1.hdg03, h1'
-        );
-
-      const meal = normalizeMealName(
-        h1?.textContent || ''
-      );
-
+      const h1 = section.querySelector('h1.hdg03, h1');
+      const meal = normalizeMealName(h1?.textContent || '');
       if (meal) return meal;
     }
-
     const meal = getMealName(tempDiv);
-
     if (meal) return meal;
-
     return state.lastClickedMealName || '';
   }
 
   function getDetectDateTime() {
     const d = new Date();
-    const h =
-      d.getHours()
-        .toString()
-        .padStart(2, '0');
-
-    const m =
-      d.getMinutes()
-        .toString()
-        .padStart(2, '0');
-
-    const s =
-      d.getSeconds()
-        .toString()
-        .padStart(2, '0');
-
-    return (
-      `${d.getMonth() + 1}/` +
-      `${d.getDate()} ` +
-      `${h}:${m}:${s}`
-    );
+    const h = d.getHours().toString().padStart(2, '0');
+    const m = d.getMinutes().toString().padStart(2, '0');
+    const s = d.getSeconds().toString().padStart(2, '0');
+    return `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
   }
 
   function formatSlotLines(availableSlots) {
     const groups = {};
-
     availableSlots.forEach(time => {
       const hour = time.split(':')[0];
-
-      if (!groups[hour]) {
-        groups[hour] = [];
-      }
-
+      if (!groups[hour]) groups[hour] = [];
       groups[hour].push(time);
     });
-
     return Object.keys(groups)
-      .sort(
-        (a, b) =>
-          Number(a) - Number(b)
-      )
-      .map(
-        hour =>
-          `⏰ ${groups[hour].join(' ')}`
-      );
+      .sort((a, b) => Number(a) - Number(b))
+      .map(hour => `⏰ ${groups[hour].join(' ')}`);
   }
 
-  function buildVacancyMessage(
-    availableSlots,
-    mealName
-  ) {
-    const restaurantName =
-      getRestaurantName();
-
-    const displayDate =
-      getDisplayDate();
-
+  function buildVacancyMessage(availableSlots, mealName) {
+    const restaurantName = getRestaurantName();
+    const displayDate = getDisplayDate();
     const lines = [
       `🍴 ${restaurantName}`,
-      `📅 ${displayDate}${
-        mealName
-          ? ` 【${mealName}】`
-          : ''
-      }`
+      `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`
     ];
-
-    lines.push(
-      ...formatSlotLines(availableSlots)
-    );
-
+    lines.push(...formatSlotLines(availableSlots));
     return lines.join('\n');
   }
 
-  function buildAutoReserveMessage(
-    time,
-    mealName
-  ) {
-    const restaurantName =
-      getRestaurantName();
-
-    const displayDate =
-      getDisplayDate();
-
+  function buildAutoReserveMessage(time, mealName) {
+    const restaurantName = getRestaurantName();
+    const displayDate = getDisplayDate();
     return [
       `🍴 ${restaurantName}`,
-      `📅 ${displayDate}${
-        mealName
-          ? ` 【${mealName}】`
-          : ''
-      }`,
-      '🖱️ 自動予約クリック試行',
+      `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`,
+      `🖱️ 自動予約クリック試行`,
       `⏰ ${time}`
     ].join('\n');
   }
 
-  function shouldNotifyAutoReserve(
-    time,
-    mealName
-  ) {
+  function shouldNotifyAutoReserve(time, mealName) {
     const now = Date.now();
-
-    const key =
-      `${getRestaurantName()}|` +
-      `${getDisplayDate()}|` +
-      `${mealName || ''}|` +
-      `${time}`;
-
-    Object.keys(
-      state.autoReserveNotifyHistory
-    ).forEach(k => {
-      if (
-        now -
-          state.autoReserveNotifyHistory[k] >
-        AUTO_RESERVE_NOTIFY_COOLDOWN
-      ) {
-        delete state
-          .autoReserveNotifyHistory[k];
+    const key = `${getRestaurantName()}|${getDisplayDate()}|${mealName || ''}|${time}`;
+    Object.keys(state.autoReserveNotifyHistory).forEach(k => {
+      if (now - state.autoReserveNotifyHistory[k] > AUTO_RESERVE_NOTIFY_COOLDOWN) {
+        delete state.autoReserveNotifyHistory[k];
       }
     });
-
-    const last =
-      state.autoReserveNotifyHistory[key] ||
-      0;
-
-    if (
-      now - last <=
-      AUTO_RESERVE_NOTIFY_COOLDOWN
-    ) {
-      localStorage.setItem(
-        'autoReserveNotifyHistory',
-        JSON.stringify(
-          state.autoReserveNotifyHistory
-        )
-      );
-
+    const last = state.autoReserveNotifyHistory[key] || 0;
+    if (now - last <= AUTO_RESERVE_NOTIFY_COOLDOWN) {
+      localStorage.setItem('autoReserveNotifyHistory', JSON.stringify(state.autoReserveNotifyHistory));
       return false;
     }
-
-    state.autoReserveNotifyHistory[key] =
-      now;
-
-    localStorage.setItem(
-      'autoReserveNotifyHistory',
-      JSON.stringify(
-        state.autoReserveNotifyHistory
-      )
-    );
-
+    state.autoReserveNotifyHistory[key] = now;
+    localStorage.setItem('autoReserveNotifyHistory', JSON.stringify(state.autoReserveNotifyHistory));
     return true;
   }
 
-  function sendDiscord(
-    reasonText,
-    isError = true
-  ) {
+  function sendDiscord(reasonText, isError = true) {
     if (!state.notifyEnabled) return;
     if (!DISCORD_WEBHOOK_URL) return;
-
     const now = Date.now();
+    if (isError && now - state.lastNotificationTime < 60000) return;
 
-    if (
-      isError &&
-      now - state.lastNotificationTime <
-        60000
-    ) {
-      return;
-    }
-
-    const colorCode =
-      isError ? 16711680 : 16776960;
-
-    const emoji =
-      isError ? '🚫' : '🔔';
+    const colorCode = isError ? 16711680 : 16776960;
+    const emoji = isError ? "🚫" : "🔔";
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username:
-          'レストラン一般再検索',
+        username: "レストラン一般再検索",
         embeds: [{
-          title: isError
-            ? `${emoji}${getRestaurantInfo()}`
-            : `🔔${getDetectDateTime()}`,
+          title: isError ? `${emoji}${getRestaurantInfo()}` : `🔔${getDetectDateTime()}`,
           description: reasonText,
           color: colorCode
         }]
       })
-    })
-      .then(() => {
-        if (isError) {
-          state.lastNotificationTime =
-            Date.now();
-        }
-      })
-      .catch(e => console.error(e));
+    }).then(() => { if (isError) state.lastNotificationTime = Date.now(); }).catch(e => console.error(e));
   }
 
-  function sendAutoReserveDiscord(
-    time,
-    mealName
-  ) {
+  function sendAutoReserveDiscord(time, mealName) {
     // 自動予約通知は通常通知ON/OFFを見ない
     if (!DISCORD_WEBHOOK_URL) return;
-
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       keepalive: true,
       body: JSON.stringify({
-        username:
-          'レストラン一般再検索',
+        username: "レストラン一般再検索",
         embeds: [{
-          title:
-            `✅${getDetectDateTime()}`,
-          description:
-            buildAutoReserveMessage(
-              time,
-              mealName
-            ),
+          title: `✅${getDetectDateTime()}`,
+          description: buildAutoReserveMessage(time, mealName),
           color: 5763719
         }]
       })
@@ -642,53 +356,31 @@
   }
 
   function resetErrorReloadCount() {
-    if (
-      state.errorReloadCount === 0
-    ) {
-      return;
-    }
-
+    if (state.errorReloadCount === 0) return;
     state.errorReloadCount = 0;
-
-    localStorage.setItem(
-      'errorReloadCount',
-      '0'
-    );
+    localStorage.setItem('errorReloadCount', '0');
   }
 
   function formatErrorStatuses(statuses) {
-    return [...new Set(statuses)]
-      .map(status => {
-        return status === 0
-          ? '通信エラー 0'
-          : `HTTP ${status}`;
-      })
-      .join(' / ');
+    return [...new Set(statuses)].map(status => {
+      return status === 0 ? '通信エラー 0' : `HTTP ${status}`;
+    }).join(' / ');
   }
 
-  async function sendErrorReloadLimitDiscord(
-    statuses,
-    errorReloadCount
-  ) {
+  async function sendErrorReloadLimitDiscord(statuses, errorReloadCount) {
     if (!DISCORD_WEBHOOK_URL) return;
 
     const ip = await getPublicIp();
-
-    const errorText =
-      formatErrorStatuses(statuses);
+    const errorText = formatErrorStatuses(statuses);
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       keepalive: true,
       body: JSON.stringify({
-        username:
-          'レストラン一般再検索',
+        username: 'レストラン一般再検索',
         embeds: [{
-          title:
-            `🚫${getDetectDateTime()}`,
+          title: `🚫${getDetectDateTime()}`,
           description: [
             `通信エラーによるF5再読み込みが${errorReloadCount}回目に達しました。`,
             `🍴 ${getRestaurantName()}`,
@@ -703,67 +395,92 @@
     }).catch(e => console.error(e));
   }
 
-  function scheduleErrorReload(
-    statuses,
-    countAsError = true
-  ) {
-    if (state.errorReloadScheduled) {
-      return;
+  async function sendFreezeDiscord() {
+    if (!state.notifyEnabled) return;
+    if (!DISCORD_WEBHOOK_URL) return;
+
+    const ip = await getPublicIp();
+
+    fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({
+        username: 'レストラン一般再検索',
+        embeds: [{
+          title: `🚫${getDetectDateTime()}`,
+          description: [
+            'フリーズ：応答がありません。',
+            `🍴 ${getRestaurantName()}`,
+            `📅 ${getDisplayDate()}`,
+            '⏳ Pending：120秒超',
+            `🌐 公開IP：${ip}`,
+            '🔄 60秒後に強制再読み込みします'
+          ].join('\n'),
+          color: 16711680
+        }]
+      })
+    }).catch(e => console.error(e));
+  }
+
+  function handleFreeze() {
+    if (state.freezeReloadScheduled) return;
+
+    state.freezeReloadScheduled = true;
+    state.searchStatus = 'OFF';
+    state.isSearchPending = false;
+    state.ajaxPendingCount = 0;
+
+    if (state.ajaxBatchFinalizeTimer) {
+      clearTimeout(state.ajaxBatchFinalizeTimer);
+      state.ajaxBatchFinalizeTimer = null;
     }
+
+    updatePanels();
+    sendFreezeDiscord();
+
+    setTimeout(() => {
+      state.f5WaitSec = createF5WaitSec();
+      location.reload();
+    }, FREEZE_RELOAD_DELAY_MS);
+  }
+
+  function scheduleErrorReload(statuses, countAsError = true) {
+    if (state.errorReloadScheduled) return;
 
     state.errorReloadScheduled = true;
 
     if (countAsError) {
       state.errorReloadCount++;
-
-      localStorage.setItem(
-        'errorReloadCount',
-        String(state.errorReloadCount)
-      );
+      localStorage.setItem('errorReloadCount', String(state.errorReloadCount));
     }
 
-    const uniqueStatuses = [
-      ...new Set(statuses)
-    ];
-
-    const errorText =
-      formatErrorStatuses(
-        uniqueStatuses
-      );
-
-    const popupId =
-      '__restaurant_error_popup';
-
-    let popup =
-      document.getElementById(popupId);
+    const uniqueStatuses = [...new Set(statuses)];
+    const errorText = formatErrorStatuses(uniqueStatuses);
+    const popupId = '__restaurant_error_popup';
+    let popup = document.getElementById(popupId);
 
     if (!popup) {
-      popup =
-        document.createElement('div');
-
+      popup = document.createElement('div');
       popup.id = popupId;
-
       Object.assign(popup.style, {
         position: 'fixed',
         top: '50%',
         left: '50%',
-        transform:
-          'translate(-50%, -50%)',
+        transform: 'translate(-50%, -50%)',
         zIndex: '2147483647',
         minWidth: '280px',
         padding: '24px 30px',
         borderRadius: '14px',
         background: '#dc3545',
         color: '#fff',
-        boxShadow:
-          '0 4px 20px rgba(0,0,0,0.45)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.45)',
         fontSize: '22px',
         fontWeight: 'bold',
         lineHeight: '1.6',
         textAlign: 'center',
         pointerEvents: 'none'
       });
-
       document.body.appendChild(popup);
     }
 
@@ -782,13 +499,9 @@
 
     if (
       countAsError &&
-      state.errorReloadCount >=
-        ERROR_RELOAD_NOTIFY_THRESHOLD
+      state.errorReloadCount >= ERROR_RELOAD_NOTIFY_THRESHOLD
     ) {
-      sendErrorReloadLimitDiscord(
-        uniqueStatuses,
-        state.errorReloadCount
-      );
+      sendErrorReloadLimitDiscord(uniqueStatuses, state.errorReloadCount);
     }
 
     setTimeout(() => {
@@ -798,104 +511,47 @@
 
   function finalizeAjaxBatch() {
     state.ajaxBatchFinalizeTimer = null;
+    if (state.ajaxPendingCount > 0) return;
 
-    if (
-      state.ajaxPendingCount > 0
-    ) {
-      return;
-    }
-
-    const statuses =
-      state.ajaxStatuses.slice();
-
+    const statuses = state.ajaxStatuses.slice();
     state.ajaxStatuses = [];
     state.isSearchPending = false;
+    updatePanels();
 
-    if (statuses.length === 0) {
-      return;
-    }
+    if (statuses.length === 0) return;
 
-    const hasSuccess =
-      statuses.includes(200);
-
-    const errorStatuses =
-      statuses.filter(
-        status => status !== 200
-      );
+    const hasSuccess = statuses.includes(200);
+    const errorStatuses = statuses.filter(status => status !== 200);
 
     if (hasSuccess) {
       resetErrorReloadCount();
     }
 
     if (errorStatuses.length > 0) {
-      scheduleErrorReload(
-        errorStatuses,
-        !hasSuccess
-      );
+      scheduleErrorReload(errorStatuses, !hasSuccess);
     }
   }
 
   function scheduleAjaxBatchFinalize() {
-    clearTimeout(
-      state.ajaxBatchFinalizeTimer
-    );
-
-    state.ajaxBatchFinalizeTimer =
-      setTimeout(
-        finalizeAjaxBatch,
-        AJAX_BATCH_SETTLE_MS
-      );
+    clearTimeout(state.ajaxBatchFinalizeTimer);
+    state.ajaxBatchFinalizeTimer = setTimeout(finalizeAjaxBatch, AJAX_BATCH_SETTLE_MS);
   }
 
   function isVisible(el) {
-    return !!(
-      el &&
-      (
-        el.offsetWidth ||
-        el.offsetHeight ||
-        el.getClientRects().length
-      )
-    );
+    return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
   }
 
-  function clickConsentNext(
-    dialog,
-    attempt = 0
-  ) {
-    const nextBtn =
-      dialog.querySelector('#btnNext') ||
-      [
-        ...dialog.querySelectorAll(
-          'button, a, ' +
-          'input[type="button"], ' +
-          'input[type="submit"]'
-        )
-      ].find(el => {
-        const text =
-          (
-            el.textContent ||
-            el.value ||
-            ''
-          )
-            .replace(/\s+/g, '')
-            .trim();
-
-        return text.includes('次へ');
-      });
-
+  function clickConsentNext(dialog, attempt = 0) {
+    const nextBtn = dialog.querySelector('#btnNext') || [...dialog.querySelectorAll('button, a, input[type="button"], input[type="submit"]')].find(el => {
+      const text = (el.textContent || el.value || '').replace(/\s+/g, '').trim();
+      return text.includes('次へ');
+    });
     if (!nextBtn) return;
 
-    const disabled =
-      nextBtn.disabled ||
-      nextBtn.getAttribute(
-        'disabled'
-      ) !== null ||
-      nextBtn.classList.contains(
-        'nextDisabled'
-      ) ||
-      nextBtn.classList.contains(
-        'ui-disabled'
-      ) ||
+    const disabled = nextBtn.disabled ||
+      nextBtn.getAttribute('disabled') !== null ||
+      nextBtn.classList.contains('nextDisabled') ||
+      nextBtn.classList.contains('ui-disabled') ||
       nextBtn.closest('.ui-disabled');
 
     if (!disabled) {
@@ -903,272 +559,82 @@
       return;
     }
 
-    const checkbox =
-      dialog.querySelector('#accept') ||
-      dialog.querySelector(
-        'input[type="checkbox"]'
-      );
-
-    if (
-      checkbox?.checked &&
-      attempt >= 10
-    ) {
+    const checkbox = dialog.querySelector('#accept') || dialog.querySelector('input[type="checkbox"]');
+    if (checkbox?.checked && attempt >= 10) {
       nextBtn.disabled = false;
-      nextBtn.removeAttribute(
-        'disabled'
-      );
-
-      nextBtn.classList.remove(
-        'nextDisabled',
-        'ui-disabled'
-      );
-
+      nextBtn.removeAttribute('disabled');
+      nextBtn.classList.remove('nextDisabled', 'ui-disabled');
       nextBtn.click();
       return;
     }
 
-    if (attempt < 30) {
-      setTimeout(
-        () =>
-          clickConsentNext(
-            dialog,
-            attempt + 1
-          ),
-        100
-      );
-    }
+    if (attempt < 30) setTimeout(() => clickConsentNext(dialog, attempt + 1), 100);
   }
 
-  function handleConsentDialog(
-    attempt = 0
-  ) {
-    const dialog =
-      document.querySelector(
-        '#noticeMessage'
-      ) ||
-      [
-        ...document.querySelectorAll(
-          '.ui-dialog, ' +
-          '.ui-popup, ' +
-          '[role="dialog"], ' +
-          '[data-role="dialog"], ' +
-          '#jqmDialog'
-        )
-      ].find(el => {
-        const text =
-          (el.textContent || '')
-            .replace(/\s+/g, '');
-
-        return (
-          isVisible(el) &&
-          text.includes('同意する') &&
-          text.includes('次へ')
-        );
-      });
-
-    if (
-      !dialog ||
-      !isVisible(dialog)
-    ) {
-      if (attempt < 30) {
-        setTimeout(
-          () =>
-            handleConsentDialog(
-              attempt + 1
-            ),
-          100
-        );
-      }
-
+  function handleConsentDialog(attempt = 0) {
+    const dialog = document.querySelector('#noticeMessage') || [...document.querySelectorAll('.ui-dialog, .ui-popup, [role="dialog"], [data-role="dialog"], #jqmDialog')].find(el => {
+      const text = (el.textContent || '').replace(/\s+/g, '');
+      return isVisible(el) && text.includes('同意する') && text.includes('次へ');
+    });
+    if (!dialog || !isVisible(dialog)) {
+      if (attempt < 30) setTimeout(() => handleConsentDialog(attempt + 1), 100);
       return;
     }
 
-    const checkbox =
-      dialog.querySelector('#accept') ||
-      dialog.querySelector(
-        'input[type="checkbox"]'
-      );
+    const checkbox = dialog.querySelector('#accept') || dialog.querySelector('input[type="checkbox"]');
+    const label = dialog.querySelector('label[for="accept"]') || [...dialog.querySelectorAll('label')].find(el => (el.textContent || '').includes('同意する'));
 
-    const label =
-      dialog.querySelector(
-        'label[for="accept"]'
-      ) ||
-      [
-        ...dialog.querySelectorAll(
-          'label'
-        )
-      ].find(el =>
-        (el.textContent || '')
-          .includes('同意する')
-      );
-
-    if (
-      checkbox &&
-      !checkbox.checked
-    ) {
-      if (label) {
-        label.click();
-      } else {
-        checkbox.click();
-      }
+    if (checkbox && !checkbox.checked) {
+      if (label) label.click();
+      else checkbox.click();
 
       checkbox.checked = true;
-
-      checkbox.setAttribute(
-        'checked',
-        'checked'
-      );
-
-      checkbox.dispatchEvent(
-        new Event(
-          'input',
-          { bubbles: true }
-        )
-      );
-
-      checkbox.dispatchEvent(
-        new Event(
-          'change',
-          { bubbles: true }
-        )
-      );
+      checkbox.setAttribute('checked', 'checked');
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
 
       if (window.jQuery) {
         try {
-          const $cb =
-            jQuery(checkbox);
-
-          $cb.prop(
-            'checked',
-            true
-          );
-
-          if ($cb.checkboxradio) {
-            $cb.checkboxradio(
-              'refresh'
-            );
-          }
-
+          const $cb = jQuery(checkbox);
+          $cb.prop('checked', true);
+          if ($cb.checkboxradio) $cb.checkboxradio('refresh');
           $cb.trigger('change');
-        } catch (e) {
+        } catch(e) {
           console.error(e);
         }
       }
     }
 
-    setTimeout(
-      () => clickConsentNext(dialog),
-      200
-    );
+    setTimeout(() => clickConsentNext(dialog), 200);
   }
 
-  function tryAutoReserveClick(
-    attempt = 0
-  ) {
+  function tryAutoReserveClick(attempt = 0) {
     if (!state.autoReserve) return;
-
-    if (
-      Date.now() <
-      state.autoReserveLockUntil
-    ) {
-      return;
-    }
-
+    if (Date.now() < state.autoReserveLockUntil) return;
     refreshCommodityMealMap(document);
-
-    const rows = [
-      ...document.querySelectorAll(
-        'section.reservationTime tr'
-      )
-    ];
-
+    const rows = [...document.querySelectorAll('section.reservationTime tr')];
     for (const row of rows) {
-      const stateText =
-        row.querySelector(
-          '.state'
-        )?.textContent || '';
-
-      const time =
-        row.querySelector(
-          'th'
-        )?.textContent.trim();
-
-      const link =
-        row.querySelector(
-          'td.btn ' +
-          'a[onclick*="toOrderForDate"]'
-        );
-
-      if (
-        !stateText.includes(
-          '空席あり'
-        ) ||
-        !time ||
-        state.excludedTimes.includes(
-          time
-        ) ||
-        !link
-      ) {
-        continue;
-      }
-
-      state.autoReserveLockUntil =
-        Date.now() + 3000;
-
-      const meal =
-        getMealNameFromRow(
-          row,
-          document
-        );
-
-      const notify =
-        shouldNotifyAutoReserve(
-          time,
-          meal
-        );
-
-      if (notify) {
-        sendAutoReserveDiscord(
-          time,
-          meal
-        );
-      }
-
+      const stateText = row.querySelector('.state')?.textContent || '';
+      const time = row.querySelector('th')?.textContent.trim();
+      const link = row.querySelector('td.btn a[onclick*="toOrderForDate"]');
+      if (!stateText.includes('空席あり') || !time || state.excludedTimes.includes(time) || !link) continue;
+      state.autoReserveLockUntil = Date.now() + 3000;
+      const meal = getMealNameFromRow(row, document);
+      const notify = shouldNotifyAutoReserve(time, meal);
+      if (notify) sendAutoReserveDiscord(time, meal);
       setTimeout(() => {
         link.click();
-
-        setTimeout(
-          () =>
-            handleConsentDialog(),
-          150
-        );
+        setTimeout(() => handleConsentDialog(), 150);
       }, notify ? 80 : 0);
-
       return;
     }
-
-    if (attempt < 5) {
-      setTimeout(
-        () =>
-          tryAutoReserveClick(
-            attempt + 1
-          ),
-        100
-      );
-    }
+    if (attempt < 5) setTimeout(() => tryAutoReserveClick(attempt + 1), 100);
   }
 
   // --- UI構築 ---
   const panels = {};
-
-  function createPanel(
-    top,
-    bg,
-    onClick
-  ) {
-    const p =
-      document.createElement('div');
-
+  function createPanel(top, bg, onClick) {
+    const p = document.createElement('div');
     Object.assign(p.style, {
       position: 'fixed',
       top: `${top}px`,
@@ -1181,835 +647,349 @@
       cursor: 'pointer',
       background: bg,
       color: '#fff',
-      boxShadow:
-        '0 2px 8px rgba(0,0,0,0.3)',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
       opacity: '0.9',
       textAlign: 'center',
       width: '66px',
       height: '34px',
       boxSizing: 'border-box'
     });
-
     p.onclick = onClick;
-
     document.body.appendChild(p);
-
     return p;
   }
 
-  function updatePanels(
-    isMaintenance = false
-  ) {
+  function updatePanels(isMaintenance = false) {
     if (isMaintenance) {
-      panels.main.textContent =
-        '休止';
-
-      panels.main.style.background =
-        '#888';
+      panels.main.textContent = "休止";
+      panels.main.style.background = "#888";
     } else {
-      panels.main.textContent =
-        state.searchStatus === 'OFF'
-          ? 'OFF'
-          : state.waitSec;
-
       const colors = {
         OFF: '#333',
         L: '#007bff',
         M: '#ff8c00',
         S: '#e83e8c'
       };
-
-      panels.main.style.background =
-        colors[state.searchStatus];
+      panels.main.textContent = state.isSearchPending
+        ? '読込中'
+        : (state.searchStatus === 'OFF' ? 'OFF' : state.waitSec);
+      panels.main.style.background = colors[state.searchStatus];
     }
 
     if (!state.autoF5) {
-      panels.f5.style.background =
-        '#333';
-
+      panels.f5.style.background = '#333';
       panels.f5.textContent = 'OFF';
     } else {
-      const m =
-        Math.floor(
-          state.f5WaitSec / 60
-        );
-
-      const s =
-        state.f5WaitSec % 60;
-
-      panels.f5.style.background =
-        '#6f42c1';
-
-      panels.f5.textContent =
-        `${m}:` +
-        `${s
-          .toString()
-          .padStart(2, '0')}`;
+      const m = Math.floor(state.f5WaitSec / 60);
+      const s = state.f5WaitSec % 60;
+      panels.f5.style.background = '#6f42c1';
+      panels.f5.textContent = `${m}:${s.toString().padStart(2, '0')}`;
     }
 
-    panels.open.style.background =
-      state.autoOpen
-        ? '#28a745'
-        : '#333';
-
+    panels.open.style.background = state.autoOpen ? '#28a745' : '#333';
     panels.open.textContent = 'TAB';
 
-    panels.reserve.style.background =
-      state.autoReserve
-        ? '#dc3545'
-        : '#333';
-
+    panels.reserve.style.background = state.autoReserve ? '#dc3545' : '#333';
     panels.reserve.textContent = '👆️';
 
-    panels.notify.style.background =
-      state.notifyEnabled
-        ? '#ffc107'
-        : '#333';
-
-    panels.notify.style.color =
-      state.notifyEnabled
-        ? '#000'
-        : '#fff';
-
-    panels.notify.textContent =
-      state.notifyEnabled
-        ? '🔔'
-        : '🔕';
+    panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#333';
+    panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
+    panels.notify.textContent = state.notifyEnabled ? '🔔' : '🔕';
 
     if (panels.reset) {
-      panels.reset.textContent =
-        'リセット';
-
-      panels.reset.style.background =
-        state.excludedTimes.length
-          ? '#8e44ad'
-          : '#000';
+      panels.reset.textContent = 'リセット';
+      panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#000';
     }
   }
 
   function resetWaitSec() {
-    if (
-      state.searchStatus === 'OFF'
-    ) {
-      return;
-    }
-
+    if (state.searchStatus === 'OFF') return;
     const ranges = {
-      S: [5, 6],
-      M: [15, 11],
-      L: [30, 11]
+      S: [1, 5],
+      M: [10, 11],
+      L: [25, 11]
     };
-
-    const r =
-      ranges[state.searchStatus];
-
-    state.waitSec =
-      Math.floor(
-        Math.random() * r[1]
-      ) + r[0];
+    const r = ranges[state.searchStatus];
+    state.waitSec = Math.floor(Math.random() * r[1]) + r[0];
   }
 
-  panels.main = createPanel(
-    10,
-    '#333',
-    () => {
-      const nextStatus = {
-        OFF: 'L',
-        L: 'M',
-        M: 'S',
-        S: 'OFF'
-      };
+  panels.main = createPanel(10, '#333', () => {
+    const nextStatus = {
+      OFF: 'L',
+      L: 'M',
+      M: 'S',
+      S: 'OFF'
+    };
+    state.searchStatus = nextStatus[state.searchStatus];
+    localStorage.setItem('searchStatus', state.searchStatus);
+    state.lastNotificationTime = 0;
+    resetWaitSec();
+    updatePanels();
+  });
 
-      state.searchStatus =
-        nextStatus[
-          state.searchStatus
-        ];
+  panels.notify = createPanel(50, '#333', () => {
+    state.notifyEnabled = !state.notifyEnabled;
+    localStorage.setItem('notifyEnabled', state.notifyEnabled ? '1' : '0');
+    updatePanels();
+  });
 
-      localStorage.setItem(
-        'searchStatus',
-        state.searchStatus
-      );
+  panels.reset = createPanel(90, '#000', () => {
+    state.excludedTimes = [];
+    localStorage.setItem('excludedTimes', '[]');
+    document.querySelectorAll('.ex-switch').forEach(cb => {
+      cb.checked = true;
+    });
+    updatePanels();
+  });
+  panels.reset.textContent = 'リセット';
 
-      state.lastNotificationTime = 0;
-
-      resetWaitSec();
-      updatePanels();
-    }
-  );
-
-  panels.notify = createPanel(
-    50,
-    '#333',
-    () => {
-      state.notifyEnabled =
-        !state.notifyEnabled;
-
-      localStorage.setItem(
-        'notifyEnabled',
-        state.notifyEnabled
-          ? '1'
-          : '0'
-      );
-
-      updatePanels();
-    }
-  );
-
-  panels.reset = createPanel(
-    90,
-    '#000',
-    () => {
-      state.excludedTimes = [];
-
-      localStorage.setItem(
-        'excludedTimes',
-        '[]'
-      );
-
-      document
-        .querySelectorAll(
-          '.ex-switch'
-        )
-        .forEach(cb => {
-          cb.checked = true;
-        });
-
-      updatePanels();
-    }
-  );
-
-  panels.reset.textContent =
-    'リセット';
-
-  panels.f5 = createPanel(
-    10,
-    '#333',
-    () => {
-      state.autoF5 =
-        !state.autoF5;
-
-      localStorage.setItem(
-        'autoF520min',
-        state.autoF5
-          ? '1'
-          : '0'
-      );
-
-      updatePanels();
-    }
-  );
-
+  panels.f5 = createPanel(10, '#333', () => {
+    state.autoF5 = !state.autoF5;
+    localStorage.setItem('autoF520min', state.autoF5 ? '1' : '0');
+    updatePanels();
+  });
   panels.f5.style.right = '84px';
 
-  panels.open = createPanel(
-    50,
-    '#333',
-    () => {
-      state.autoOpen =
-        !state.autoOpen;
-
-      localStorage.setItem(
-        'autoOpenTimeTabs',
-        state.autoOpen
-          ? '1'
-          : '0'
-      );
-
-      updatePanels();
-
-      if (state.autoOpen) {
-        openAllTimeSlots();
-      }
-    }
-  );
-
+  panels.open = createPanel(50, '#333', () => {
+    state.autoOpen = !state.autoOpen;
+    localStorage.setItem('autoOpenTimeTabs', state.autoOpen ? '1' : '0');
+    updatePanels();
+    if (state.autoOpen) openAllTimeSlots();
+  });
   panels.open.style.right = '84px';
   panels.open.textContent = 'TAB';
 
-  panels.reserve = createPanel(
-    90,
-    '#333',
-    () => {
-      state.autoReserve =
-        !state.autoReserve;
-
-      localStorage.setItem(
-        'autoReserveClick',
-        state.autoReserve
-          ? '1'
-          : '0'
-      );
-
-      updatePanels();
-    }
-  );
-
+  panels.reserve = createPanel(90, '#333', () => {
+    state.autoReserve = !state.autoReserve;
+    localStorage.setItem('autoReserveClick', state.autoReserve ? '1' : '0');
+    updatePanels();
+  });
   panels.reserve.style.right = '84px';
   panels.reserve.textContent = '👆️';
 
   function openAllTimeSlots() {
-    const sections =
-      document.querySelectorAll(
-        'section.reservationTime'
-      );
-
+    const sections = document.querySelectorAll('section.reservationTime');
     let delay = 0;
-
     sections.forEach(sec => {
-      const h1 =
-        sec.querySelector('h1');
-
-      const contents =
-        sec.querySelector(
-          '.contents'
-        );
-
-      if (
-        h1 &&
-        contents &&
-        contents.style.display ===
-          'none'
-      ) {
-        setTimeout(
-          () => h1.click(),
-          delay * 200
-        );
-
+      const h1 = sec.querySelector('h1');
+      const contents = sec.querySelector('.contents');
+      if (h1 && contents && contents.style.display === 'none') {
+        setTimeout(() => h1.click(), delay * 200);
         delay++;
       }
     });
   }
 
-  function disableClassName(
-    elem,
-    className,
-    prefix = ''
-  ) {
-    $(elem)
-      .find(
-        `${prefix}.${className}`
-      )
-      .removeClass(className)
-      .addClass(`_${className}`);
+  function disableClassName(elem, className, prefix = '') {
+    $(elem).find(`${prefix}.${className}`).removeClass(className).addClass(`_${className}`);
   }
 
-  function enableClassName(
-    elem,
-    className,
-    prefix = ''
-  ) {
-    $(elem)
-      .find(
-        `${prefix}._${className}`
-      )
-      .removeClass(
-        `_${className}`
-      )
-      .addClass(className);
+  function enableClassName(elem, className, prefix = '') {
+    $(elem).find(`${prefix}._${className}`).removeClass(`_${className}`).addClass(className);
   }
 
   let debounceTimer;
-
   function addExclusionSwitchesDebounced() {
     clearTimeout(debounceTimer);
-
     debounceTimer = setTimeout(() => {
-      document
-        .querySelectorAll('tr')
-        .forEach(row => {
-          const th =
-            row.querySelector('th');
+      document.querySelectorAll('tr').forEach(row => {
+        const th = row.querySelector('th');
+        const tdState = row.querySelector('.state');
+        if (!th || !tdState) return;
 
-          const tdState =
-            row.querySelector(
-              '.state'
-            );
+        const timeStr = th.innerText.trim();
+        if (!/^\d{1,2}:\d{2}$/.test(timeStr)) return;
+        if (tdState.querySelector('.ex-switch')) return;
 
-          if (!th || !tdState) {
-            return;
+        const isExcluded = state.excludedTimes.includes(timeStr);
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'ex-switch';
+        checkbox.checked = !isExcluded;
+        checkbox.style.cssText = 'margin-left: 10px; transform: scale(1.1); vertical-align: middle; cursor: pointer; position: relative; z-index: 100;';
+        tdState.style.whiteSpace = 'nowrap';
+
+        checkbox.onclick = (e) => e.stopPropagation();
+        checkbox.onchange = (e) => {
+          if (!e.target.checked && !state.excludedTimes.includes(timeStr)) {
+            state.excludedTimes.push(timeStr);
+          } else if (e.target.checked) {
+            state.excludedTimes = state.excludedTimes.filter(t => t !== timeStr);
           }
-
-          const timeStr =
-            th.innerText.trim();
-
-          if (
-            !/^\d{1,2}:\d{2}$/.test(
-              timeStr
-            )
-          ) {
-            return;
-          }
-
-          if (
-            tdState.querySelector(
-              '.ex-switch'
-            )
-          ) {
-            return;
-          }
-
-          const isExcluded =
-            state.excludedTimes.includes(
-              timeStr
-            );
-
-          const checkbox =
-            document.createElement(
-              'input'
-            );
-
-          checkbox.type =
-            'checkbox';
-
-          checkbox.className =
-            'ex-switch';
-
-          checkbox.checked =
-            !isExcluded;
-
-          checkbox.style.cssText =
-            'margin-left: 10px; ' +
-            'transform: scale(1.1); ' +
-            'vertical-align: middle; ' +
-            'cursor: pointer; ' +
-            'position: relative; ' +
-            'z-index: 100;';
-
-          tdState.style.whiteSpace =
-            'nowrap';
-
-          checkbox.onclick = e =>
-            e.stopPropagation();
-
-          checkbox.onchange = e => {
-            if (
-              !e.target.checked &&
-              !state.excludedTimes.includes(
-                timeStr
-              )
-            ) {
-              state.excludedTimes.push(
-                timeStr
-              );
-            } else if (
-              e.target.checked
-            ) {
-              state.excludedTimes =
-                state.excludedTimes.filter(
-                  t => t !== timeStr
-                );
-            }
-
-            localStorage.setItem(
-              'excludedTimes',
-              JSON.stringify(
-                state.excludedTimes
-              )
-            );
-
-            updatePanels();
-          };
-
-          tdState.appendChild(
-            checkbox
-          );
-        });
+          localStorage.setItem('excludedTimes', JSON.stringify(state.excludedTimes));
+          updatePanels();
+        };
+        tdState.appendChild(checkbox);
+      });
     }, 200);
   }
 
-  const observer =
-    new MutationObserver(
-      addExclusionSwitchesDebounced
-    );
+  const observer = new MutationObserver(addExclusionSwitchesDebounced);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
 
-  observer.observe(
-    document.body,
-    {
-      childList: true,
-      subtree: true
-    }
-  );
+  if (typeof $ !== "undefined") {
+    $(document).on("ajaxSend", (event, xhr, settings) => {
+      if (settings.url.includes("ajaxReservationOfDate")) {
+        if (state.errorReloadScheduled || state.freezeReloadScheduled) return;
 
-  if (typeof $ !== 'undefined') {
-    $(document).on(
-      'ajaxSend',
-      (
-        event,
-        xhr,
-        settings
-      ) => {
-        if (
-          settings.url.includes(
-            'ajaxReservationOfDate'
-          )
-        ) {
-          refreshCommodityMealMap(
-            document
-          );
+        refreshCommodityMealMap(document);
 
-          if (
-            state.ajaxBatchFinalizeTimer
-          ) {
-            clearTimeout(
-              state.ajaxBatchFinalizeTimer
-            );
-
-            state.ajaxBatchFinalizeTimer =
-              null;
-          }
-
-          if (
-            state.ajaxPendingCount === 0 &&
-            state.ajaxStatuses.length === 0
-          ) {
-            state.lastSearchStartTime =
-              Date.now();
-          }
-
-          state.ajaxPendingCount++;
-          state.isSearchPending = true;
+        if (state.ajaxBatchFinalizeTimer) {
+          clearTimeout(state.ajaxBatchFinalizeTimer);
+          state.ajaxBatchFinalizeTimer = null;
         }
+
+        if (state.ajaxPendingCount === 0 && state.ajaxStatuses.length === 0) {
+          state.lastSearchStartTime = Date.now();
+        }
+
+        state.ajaxPendingCount++;
+        state.isSearchPending = true;
+        updatePanels();
       }
-    );
+    });
 
-    $(document).on(
-      'ajaxComplete',
-      (
-        event,
-        xhr,
-        settings
-      ) => {
-        if (
-          settings.url.includes(
-            'ajaxReservationOfDate'
-          )
-        ) {
-          state.ajaxStatuses.push(
-            xhr.status
-          );
+    $(document).on("ajaxComplete", (event, xhr, settings) => {
+      if (settings.url.includes("ajaxReservationOfDate")) {
+        if (state.errorReloadScheduled || state.freezeReloadScheduled) return;
 
-          state.ajaxPendingCount =
-            Math.max(
-              0,
-              state.ajaxPendingCount - 1
-            );
+        state.ajaxStatuses.push(xhr.status);
+        state.ajaxPendingCount = Math.max(0, state.ajaxPendingCount - 1);
 
-          if (
-            state.ajaxPendingCount === 0
-          ) {
-            scheduleAjaxBatchFinalize();
-          }
+        if (state.ajaxPendingCount === 0) {
+          scheduleAjaxBatchFinalize();
+        }
 
-          if (xhr.status !== 200) {
-            return;
-          }
+        if (xhr.status !== 200) return;
 
-          const responseHtml =
-            xhr.responseText;
+        const responseHtml = xhr.responseText;
+        if (!responseHtml) return;
 
-          if (!responseHtml) return;
+        try {
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = responseHtml;
+          refreshCommodityMealMap(document);
+          refreshCommodityMealMap(tempDiv);
+          const slotsByMeal = {};
 
-          try {
-            const tempDiv =
-              document.createElement(
-                'div'
-              );
+          tempDiv.querySelectorAll('tr').forEach(row => {
+            if (row.querySelector('.state')?.textContent.includes('空席あり')) {
+              const time = row.querySelector('th')?.textContent.trim();
 
-            tempDiv.innerHTML =
-              responseHtml;
+              if (time && !state.excludedTimes.includes(time)) {
+                const meal = getMealNameFromRow(row, tempDiv);
 
-            refreshCommodityMealMap(
-              document
-            );
-
-            refreshCommodityMealMap(
-              tempDiv
-            );
-
-            const slotsByMeal = {};
-
-            tempDiv
-              .querySelectorAll('tr')
-              .forEach(row => {
-                const hasVacancy =
-                  row
-                    .querySelector(
-                      '.state'
-                    )
-                    ?.textContent
-                    .includes(
-                      '空席あり'
-                    );
-
-                if (!hasVacancy) {
-                  return;
-                }
-
-                const time =
-                  row
-                    .querySelector(
-                      'th'
-                    )
-                    ?.textContent
-                    .trim();
-
-                if (
-                  !time ||
-                  state.excludedTimes.includes(
-                    time
-                  )
-                ) {
-                  return;
-                }
-
-                const meal =
-                  getMealNameFromRow(
-                    row,
-                    tempDiv
-                  );
-
-                if (
-                  !slotsByMeal[meal]
-                ) {
+                if (!slotsByMeal[meal]) {
                   slotsByMeal[meal] = [];
                 }
 
-                if (
-                  !slotsByMeal[
-                    meal
-                  ].includes(time)
-                ) {
-                  slotsByMeal[
-                    meal
-                  ].push(time);
+                if (!slotsByMeal[meal].includes(time)) {
+                  slotsByMeal[meal].push(time);
                 }
-              });
-
-            const hasVacancy =
-              Object.values(
-                slotsByMeal
-              ).some(
-                slots =>
-                  slots.length > 0
-              );
-
-            if (hasVacancy) {
-              Object.entries(
-                slotsByMeal
-              ).forEach(
-                ([meal, slots]) => {
-                  if (
-                    slots.length > 0
-                  ) {
-                    sendDiscord(
-                      buildVacancyMessage(
-                        slots,
-                        meal
-                      ),
-                      false
-                    );
-                  }
-                }
-              );
-
-              if (
-                state.autoReserve
-              ) {
-                setTimeout(
-                  () =>
-                    tryAutoReserveClick(),
-                  0
-                );
               }
             }
-          } catch (e) {
-            console.error(
-              '解析エラー:',
-              e
-            );
+          });
+
+          const hasVacancy = Object.values(slotsByMeal).some(
+            slots => slots.length > 0
+          );
+
+          if (hasVacancy) {
+            Object.entries(slotsByMeal).forEach(([meal, slots]) => {
+              if (slots.length > 0) {
+                sendDiscord(buildVacancyMessage(slots, meal), false);
+              }
+            });
+
+            if (state.autoReserve) {
+              setTimeout(() => tryAutoReserveClick(), 0);
+            }
           }
+        } catch(e) {
+          console.error("解析エラー:", e);
         }
       }
-    );
+    });
 
     $(document)
-      .off(
-        'ajaxStop.restaurantReload'
-      )
-      .on(
-        'ajaxStop.restaurantReload',
-        function () {
-          if (state.autoOpen) {
-            setTimeout(
-              openAllTimeSlots,
-              300
-            );
-          }
+      .off("ajaxStop.restaurantReload")
+      .on("ajaxStop.restaurantReload", function() {
+        if (state.autoOpen) {
+          setTimeout(openAllTimeSlots, 300);
         }
-      );
+      });
   }
 
-  const reloadSP = (
-    el,
-    individual = false
-  ) => {
-    $(el)
-      .on('click', e => {
-        e.stopPropagation();
+  const reloadSP = (el, individual = false) => {
+    $(el).on('click', (e) => {
+      e.stopPropagation();
 
-        state.lastClickedMealName =
-          individual
-            ? normalizeMealName(
-                $(el).text()
-              )
-            : '';
+      state.lastClickedMealName = individual
+        ? normalizeMealName($(el).text())
+        : '';
 
-        refreshCommodityMealMap(
-          document
-        );
+      refreshCommodityMealMap(document);
 
-        const nextBtn =
-          $(
-            'li.next ' +
-            'button.nextDateLink'
-          );
+      const nextBtn = $('li.next button.nextDateLink');
+      const prevBtn = $('li.prev button.preDateLink');
 
-        const prevBtn =
-          $(
-            'li.prev ' +
-            'button.preDateLink'
-          );
+      if (prevBtn.attr('disabled') && nextBtn.attr('disabled')) return;
 
-        if (
-          prevBtn.attr('disabled') &&
-          nextBtn.attr('disabled')
-        ) {
-          return;
-        }
+      const otherSections = $(el).closest('section').siblings('section');
 
-        const otherSections =
-          $(el)
-            .closest('section')
-            .siblings('section');
+      if (individual) {
+        otherSections.each((idx, elem) => {
+          disableClassName(elem, 'restaurantCalendarOfDate');
+          disableClassName(elem, 'reservationTime');
+          disableClassName(elem, 'hState', 'span');
+        });
+      }
 
-        if (individual) {
-          otherSections.each(
-            (idx, elem) => {
-              disableClassName(
-                elem,
-                'restaurantCalendarOfDate'
-              );
+      const cur = $("#reservationOfDateHid").html();
+      const prev = $.datepicker.parseDate("yymmdd", cur, {}).addDays(-1);
 
-              disableClassName(
-                elem,
-                'reservationTime'
-              );
-
-              disableClassName(
-                elem,
-                'hState',
-                'span'
-              );
-            }
-          );
-        }
-
-        const cur =
-          $('#reservationOfDateHid')
-            .html();
-
-        const prev =
-          $.datepicker
-            .parseDate(
-              'yymmdd',
-              cur,
-              {}
-            )
-            .addDays(-1);
-
-        $('#reservationOfDateHid')
-          .html(
-            $.datepicker.formatDate(
-              'yymmdd',
-              prev,
-              {}
-            )
-          );
-
-        nextBtn.removeClass(
-          'hasNoData'
-        );
-
-        changeReservationDate(
-          'next',
-          nextBtn[0]
-        );
-
-        $.mobile.loading('hide');
-
-        state.lastNotificationTime = 0;
-
-        resetWaitSec();
-        updatePanels();
-
-        if (individual) {
-          otherSections.each(
-            (idx, elem) => {
-              enableClassName(
-                elem,
-                'restaurantCalendarOfDate'
-              );
-
-              enableClassName(
-                elem,
-                'reservationTime'
-              );
-
-              enableClassName(
-                elem,
-                'hState',
-                'span'
-              );
-            }
-          );
-        }
-      })
-      .css(
-        'cursor',
-        'pointer'
+      $("#reservationOfDateHid").html(
+        $.datepicker.formatDate("yymmdd", prev, {})
       );
+
+      nextBtn.removeClass('hasNoData');
+      changeReservationDate('next', nextBtn[0]);
+      $.mobile.loading("hide");
+
+      state.lastNotificationTime = 0;
+
+      resetWaitSec();
+      updatePanels();
+
+      if (individual) {
+        otherSections.each((idx, elem) => {
+          enableClassName(elem, 'restaurantCalendarOfDate');
+          enableClassName(elem, 'reservationTime');
+          enableClassName(elem, 'hState', 'span');
+        });
+      }
+    }).css('cursor', 'pointer');
   };
 
-  const targetDisp =
-    document.querySelector(
-      '#reservationOfDateDisp1'
-    );
+  const targetDisp = document.querySelector('#reservationOfDateDisp1');
 
   if (targetDisp) {
     reloadSP($(targetDisp));
   }
 
   document
-    .querySelectorAll(
-      'section > div > ' +
-      'h1:nth-child(1)'
-    )
-    .forEach(h => {
-      reloadSP($(h), true);
-    });
+    .querySelectorAll('section > div > h1:nth-child(1)')
+    .forEach(h => reloadSP($(h), true));
 
-  refreshCommodityMealMap(
-    document
-  );
-
+  refreshCommodityMealMap(document);
   resetWaitSec();
   updatePanels();
 
   if (state.autoOpen) {
-    setTimeout(
-      openAllTimeSlots,
-      1000
-    );
+    setTimeout(openAllTimeSlots, 1000);
   }
 
   setInterval(() => {
@@ -2021,16 +1001,9 @@
       d.getMinutes() * 60 +
       d.getSeconds();
 
-    if (
-      state.errorReloadScheduled
-    ) {
-      return;
-    }
+    if (state.errorReloadScheduled || state.freezeReloadScheduled) return;
 
-    if (
-      secTotal >= 10795 &&
-      secTotal <= 18005
-    ) {
+    if (secTotal >= 10795 && secTotal <= 18005) {
       updatePanels(true);
       return;
     }
@@ -2038,58 +1011,38 @@
     if (
       state.searchStatus !== 'OFF' &&
       state.isSearchPending &&
-      now -
-        state.lastSearchStartTime >
-        120000
+      now - state.lastSearchStartTime > FREEZE_TIMEOUT_MS
     ) {
-      sendDiscord(
-        'フリーズ：応答がありません。停止しました。',
-        true
-      );
-
-      state.searchStatus = 'OFF';
-
-      updatePanels();
+      handleFreeze();
       return;
     }
 
     if (state.autoF5) {
       state.f5WaitSec--;
-
       updatePanels();
 
-      if (
-        state.f5WaitSec <= 0
-      ) {
+      if (state.f5WaitSec <= 0) {
         location.reload();
       }
     }
 
-    if (
-      state.searchStatus === 'OFF'
-    ) {
+    if (state.isSearchPending) {
+      updatePanels();
       return;
     }
 
-    state.waitSec--;
+    if (state.searchStatus === 'OFF') return;
 
+    state.waitSec--;
     updatePanels();
 
     if (state.waitSec <= 0) {
-      document
-        .querySelector(
-          '#reservationOfDateDisp1'
-        )
-        ?.click();
-
+      document.querySelector('#reservationOfDateDisp1')?.click();
       resetWaitSec();
     }
   }, 1000);
 
-  const mark =
-    document.createElement('div');
-
+  const mark = document.createElement('div');
   mark.id = MARK_ID;
-
   document.body.appendChild(mark);
 })();
