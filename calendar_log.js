@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 客室指定在庫モニター
-// @version      5.17
+// @version      5.23
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -68,6 +68,12 @@
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
   };
 
+  const getMaxClickableUseDate = () => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 4);
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  };
+
   const getClockStr = () => new Date().toTimeString().slice(0, 8);
 
   const toCircled = (num) => {
@@ -82,6 +88,268 @@
     return st === 0
       ? `${FULL_LABEL[st]}${stockMark(rm)}`
       : FULL_LABEL[st];
+  };
+
+  let autoVacancyDateClicked = false;
+  let reserveProceedStarted = false;
+  let reserveProceedClicked = false;
+
+  const isVisibleElement = el => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
+  };
+
+  const clickElementLikeHuman = (el) => {
+    const ev = { bubbles: true, cancelable: true, view: window };
+
+    try {
+      el.dispatchEvent(new PointerEvent('pointerdown', ev));
+      el.dispatchEvent(new MouseEvent('mousedown', ev));
+      el.dispatchEvent(new PointerEvent('pointerup', ev));
+      el.dispatchEvent(new MouseEvent('mouseup', ev));
+    } catch (e) {
+      el.dispatchEvent(new MouseEvent('mousedown', ev));
+      el.dispatchEvent(new MouseEvent('mouseup', ev));
+    }
+
+    el.click();
+  };
+
+  const getDisplayedYearMonthRaw = () => {
+    const sel = document.getElementById('boxCalendarSelect');
+
+    if (sel) {
+      const val = (sel.value || '').trim();
+      const text = (sel.options?.[sel.selectedIndex]?.textContent || '').trim();
+
+      let m = val.match(/^(\d{4}),\s*(\d{1,2})$/);
+      if (m) return `${m[1]}${pad(m[2])}`;
+
+      m = val.match(/^(\d{4})\/(\d{1,2})$/);
+      if (m) return `${m[1]}${pad(m[2])}`;
+
+      m = val.match(/^(\d{4})(\d{2})/);
+      if (m) return `${m[1]}${m[2]}`;
+
+      m = text.match(/(\d{4})[\/年](\d{1,2})/);
+      if (m) return `${m[1]}${pad(m[2])}`;
+    }
+
+    const monthText =
+      document.querySelector('.boxCalendar.month .selectMonth li p.currentMonth')?.textContent?.trim() ||
+      document.querySelector('.currentMonth')?.textContent?.trim() ||
+      '';
+
+    const m = monthText.match(/(\d{4})[\/年](\d{1,2})/);
+    if (m) return `${m[1]}${pad(m[2])}`;
+
+    return '';
+  };
+
+  const isClickableVacancyDate = (dtRaw, baseYm = '') => {
+    const displayedYm = baseYm || getDisplayedYearMonthRaw();
+
+    if (displayedYm && dtRaw.slice(0, 6) !== displayedYm) {
+      return false;
+    }
+
+    if (dtRaw > getMaxClickableUseDate()) {
+      return false;
+    }
+
+    return true;
+  };
+
+  const findVacancyDateClickTarget = (foundVacancies) => {
+    const displayedYm = getDisplayedYearMonthRaw();
+
+    let sortedVacancies = [...foundVacancies];
+
+    if (displayedYm) {
+      sortedVacancies = sortedVacancies.filter(v => v.dtRaw.slice(0, 6) === displayedYm);
+    }
+
+    sortedVacancies = sortedVacancies
+      .filter(v => v.dtRaw <= getMaxClickableUseDate())
+      .sort((a, b) => a.day - b.day);
+
+    const primary = [...document.querySelectorAll('.boxCalendar.month dl')];
+    const dls = primary.length > 0 ? primary : [...document.querySelectorAll('dl')];
+
+    for (const vacancy of sortedVacancies) {
+      const day = String(vacancy.day);
+
+      for (const dl of dls) {
+        const dateText = dl.querySelector('dt.calendarDate')?.textContent?.trim();
+        if (dateText !== day) continue;
+
+        const calendarImage = dl.querySelector('dd.calendarImage');
+        if (!calendarImage) continue;
+
+        const hasNumberVacancy =
+          !!calendarImage.querySelector('span.num');
+
+        const hasCircleVacancy =
+          !!calendarImage.querySelector('img[src*="ico_maru_02_o.png"]');
+
+        const hasVacancy =
+          hasNumberVacancy || hasCircleVacancy;
+
+        if (!hasVacancy) continue;
+
+        return { target: dl, foundVacancy: vacancy };
+      }
+    }
+
+    return null;
+  };
+
+  const sendReserveProceedClickedDiscord = (foundVacancy) => {
+    const webhookUrl = getDiscordWebhookUrl();
+
+    if (!webhookUrl) {
+      console.warn('Discord Webhook未設定: window.TDR_WEBHOOKS.hotel を確認してください');
+      return;
+    }
+
+    const payload = {
+      username: SCRIPT_NAME,
+      embeds: [{
+        title: `✅ **${tStrSec()}**\n${foundVacancy.dt} 予約手続き押下\n${foundVacancy.roomName}`,
+        color: 65280,
+        description: `時刻: ${tStrMs()}\n${foundVacancy.totalPrice.toLocaleString()}円 [${foundVacancy.priceRank}]\n在庫${foundVacancy.rm}`
+      }]
+    };
+
+    try {
+      fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(e => console.error('予約押下通知エラー', e));
+    } catch (e) {
+      console.error('予約押下通知エラー', e);
+    }
+  };
+
+  const findReserveProceedButton = (foundVacancy) => {
+    const buttons = [...document.querySelectorAll('button.next, button')];
+
+    for (const btn of buttons) {
+      if (!isVisibleElement(btn)) continue;
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') continue;
+
+      const text = (btn.textContent || '').trim();
+      const onclick = btn.getAttribute('onclick') || '';
+
+      if (!text.includes('予約手続きに進む')) continue;
+      if (!onclick.includes('vacancyReserve')) continue;
+
+      const hasDate = onclick.includes(foundVacancy.dtRaw);
+      const hasCommodity = onclick.includes(foundVacancy.commodityCd);
+      const hasPriceFrame = foundVacancy.priceRank ? onclick.includes(foundVacancy.priceRank) : true;
+
+      if (hasDate && hasCommodity && hasPriceFrame) {
+        return btn;
+      }
+    }
+
+    for (const btn of buttons) {
+      if (!isVisibleElement(btn)) continue;
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') continue;
+
+      const text = (btn.textContent || '').trim();
+      const onclick = btn.getAttribute('onclick') || '';
+
+      if (text.includes('予約手続きに進む') && onclick.includes('vacancyReserve')) {
+        return btn;
+      }
+    }
+
+    return null;
+  };
+
+  const clickReserveProceedButton = (foundVacancy) => {
+    if (reserveProceedStarted || reserveProceedClicked) return;
+
+    reserveProceedStarted = true;
+
+    const start = Date.now();
+
+    const tryClick = () => {
+      if (reserveProceedClicked) return;
+
+      const btn = findReserveProceedButton(foundVacancy);
+
+      if (btn) {
+        reserveProceedClicked = true;
+
+        sendReserveProceedClickedDiscord(foundVacancy);
+
+        clickElementLikeHuman(btn);
+        showPopup(`🎯 空室発見\n予約手続き押下`, 'rgba(204, 0, 0, 0.9)');
+        return;
+      }
+
+      if (Date.now() - start < 1500) {
+        setTimeout(tryClick, 50);
+      } else {
+        console.warn('予約手続きボタン未検出', {
+          foundVacancy,
+          buttons: [...document.querySelectorAll('button.next, button')].map(btn => ({
+            text: (btn.textContent || '').trim(),
+            onclick: btn.getAttribute('onclick') || '',
+            html: btn.outerHTML
+          }))
+        });
+
+        showPopup(`🎯 空室発見\n予約ボタン未検出`, 'rgba(204, 0, 0, 0.9)');
+      }
+    };
+
+    setTimeout(tryClick, 200);
+  };
+
+  const clickVacancyDate = (foundVacancies) => {
+    if (autoVacancyDateClicked) return;
+
+    const start = Date.now();
+
+    const tryClick = () => {
+      if (autoVacancyDateClicked) return;
+
+      const result = findVacancyDateClickTarget(foundVacancies);
+
+      if (result?.target) {
+        autoVacancyDateClicked = true;
+        clickElementLikeHuman(result.target);
+        showPopup(`🎯 空室発見\n${result.foundVacancy.dt} 日付クリック`, 'rgba(204, 0, 0, 0.9)');
+
+        clickReserveProceedButton(result.foundVacancy);
+        return;
+      }
+
+      if (Date.now() - start < 5000) {
+        setTimeout(tryClick, 100);
+      } else {
+        console.warn('空室日未検出', {
+          displayedYm: getDisplayedYearMonthRaw(),
+          maxClickableUseDate: getMaxClickableUseDate(),
+          foundVacancies,
+          calendarDays: [...document.querySelectorAll('.boxCalendar.month dl, dl')].map(dl => ({
+            day: dl.querySelector('dt.calendarDate')?.textContent?.trim(),
+            image: dl.querySelector('dd.calendarImage')?.innerHTML || '',
+            html: dl.outerHTML
+          })).filter(x => x.day)
+        });
+
+        showPopup(`🎯 空室発見\n日付未検出`, 'rgba(204, 0, 0, 0.9)');
+      }
+    };
+
+    setTimeout(tryClick, 100);
   };
 
   const initCalendarStartPlus4 = () => {
@@ -368,6 +636,9 @@
       longTimer = null;
       consecutiveErrorCount = 0;
       fatalErrorCount = 0;
+      autoVacancyDateClicked = false;
+      reserveProceedStarted = false;
+      reserveProceedClicked = false;
       mode = m;
       updateModes();
       if (mode !== 0) triggerSearch();
@@ -544,6 +815,7 @@
         const roomStr = p_room ? `客室:${p_room}` : '';
         const targetInfoStr = `[${yearMonthStr} ${hotelStr} ${roomStr}]`.trim().replace(/ +/g, ' ');
         const contextKey = `${p_hotel || 'default'}_${p_ym || 'now'}`;
+        const requestYm = p_ym && p_ym.length >= 6 ? p_ym.slice(0, 6) : '';
 
         const ok = opt.success;
 
@@ -551,27 +823,32 @@
           consecutiveErrorCount = 0;
           fatalErrorCount = 0;
 
-          logStock(resp, contextKey).then(anyFound => {
-            if (mode === 3 && anyFound) {
-              mode = 0;
-              updateModes();
-              showPopup(`🎯 空室発見!\n${getClockStr()}`, 'rgba(0, 102, 204, 0.9)');
-            } else {
-              showPopup(getClockStr(), 'rgba(0, 102, 204, 0.9)');
-            }
-          });
-
           ok?.(resp);
           initMonthClick();
 
-          if (mode === 1) {
-            triggerSearch();
-          } else if (mode === 2) {
-            const randomInterval = Math.floor(Math.random() * (660001 - 540000)) + 540000;
-            longTimer = setTimeout(triggerSearch, randomInterval);
-          } else if (mode === 3) {
-            triggerSearch();
-          }
+          logStock(resp, contextKey, requestYm).then(foundVacancies => {
+            if (mode === 3 && foundVacancies.length > 0) {
+              clearTimeout(longTimer);
+              longTimer = null;
+
+              mode = 0;
+              updateModes();
+
+              clickVacancyDate(foundVacancies);
+              return;
+            }
+
+            showPopup(getClockStr(), 'rgba(0, 102, 204, 0.9)');
+
+            if (mode === 1) {
+              triggerSearch();
+            } else if (mode === 2) {
+              const randomInterval = Math.floor(Math.random() * (660001 - 540000)) + 540000;
+              longTimer = setTimeout(triggerSearch, randomInterval);
+            } else if (mode === 3) {
+              triggerSearch();
+            }
+          });
         };
 
         opt.error = function (k) {
@@ -659,10 +936,10 @@
     };
   }
 
-  async function logStock(resp, contextKey) {
+  async function logStock(resp, contextKey, requestYm = '') {
     const infos = resp.ecRoomStockInfos ?? {};
     const isFirstTime = !loadedKeys.has(contextKey);
-    let vacancyDetected = false;
+    const foundVacancies = [];
     const nowObj = new Date();
     const targetUseDate = getTargetUseDate();
 
@@ -697,8 +974,17 @@
               }));
             }
 
-            if (st === 0 && rm > 0) {
-              vacancyDetected = true;
+            if (st === 0 && rm > 0 && isClickableVacancyDate(dtRaw, requestYm)) {
+              foundVacancies.push({
+                dtRaw,
+                dt,
+                day: Number(dtRaw.slice(6, 8)),
+                commodityCd,
+                roomName,
+                priceRank,
+                rm,
+                totalPrice
+              });
             }
 
             if (!isFirstTime && notifyEnabled && prev !== undefined && (prev.st !== st || prev.rm !== rm)) {
@@ -748,6 +1034,6 @@
       }
     }
 
-    return vacancyDetected;
+    return foundVacancies.sort((a, b) => a.day - b.day);
   }
 })();
