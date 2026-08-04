@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 客室指定在庫モニター
-// @version      5.24
+// @version      5.26
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -33,8 +33,8 @@
 
   const MODE_CONF = {
     0: { txt: '👆', bg: '#000', fg: '#fff' },
-    1: { txt: '🏃‍♀️', bg: 'orange', fg: '#fff' },
-    2: { txt: '🚶', bg: 'purple', fg: '#fff' },
+    1: { txt: '🏃‍♀️', bg: 'pink', fg: '#000' },
+    2: { txt: '🚶', bg: 'blue', fg: '#fff' },
     3: { txt: '👍', bg: 'red', fg: '#fff' }
   };
 
@@ -604,6 +604,17 @@
     style: `background-color:${bg} !important; color:${fg} !important; padding:4px 6px; cursor:pointer; border-radius:4px; font-size:14px; user-select:none; text-align:center; min-width:26px; line-height:1.2; font-weight:bold; transition:opacity 0.2s;`
   });
 
+  const resetModeRuntime = () => {
+    hidePopup();
+    clearTimeout(longTimer);
+    longTimer = null;
+    consecutiveErrorCount = 0;
+    fatalErrorCount = 0;
+    autoVacancyDateClicked = false;
+    reserveProceedStarted = false;
+    reserveProceedClicked = false;
+  };
+
   const panel = Object.assign(document.createElement('div'), {
     style: 'position:fixed;top:4px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:4px;z-index:99999;background:rgba(255,255,255,0.9);padding:6px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.3);'
   });
@@ -616,37 +627,60 @@
     style: 'display:flex; justify-content:flex-start; align-items:center; gap:4px;'
   });
 
-  const modeBtns = [];
+  const btnManual = makeBtn(MODE_CONF[0].txt, MODE_CONF[0].bg, MODE_CONF[0].fg);
+  const btnSearchMode = makeBtn(MODE_CONF[2].txt, MODE_CONF[2].bg, MODE_CONF[2].fg);
+  const btnAutoGet = makeBtn(MODE_CONF[3].txt, MODE_CONF[3].bg, MODE_CONF[3].fg);
 
   const updateModes = () => {
-    modeBtns.forEach((btn, i) => {
-      btn.style.opacity = (mode === i) ? '1' : '0.3';
-    });
+    btnManual.style.opacity = mode === 0 ? '1' : '0.3';
+    btnAutoGet.style.opacity = mode === 3 ? '1' : '0.3';
+
+    const searchMode = mode === 1 ? 1 : 2;
+    const conf = MODE_CONF[searchMode];
+
+    btnSearchMode.textContent = conf.txt;
+    btnSearchMode.style.setProperty('background-color', conf.bg, 'important');
+    btnSearchMode.style.setProperty('color', conf.fg, 'important');
+    btnSearchMode.style.opacity = (mode === 1 || mode === 2) ? '1' : '0.3';
+
     save('mode', mode);
   };
 
-  [0, 1, 2, 3].forEach(m => {
-    const conf = MODE_CONF[m];
-    const btn = makeBtn(conf.txt, conf.bg, conf.fg);
+  btnManual.onclick = () => {
+    if (mode === 0) return;
 
-    btn.onclick = () => {
-      if (mode === m) return;
-      hidePopup();
-      clearTimeout(longTimer);
-      longTimer = null;
-      consecutiveErrorCount = 0;
-      fatalErrorCount = 0;
-      autoVacancyDateClicked = false;
-      reserveProceedStarted = false;
-      reserveProceedClicked = false;
-      mode = m;
-      updateModes();
-      if (mode !== 0) triggerSearch();
-    };
+    resetModeRuntime();
 
-    modeBtns.push(btn);
-    row1.appendChild(btn);
-  });
+    mode = 0;
+    updateModes();
+  };
+
+  btnSearchMode.onclick = () => {
+    resetModeRuntime();
+
+    if (mode === 1) {
+      mode = 2;
+    } else if (mode === 2) {
+      mode = 1;
+    } else {
+      mode = 2;
+    }
+
+    updateModes();
+    triggerSearch();
+  };
+
+  btnAutoGet.onclick = () => {
+    if (mode === 3) return;
+
+    resetModeRuntime();
+
+    mode = 3;
+    updateModes();
+    triggerSearch();
+  };
+
+  row1.append(btnManual, btnSearchMode, btnAutoGet);
 
   const btnNotify = makeBtn('🔔', 'gray', '#fff');
 
