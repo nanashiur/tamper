@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 客室指定在庫モニター
-// @version      5.23
+// @version      5.24
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -35,7 +35,7 @@
     0: { txt: '👆', bg: '#000', fg: '#fff' },
     1: { txt: '🏃‍♀️', bg: 'orange', fg: '#fff' },
     2: { txt: '🚶', bg: 'purple', fg: '#fff' },
-    3: { txt: '👍', bg: 'pink', fg: '#000' }
+    3: { txt: '👍', bg: 'red', fg: '#fff' }
   };
 
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
@@ -172,7 +172,7 @@
 
     sortedVacancies = sortedVacancies
       .filter(v => v.dtRaw <= getMaxClickableUseDate())
-      .sort((a, b) => a.day - b.day);
+      .sort((a, b) => b.dtRaw.localeCompare(a.dtRaw));
 
     const primary = [...document.querySelectorAll('.boxCalendar.month dl')];
     const dls = primary.length > 0 ? primary : [...document.querySelectorAll('dl')];
@@ -1034,6 +1034,6 @@
       }
     }
 
-    return foundVacancies.sort((a, b) => a.day - b.day);
+    return foundVacancies.sort((a, b) => b.dtRaw.localeCompare(a.dtRaw));
   }
 })();
