@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📅 客室指定在庫モニター
-// @version      5.26
+// @version      5.27
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -686,7 +686,8 @@
 
   const updateNotify = () => {
     btnNotify.style.opacity = notifyEnabled ? '1' : '0.3';
-    btnNotify.style.setProperty('background-color', notifyEnabled ? 'purple' : 'gray', 'important');
+    btnNotify.style.setProperty('background-color', notifyEnabled ? 'yellow' : 'gray', 'important');
+    btnNotify.style.setProperty('color', notifyEnabled ? '#000' : '#fff', 'important');
     save('notify', notifyEnabled);
   };
 
