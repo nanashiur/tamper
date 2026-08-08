@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         TDR トラベルバッグ オプション
-// @version      0.07
+// @name         🧳トラベルバッグ
+// @version      1.00
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/edit/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
