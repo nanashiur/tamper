@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.04
+// @version      1.05
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -15,6 +15,7 @@
 
   const SCRIPT_NAME = 'ℹ️レストラン予約情報入力';
   const STORAGE_KEY_NOTIFY = 'tdr_restaurant_input_notify_enabled';
+  const PHONE_FALLBACK = '090';
 
   const PHASE_25 = '25';
   const PHASE_1 = '1';
@@ -32,10 +33,18 @@
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  console.log(`[${SCRIPT_NAME}] v1.04 起動`);
+  console.log(`[${SCRIPT_NAME}] v1.05 起動`);
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
+  }
+
+  function getPhoneNumber() {
+    const phone = String(window.TDR_WEBHOOKS?.phone || '')
+      .replace(/[^\d]/g, '')
+      .trim();
+
+    return phone || PHONE_FALLBACK;
   }
 
   function getNotifyEnabled() {
@@ -410,9 +419,14 @@
 
     if (normalize(input.value)) return false;
 
-    setNativeValue(input, '090');
+    const phone = getPhoneNumber();
+    setNativeValue(input, phone);
 
-    console.log(`[${SCRIPT_NAME}] 電話番号を仮入力: 090`);
+    console.log(
+      `[${SCRIPT_NAME}] 電話番号を入力:`,
+      phone === PHONE_FALLBACK ? `${PHONE_FALLBACK} / fallback` : '設定値'
+    );
+
     return true;
   }
 
