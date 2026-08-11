@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.17
+// @version      1.18
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -11,62 +11,81 @@
 // ==/UserScript==
 (() => {
 'use strict';
-const VERSION='1.17', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+
+const VERSION='1.18', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
-if (window[INSTALLED]) return; window[INSTALLED]=true;
+if(window[INSTALLED]) return;
+window[INSTALLED]=true;
 
 let autoEnabled=false, fireTimer=null, countdownTimer=null, nextFireAt=0, autoButton=null;
 let vacancySelectMode=0, vacancySelectButton=null, vacancySelectToken=0;
 let autoConfirmEnabled=false, autoConfirmButton=null, autoConfirmTimer=null, lastObservedCurrentSignature='';
 let reservationNoticeActive=false, pageObserver=null;
-const HOURS=['11','12','13','14','15','16','17','18','19','20','21'], MINUTES=['00','10','20','30','40','50'], priorityRows=[];
+const HOURS=['11','12','13','14','15','16','17','18','19','20','21'];
+const MINUTES=['00','10','20','30','40','50'];
+const priorityRows=[];
 
 function normalizePriority(v){
   const m=String(v||'').trim().match(/^(11|12|13|14|15|16|17|18|19|20|21):(--|00|10|15|20|30|40|45|50)$/);
-  if (!m) return '';
+  if(!m) return '';
   const min=m[2]==='15'?'10':m[2]==='45'?'40':m[2];
   return `${m[1]}:${min}`;
 }
+function normalizePriorityTimes(a){
+  const out=['','','','',''];
+  if(!Array.isArray(a)) return out;
+  let stop=false;
+  for(let i=0;i<5;i++){
+    if(stop) continue;
+    const v=normalizePriority(a[i]);
+    if(!v){ stop=true; continue; }
+    out[i]=v;
+  }
+  return out;
+}
 function loadPriorityTimes(){
-  try {
+  try{
     const raw=localStorage.getItem(PRIORITY_KEY);
-    if (raw) {
-      const a=JSON.parse(raw);
-      if (Array.isArray(a)) return Array.from({length:5},(_,i)=>normalizePriority(a[i]));
-    }
+    if(raw) return normalizePriorityTimes(JSON.parse(raw));
     const legacy=normalizePriority(localStorage.getItem(LEGACY_KEY));
-    if (legacy) return [legacy,'','','',''];
-  } catch(e){ console.warn('[TDR TravelBag] 優先時間読込失敗',e); }
+    if(legacy) return [legacy,'','','',''];
+  }catch(e){ console.warn('[TDR TravelBag] 優先時間読込失敗',e); }
   return ['','','','',''];
 }
 function getPriorityTimes(){
-  return priorityRows.map(({hour,minute})=>hour.value?`${hour.value}:${minute.value||'--'}`:'');
+  const out=[];
+  for(const {hour,minute} of priorityRows){
+    if(!hour.value){ out.push(''); break; }
+    out.push(`${hour.value}:${minute.value||'--'}`);
+  }
+  while(out.length<5) out.push('');
+  return normalizePriorityTimes(out);
 }
 function savePriorityTimes(){
-  try {
+  try{
     localStorage.setItem(PRIORITY_KEY,JSON.stringify(getPriorityTimes()));
     localStorage.removeItem(LEGACY_KEY);
-  } catch(e){ console.warn('[TDR TravelBag] 優先時間保存失敗',e); }
+  }catch(e){ console.warn('[TDR TravelBag] 優先時間保存失敗',e); }
 }
 function getPriorities(){
   const vals=priorityRows.length?getPriorityTimes():loadPriorityTimes(), out=[];
-  vals.forEach((v,index)=>{
-    v=normalizePriority(v);
-    if (!v) return;
+  for(let i=0;i<vals.length;i++){
+    const v=normalizePriority(vals[i]);
+    if(!v) break;
     const [hour,minute]=v.split(':');
-    out.push({index,hour,minute:minute==='--'?'':minute,display:v});
-  });
+    out.push({index:i,hour,minute:minute==='--'?'':minute,display:v});
+  }
   return out;
 }
 function priorityMatches(p,time){
   const m=String(time||'').trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!p||!m) return false;
-  const h=m[1].padStart(2,'0'), min=m[2];
-  if (h!==p.hour) return false;
-  if (!p.minute) return true;
-  if (p.minute==='10') return min==='10'||min==='15';
-  if (p.minute==='40') return min==='40'||min==='45';
-  return min===p.minute;
+  if(!p||!m) return false;
+  const hour=m[1].padStart(2,'0'), minute=m[2];
+  if(hour!==p.hour) return false;
+  if(!p.minute) return true;
+  if(p.minute==='10') return minute==='10'||minute==='15';
+  if(p.minute==='40') return minute==='40'||minute==='45';
+  return minute===p.minute;
 }
 function priorityRank(time,ps){
   for(let i=0;i<ps.length;i++) if(priorityMatches(ps[i],time)) return i;
@@ -74,33 +93,76 @@ function priorityRank(time,ps){
 }
 function matchingPriority(time){ return getPriorities().find(p=>priorityMatches(p,time))||null; }
 
+function updatePriorityRows(){
+  let active=true;
+  for(let i=0;i<priorityRows.length;i++){
+    const {row,label,hour,minute}=priorityRows[i];
+    if(!active){
+      hour.value='';
+      minute.value='';
+      hour.disabled=true;
+      minute.disabled=true;
+      row.style.opacity='.4';
+      label.style.color='#777';
+      continue;
+    }
+    hour.disabled=false;
+    row.style.opacity='1';
+    label.style.color='#000';
+    if(!hour.value){
+      minute.value='';
+      minute.disabled=true;
+      active=false;
+    }else{
+      minute.disabled=false;
+    }
+  }
+}
+function priorityHourChanged(index){
+  const r=priorityRows[index];
+  if(!r) return;
+  if(!r.hour.value){
+    r.minute.value='';
+    for(let i=index+1;i<priorityRows.length;i++){
+      priorityRows[i].hour.value='';
+      priorityRows[i].minute.value='';
+    }
+  }
+  updatePriorityRows();
+  savePriorityTimes();
+}
+
 function updateVacancyButton(){
-  if (!vacancySelectButton) return;
+  if(!vacancySelectButton) return;
   const states=[['選択OFF','#777'],['選択回避','#fb8c00'],['選択強制','#e65100']];
-  [vacancySelectButton.textContent,vacancySelectButton.style.background]=states[vacancySelectMode];
+  vacancySelectButton.textContent=states[vacancySelectMode][0];
+  vacancySelectButton.style.background=states[vacancySelectMode][1];
 }
 function turnOffVacancySelect(){
-  if(vacancySelectMode){ vacancySelectMode=0; vacancySelectToken++; updateVacancyButton(); }
+  if(!vacancySelectMode) return;
+  vacancySelectMode=0;
+  vacancySelectToken++;
+  updateVacancyButton();
 }
 document.addEventListener('click',e=>{
   if(e.target?.closest?.('#confirmBtn')) turnOffVacancySelect();
 },true);
 
 function updateAutoConfirmButton(){
-  if (!autoConfirmButton) return;
+  if(!autoConfirmButton) return;
   autoConfirmButton.textContent=autoConfirmEnabled?'確定 ON':'確定 OFF';
   autoConfirmButton.style.background=autoConfirmEnabled?'#d32f2f':'#777';
 }
 function getPhoneNumber(){
   const phone=window.TDR_WEBHOOKS?.phone;
-  if (typeof phone==='string'&&phone.trim()) return phone.trim();
+  if(typeof phone==='string'&&phone.trim()) return phone.trim();
   console.warn('[TDR TravelBag] 電話番号を取得できないため090を使用します');
   return '090';
 }
 function prepareReservationForm(){
   const phone=getPhoneNumber();
-  if (window.jQuery) window.jQuery('input[name="telNum"]').val(phone);
-  else {
+  if(window.jQuery) window.jQuery('input[name="telNum"]').val(phone);
+  else{
     const el=document.querySelector('input[name="telNum"]');
     if(el) el.value=phone;
   }
@@ -113,7 +175,7 @@ function getSelectedTimeInfo(){
   const time=li.querySelector('a')?.textContent?.trim()||'';
   const openNumKey=li.querySelector('input[name="openNumKey"]')?.value||'';
   const commodityCD=li.querySelector('input[name="commodityCD"]')?.value||'';
-  return time?{time,openNumKey,commodityCD,signature:`${commodityCD}|${openNumKey}|${time}`}:null;
+  return time?{time,openNumKey,commodityCD,signature:`${commodityCD}|${openNumKey}|${time}`} : null;
 }
 function scheduleAutoConfirm(info){
   if(!autoConfirmEnabled||!info) return;
@@ -166,10 +228,10 @@ function processNoticeModal(){
       reservationNoticeActive=false;
       return;
     }
-    const b=m.querySelector('#btnNext');
-    if(!b){ reservationNoticeActive=false; return; }
+    const btn=m.querySelector('#btnNext');
+    if(!btn){ reservationNoticeActive=false; return; }
     console.log('[TDR TravelBag] 注意モーダル「次へ」自動クリック');
-    b.click();
+    btn.click();
   },0);
 }
 function installPageObserver(){
@@ -188,9 +250,10 @@ installPageObserver();
 
 let pendingSeq=0, pendingTimer=null;
 const pending=new Map();
+
 function oldestPending(){
   let t=Infinity;
-  for(const v of pending.values()) if(v<t)t=v;
+  for(const v of pending.values()) if(v<t) t=v;
   return t===Infinity?0:t;
 }
 function updateAutoButtonBg(){
@@ -214,13 +277,13 @@ function endPending(id){
     pendingTimer=null;
     updateAutoButtonBg();
     updateCountdown();
-  } else updatePending();
+  }else updatePending();
 }
 
 const isTimeGet=url=>/timeGet/i.test(String(url||''));
 function absUrl(url){
-  try{return new URL(String(url||''),location.href).toString();}
-  catch{return String(url||'');}
+  try{ return new URL(String(url||''),location.href).toString(); }
+  catch{ return String(url||''); }
 }
 function getValue(row,key){
   if(!row||typeof row!=='object') return '';
@@ -262,8 +325,8 @@ function bodyString(body){
   if(typeof body==='string') return body;
   if(body instanceof URLSearchParams) return body.toString();
   if(body instanceof FormData){
-    try{return new URLSearchParams([...body.entries()]).toString();}
-    catch{return '';}
+    try{ return new URLSearchParams([...body.entries()]).toString(); }
+    catch{ return ''; }
   }
   return String(body||'');
 }
@@ -274,12 +337,12 @@ function formatDate(v){
 function payloadInfo(body){
   const text=bodyString(body);
   const out={raw:text,useDate:'',displayDate:'',targetCommodityCD:'',targetCodeDisplay:''};
-  if(!text)return out;
+  if(!text) return out;
   let p;
-  try{p=new URLSearchParams(text);}catch{return out;}
-  const d=p.get('useDate')||p.get('hotelUseDate')||'';
-  const c=p.get('commodityCD')||'';
-  return {...out,useDate:d,displayDate:formatDate(d),targetCommodityCD:c,targetCodeDisplay:splitCommodityCD(c).display};
+  try{ p=new URLSearchParams(text); }catch{ return out; }
+  const date=p.get('useDate')||p.get('hotelUseDate')||'';
+  const code=p.get('commodityCD')||'';
+  return {...out,useDate:date,displayDate:formatDate(date),targetCommodityCD:code,targetCodeDisplay:splitCommodityCD(code).display};
 }
 function parseResponse(r){
   if(Array.isArray(r)) return r;
@@ -291,7 +354,7 @@ function parseResponse(r){
 }
 function printTimeGet(source,url,response,body){
   let data;
-  try{data=parseResponse(response);}
+  try{ data=parseResponse(response); }
   catch(e){
     console.warn('[TB timeGet] JSON解析失敗',{source,url:absUrl(url),response});
     return null;
@@ -343,6 +406,7 @@ function printTimeGet(source,url,response,body){
 function getVacancyCandidates(data){
   if(!Array.isArray(data)) return [];
   const ps=getPriorities(), all=[];
+
   for(const row of data){
     if(statusLabel(row)!=='空席') continue;
     const commodityCD=String(getValue(row,'commodityCD')||'').trim();
@@ -350,35 +414,34 @@ function getVacancyCandidates(data){
     const openNumKey=String(getValue(row,'openNumKey')??'').trim();
     if(commodityCD&&time) all.push({commodityCD,time,openNumKey});
   }
+
   all.sort((a,b)=>
     priorityRank(a.time,ps)-priorityRank(b.time,ps)||
     a.time.localeCompare(b.time)||
     a.commodityCD.localeCompare(b.commodityCD)
   );
+
   return vacancySelectMode===1
     ? all.filter(x=>priorityRank(x.time,ps)<ps.length)
     : all;
 }
 function clickVacancy(candidates){
   const items=document.querySelectorAll('#timeSlider li.vacancy');
-  for(const target of candidates) for(const li of items){
-    const a=li.querySelector('a');
-    const time=a?.textContent?.trim()||'';
-    const open=li.querySelector('input[name="openNumKey"]')?.value||'';
-    const code=li.querySelector('input[name="commodityCD"]')?.value||'';
 
-    if(time===target.time&&String(open)===String(target.openNumKey)&&code===target.commodityCD){
-      const p=matchingPriority(target.time);
-      console.log(
-        '[TDR TravelBag] 空席自動選択:',
-        target.time,
-        p?`【第${p.index+1}希望 ${p.display}】`:'【強制最早時間】',
-        target.commodityCD,
-        target.openNumKey
-      );
-      a.click();
-      setTimeout(checkAutoConfirmSelection,0);
-      return true;
+  for(const target of candidates){
+    for(const li of items){
+      const a=li.querySelector('a');
+      const time=a?.textContent?.trim()||'';
+      const open=li.querySelector('input[name="openNumKey"]')?.value||'';
+      const code=li.querySelector('input[name="commodityCD"]')?.value||'';
+
+      if(time===target.time&&String(open)===String(target.openNumKey)&&code===target.commodityCD){
+        const p=matchingPriority(target.time);
+        console.log('[TDR TravelBag] 空席自動選択:',target.time,p?`【第${p.index+1}希望 ${p.display}】`:'【強制最早時間】',target.commodityCD,target.openNumKey);
+        a.click();
+        setTimeout(checkAutoConfirmSelection,0);
+        return true;
+      }
     }
   }
   return false;
@@ -390,24 +453,28 @@ function scheduleVacancySelect(data){
   if(!vacancies.length) return console.log('[TDR TravelBag] 空席自動選択: 空席なし');
 
   const ps=getPriorities(), candidates=getVacancyCandidates(data);
+
   if(vacancySelectMode===1&&!candidates.length)
     return console.log('[TDR TravelBag] 選択回避: 希望条件に一致する空席なし → 選択しません');
+
   if(!candidates.length) return;
 
   const matched=ps.find(p=>candidates.some(c=>priorityMatches(p,c.time)));
-  if(matched)
-    console.log('[TDR TravelBag] 優先時間:',`第${matched.index+1}希望`,matched.display,'空席');
+
+  if(matched) console.log('[TDR TravelBag] 優先時間:',`第${matched.index+1}希望`,matched.display,'空席');
   else if(vacancySelectMode===2)
     console.log('[TDR TravelBag] 選択強制:',ps.length?'希望条件に一致する空席なし → 全空席の最早時間を選択':'希望時間指定なし → 全空席の最早時間を選択');
 
   const token=++vacancySelectToken;
   let n=0;
+
   const run=()=>{
     if(!vacancySelectMode||token!==vacancySelectToken) return;
     if(clickVacancy(candidates)) return;
     if(++n<10) setTimeout(run,50);
     else console.warn('[TDR TravelBag] 空席自動選択: 対象DOMを確認できませんでした',candidates);
   };
+
   setTimeout(run,0);
 }
 
@@ -419,8 +486,12 @@ window.fetch=function(input,init){
   let id=null,p;
 
   if(isTimeGet(url)) id=startPending();
-  try{p=originalFetch.apply(this,arguments);}
-  catch(e){if(id!==null)endPending(id);throw e;}
+
+  try{ p=originalFetch.apply(this,arguments); }
+  catch(e){
+    if(id!==null) endPending(id);
+    throw e;
+  }
 
   if(isTimeGet(url)){
     p.then(res=>
@@ -436,6 +507,7 @@ window.fetch=function(input,init){
       endPending(id);
     });
   }
+
   return p;
 };
 
@@ -453,12 +525,14 @@ XMLHttpRequest.prototype.send=function(body){
 
   if(info&&isTimeGet(info.url)){
     id=startPending();
+
     this.addEventListener('loadend',()=>{
       let response='';
+
       try{
         response=(this.responseType===''||this.responseType==='text')?this.responseText||'':this.response;
       }catch{
-        try{response=this.response||'';}catch{}
+        try{ response=this.response||''; }catch{}
       }
 
       try{
@@ -470,8 +544,11 @@ XMLHttpRequest.prototype.send=function(body){
     });
   }
 
-  try{return originalSend.apply(this,arguments);}
-  catch(e){if(id!==null)endPending(id);throw e;}
+  try{ return originalSend.apply(this,arguments); }
+  catch(e){
+    if(id!==null) endPending(id);
+    throw e;
+  }
 };
 
 const isEditPage=()=>location.pathname.startsWith('/online/travelbag/edit/');
@@ -481,11 +558,14 @@ function adultNum(){
     console.warn('[TDR TravelBag] jQuery が見つかりません');
     return null;
   }
+
   const $a=window.jQuery('select[name="adultNum"]');
+
   if(!$a.length){
     console.warn('[TDR TravelBag] adultNum が見つかりません');
     return null;
   }
+
   return $a;
 }
 function fireStockReload(){
@@ -521,10 +601,12 @@ function scheduleNextFire(){
 }
 function updateCountdown(){
   if(!autoButton||pending.size) return;
+
   if(!autoEnabled){
     autoButton.textContent='自動OFF';
     return;
   }
+
   const ms=nextFireAt-Date.now();
   autoButton.textContent=ms<=0?'00':String(Math.min(59,Math.ceil(ms/1000))).padStart(2,'0');
 }
@@ -540,10 +622,16 @@ function stopCountdown(){
 }
 
 function makePriorityControls(){
-  const box=document.createElement('div');
-  box.style.cssText='display:flex;flex-direction:column;width:132px;gap:3px';
+  const host=document.createElement('div');
+  host.style.cssText='width:132px';
+  const shadow=host.attachShadow({mode:'open'});
 
-  const saved=loadPriorityTimes(), labels=['①','②','③','④','⑤'];
+  const box=document.createElement('div');
+  box.style.cssText='display:flex;flex-direction:column;width:132px;gap:3px;font-family:sans-serif';
+
+  const saved=loadPriorityTimes();
+  const labels=['①','②','③','④','⑤'];
+  const selectCSS='width:52px;height:30px;box-sizing:border-box;padding:0 2px;margin:0;border:1px solid #777;border-radius:4px;background:#fff;color:#000;font-size:13px;font-weight:bold;cursor:pointer';
 
   for(let i=0;i<5;i++){
     const row=document.createElement('div');
@@ -555,12 +643,10 @@ function makePriorityControls(){
     label.textContent=labels[i];
     label.style.cssText='display:inline-flex;align-items:center;justify-content:center;width:24px;height:30px;font-size:15px;font-weight:bold;color:#000';
 
-    hour.innerHTML='<option value="">--</option>'+HOURS.map(x=>`<option value="${x}">${x}</option>`).join('');
-    minute.innerHTML='<option value="">--</option>'+MINUTES.map(x=>`<option value="${x}">${x}</option>`).join('');
-
-    const css='width:52px;height:30px;box-sizing:border-box;padding:0 2px;margin:0;border:1px solid #777;border-radius:4px;background:#fff;color:#000;font-size:13px;font-weight:bold;cursor:pointer';
-    hour.style.cssText=css;
-    minute.style.cssText=css;
+    hour.innerHTML='<option value="">--</option>'+HOURS.map(v=>`<option value="${v}">${v}</option>`).join('');
+    minute.innerHTML='<option value="">--</option>'+MINUTES.map(v=>`<option value="${v}">${v}</option>`).join('');
+    hour.style.cssText=selectCSS;
+    minute.style.cssText=selectCSS;
 
     const v=saved[i];
     if(v){
@@ -569,14 +655,17 @@ function makePriorityControls(){
       minute.value=m==='--'?'':m;
     }
 
-    hour.addEventListener('change',savePriorityTimes);
+    hour.addEventListener('change',()=>priorityHourChanged(i));
     minute.addEventListener('change',savePriorityTimes);
 
     row.append(label,hour,minute);
     box.appendChild(row);
-    priorityRows.push({hour,minute});
+    priorityRows.push({row,label,hour,minute});
   }
-  return box;
+
+  shadow.appendChild(box);
+  updatePriorityRows();
+  return host;
 }
 
 function makeButton(text,bg,handler){
@@ -597,6 +686,7 @@ function createPanel(){
 
   autoButton=makeButton('自動OFF','#777',()=>{
     autoEnabled=!autoEnabled;
+
     if(autoEnabled){
       scheduleNextFire();
       startCountdown();
@@ -606,6 +696,7 @@ function createPanel(){
       nextFireAt=0;
       stopCountdown();
     }
+
     updateAutoButtonBg();
     pending.size?updatePending():updateCountdown();
   });
@@ -616,7 +707,7 @@ function createPanel(){
     updateVacancyButton();
   });
 
-  const priority=makePriorityControls();
+  const priorityControls=makePriorityControls();
 
   autoConfirmButton=makeButton('確定 OFF','#777',()=>{
     autoConfirmEnabled=!autoConfirmEnabled;
@@ -627,12 +718,13 @@ function createPanel(){
       const c=getSelectedTimeInfo();
       lastObservedCurrentSignature=c?c.signature:'';
     }
+
     updateAutoConfirmButton();
   });
 
-  const manual=makeButton('1名','#198754',manualReload);
+  const manualButton=makeButton('1名','#198754',manualReload);
 
-  panel.append(autoButton,vacancySelectButton,priority,autoConfirmButton,manual);
+  panel.append(autoButton,vacancySelectButton,priorityControls,autoConfirmButton,manualButton);
   document.body.appendChild(panel);
 
   updateVacancyButton();
@@ -646,10 +738,8 @@ function createPanel(){
   console.log(`[TDR TravelBag] v${VERSION} パネル起動`);
 }
 
-if(document.readyState==='loading')
-  document.addEventListener('DOMContentLoaded',createPanel,{once:true});
-else
-  createPanel();
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',createPanel,{once:true});
+else createPanel();
 
 console.log(`[TDR TravelBag] v${VERSION} 通信監視起動`);
 })();
