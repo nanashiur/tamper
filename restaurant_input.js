@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.06
+// @version      1.07
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -15,21 +15,19 @@
 
   const SCRIPT_NAME = 'ℹ️レストラン予約情報入力';
   const STORAGE_KEY_NOTIFY = 'tdr_restaurant_input_notify_enabled';
+  const STORAGE_KEY_NOTIFY_DATE = 'tdr_restaurant_input_notify_date';
   const PHONE_FALLBACK = '090';
 
-  const PHASE_MAIN = 'main';
-  const PHASE_1 = '1';
-
-  let timerPhase = PHASE_MAIN;
-  let timerEndAt = Date.now() + getPhaseMs(PHASE_MAIN);
+  let timerEndAt = Date.now() + getCountdownMs();
   let countdownTimer = null;
+  let countdownEnabled = true;
   let notifiedThisPage = false;
   let errorNotifiedThisPage = false;
   let autoAgreeRunning = false;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  console.log(`[${SCRIPT_NAME}] v1.06 起動`);
+  console.log(`[${SCRIPT_NAME}] v1.07 起動: ${getCountdownMinutes()}分`);
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
@@ -43,38 +41,58 @@
     return phone || PHONE_FALLBACK;
   }
 
-  function getMainPhaseMinutes() {
+  function getCountdownMinutes() {
     return location.pathname.includes('/restaurant/input/indexBack') ? 5 : 20;
   }
 
-  function getPhaseMs(phase) {
-    return phase === PHASE_1
-      ? 1 * 60 * 1000
-      : getMainPhaseMinutes() * 60 * 1000;
+  function getCountdownMs() {
+    return getCountdownMinutes() * 60 * 1000;
+  }
+
+  function getTodayKey() {
+    const d = new Date();
+
+    return [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0')
+    ].join('');
   }
 
   function getNotifyEnabled() {
+    const today = getTodayKey();
+    const savedDate = localStorage.getItem(STORAGE_KEY_NOTIFY_DATE);
+
+    if (savedDate !== today) {
+      localStorage.setItem(STORAGE_KEY_NOTIFY, '1');
+      localStorage.setItem(STORAGE_KEY_NOTIFY_DATE, today);
+      return true;
+    }
+
     const v = localStorage.getItem(STORAGE_KEY_NOTIFY);
     return v === null ? true : v === '1';
   }
 
   function setNotifyEnabled(enabled) {
     localStorage.setItem(STORAGE_KEY_NOTIFY, enabled ? '1' : '0');
+    localStorage.setItem(STORAGE_KEY_NOTIFY_DATE, getTodayKey());
   }
 
-  function resetTimerPhase(phase) {
-    timerPhase = phase;
-    timerEndAt = Date.now() + getPhaseMs(phase);
+  function resetTimer() {
+    timerEndAt = Date.now() + getCountdownMs();
   }
 
-  function toggleTimer() {
-    resetTimerPhase(timerPhase === PHASE_MAIN ? PHASE_1 : PHASE_MAIN);
+  function toggleCountdown() {
+    countdownEnabled = !countdownEnabled;
+
+    if (countdownEnabled) {
+      resetTimer();
+      console.log(`[${SCRIPT_NAME}] カウントON`);
+    } else {
+      console.log(`[${SCRIPT_NAME}] カウントOFF`);
+    }
+
     updateCountdownPanel();
-
-    console.log(
-      `[${SCRIPT_NAME}] カウントダウン切替:`,
-      timerPhase === PHASE_MAIN ? `${getMainPhaseMinutes()}分` : '1分'
-    );
   }
 
   function normalize(s) {
@@ -192,7 +210,7 @@
     panel.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
-      toggleTimer();
+      toggleCountdown();
     });
 
     document.body.appendChild(panel);
@@ -203,16 +221,20 @@
     const panel = createCountdownPanel();
     if (!panel) return;
 
+    if (!countdownEnabled) {
+      panel.textContent = 'OFF';
+      panel.title = 'カウントOFF / クリックでON';
+      panel.style.background = 'rgba(0,0,0,.45)';
+      panel.style.color = '#fff';
+      return;
+    }
+
     const remainMs = Math.max(0, timerEndAt - Date.now());
+    const min = getCountdownMinutes();
 
     panel.textContent = formatRemain(remainMs);
-    panel.title = timerPhase === PHASE_MAIN
-      ? `${getMainPhaseMinutes()}分カウントダウン中 / クリックで1分へ`
-      : `1分カウントダウン中 / クリックで${getMainPhaseMinutes()}分へ`;
-
-    panel.style.background = timerPhase === PHASE_1
-      ? 'rgba(180,0,0,.88)'
-      : 'rgba(0,0,0,.82)';
+    panel.title = `${min}分後に次へ進む / クリックでOFF`;
+    panel.style.background = 'rgba(0,0,0,.82)';
     panel.style.color = '#fff';
   }
 
@@ -330,7 +352,8 @@
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        keepalive: true
       });
 
       console.log(`[${SCRIPT_NAME}] Discord通知送信:`, res.status);
@@ -375,7 +398,8 @@
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        keepalive: true
       });
 
       console.log(`[${SCRIPT_NAME}] エラー画面Discord通知送信:`, res.status);
@@ -556,6 +580,11 @@
     if (autoAgreeRunning) return;
     autoAgreeRunning = true;
 
+    if (!countdownEnabled) {
+      autoAgreeRunning = false;
+      return;
+    }
+
     const cb = findAgreeCheckbox();
     const next = findNextButton();
 
@@ -566,10 +595,6 @@
     }
 
     const data = parseRestaurantInfo();
-
-    if (data && !data.error && getNotifyEnabled()) {
-      await notifyDiscord(data, `${getMainPhaseMinutes()}分経過`);
-    }
 
     autoFillPhoneNumber();
 
@@ -582,6 +607,10 @@
 
       const btn = findNextButton();
       if (btn && !isButtonDisabled(btn)) {
+        if (data && !data.error && getNotifyEnabled()) {
+          await notifyDiscord(data, `${getCountdownMinutes()}分経過`);
+        }
+
         console.log(`[${SCRIPT_NAME}] 自動で次へ進みます`);
         btn.click();
         return;
@@ -609,6 +638,11 @@
       return;
     }
 
+    if (!countdownEnabled) {
+      updateCountdownPanel();
+      return;
+    }
+
     const remainMs = timerEndAt - Date.now();
 
     if (remainMs > 0) {
@@ -616,15 +650,9 @@
       return;
     }
 
-    if (timerPhase === PHASE_MAIN) {
-      console.log(`[${SCRIPT_NAME}] ${getMainPhaseMinutes()}分終了。1分カウントダウンへ移行`);
-      resetTimerPhase(PHASE_1);
-      updateCountdownPanel();
-      return;
-    }
+    console.log(`[${SCRIPT_NAME}] ${getCountdownMinutes()}分終了。自動で次へ進みます`);
 
-    console.log(`[${SCRIPT_NAME}] 1分終了。自動進行して${getMainPhaseMinutes()}分カウントダウンへ戻ります`);
-    resetTimerPhase(PHASE_MAIN);
+    resetTimer();
     updateCountdownPanel();
     autoAgreeAndNext();
   }
@@ -633,7 +661,7 @@
     if (countdownTimer) return;
     if (!isAgreeScreen()) return;
 
-    resetTimerPhase(PHASE_MAIN);
+    resetTimer();
     updateCountdownPanel();
 
     countdownTimer = setInterval(handleCountdownTick, 500);
