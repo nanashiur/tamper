@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      1.95
+// @version      1.96
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -18,12 +18,10 @@
   const LAST_ROOMINFO_KEY = 'tdr_roominfo_last_data';
   const STORAGE_TIMER_TRIGGER_TIME_KEY = 'tdr_11am_timer_trigger_time';
 
-  const COUNTDOWN_MS = 5 * 60 * 1000;
-
   const COLOR_NORMAL = 0x00ff66;
   const COLOR_ERROR = 0xffcc00;
 
-  let timerEndAt = Date.now() + COUNTDOWN_MS;
+  let timerEndAt = Date.now() + getCountdownMs();
   let countdownTimer = null;
   let notifiedThisPage = false;
   let errorNotifiedThisPage = false;
@@ -34,7 +32,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v1.95 起動:', PAGE_MODE);
+  console.log('[ℹ️客室情報画面] v1.96 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
 
   function getPageMode() {
     const path = location.pathname.replace(/\/+$/, '');
@@ -48,6 +46,24 @@
 
   function getCurrentPath() {
     return location.pathname.replace(/\/+$/, '');
+  }
+
+  function getCountdownMinutes() {
+    const path = getCurrentPath();
+
+    if (path === '/online/sp/wv/roominfo') return 20;
+    if (path === '/online/sp/wv/roominfo/next') return 5;
+    if (path === '/online/sp/wv/roominfo/back') return 5;
+
+    return 5;
+  }
+
+  function getCountdownMs() {
+    return getCountdownMinutes() * 60 * 1000;
+  }
+
+  function getElapsedNote() {
+    return `${getCountdownMinutes()}分経過`;
   }
 
   function canAutoPressBack() {
@@ -78,7 +94,7 @@
   }
 
   function resetTimer() {
-    timerEndAt = Date.now() + COUNTDOWN_MS;
+    timerEndAt = Date.now() + getCountdownMs();
   }
 
   function normalize(s) {
@@ -223,11 +239,12 @@
     if (!panel) return;
 
     const remainMs = Math.max(0, timerEndAt - Date.now());
+    const min = getCountdownMinutes();
 
     panel.textContent = formatRemain(remainMs);
     panel.title = PAGE_MODE === 'next'
-      ? '5分後に戻る'
-      : '5分後に次へ進む';
+      ? `${min}分後に戻る`
+      : `${min}分後に次へ進む`;
 
     panel.style.background = PAGE_MODE === 'next'
       ? 'rgba(180,0,0,.88)'
@@ -376,12 +393,6 @@
     errorNotifiedThisPage = true;
 
     console.warn('[ℹ️客室情報画面] エラーページを検出');
-
-    if (!getNotifyEnabled()) {
-      console.log('[ℹ️客室情報画面] 通知OFFのためエラー通知を送信しません');
-      return;
-    }
-
     notifyDiscord(makeStoredRoomInfo(), 'エラー', COLOR_ERROR, 'start');
   }
 
@@ -470,7 +481,7 @@
     if (!getNotifyEnabled()) return;
 
     autoAdvanceNotified = true;
-    await notifyDiscord(getRoomInfoForNotification(), '5分経過', COLOR_NORMAL, 'move');
+    await notifyDiscord(getRoomInfoForNotification(), getElapsedNote(), COLOR_NORMAL, 'move');
   }
 
   async function autoAction() {
@@ -568,8 +579,8 @@
 
     console.log(
       PAGE_MODE === 'next'
-        ? '[ℹ️客室情報画面] 5分終了。自動で戻ります'
-        : '[ℹ️客室情報画面] 5分終了。自動で次へ進みます'
+        ? `[ℹ️客室情報画面] ${getCountdownMinutes()}分終了。自動で戻ります`
+        : `[ℹ️客室情報画面] ${getCountdownMinutes()}分終了。自動で次へ進みます`
     );
 
     resetTimer();
