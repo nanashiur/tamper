@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.20
+// @version      1.21
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.20', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.21', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -269,7 +269,7 @@ function endPending(id){
 }
 
 const isTimeGet=url=>/timeGet/i.test(String(url||''));
-const isPurchase=url=>/\/purchase(?:\/|$|\?)/i.test(String(url||''));
+const isPurchase=url=>/\/(?:privilege)?purchase(?:\/|$|\?)/i.test(String(url||''));
 
 function absUrl(url){
   try{ return new URL(String(url||''),location.href).toString(); }
@@ -346,6 +346,7 @@ function parseResponse(r){
 }
 function printTimeGet(source,url,response,body){
   let data;
+
   try{ data=parseResponse(response); }
   catch(e){
     console.warn('[TB timeGet] JSON解析失敗',{source,url:absUrl(url),response});
@@ -406,12 +407,7 @@ function getVacancyCandidates(data){
     if(commodityCD&&time) all.push({commodityCD,time,openNumKey});
   }
 
-  all.sort((a,b)=>
-    priorityRank(a.time,ps)-priorityRank(b.time,ps)||
-    a.time.localeCompare(b.time)||
-    a.commodityCD.localeCompare(b.commodityCD)
-  );
-
+  all.sort((a,b)=>priorityRank(a.time,ps)-priorityRank(b.time,ps)||a.time.localeCompare(b.time)||a.commodityCD.localeCompare(b.commodityCD));
   return vacancySelectMode===1?all.filter(x=>priorityRank(x.time,ps)<ps.length):all;
 }
 function clickVacancy(candidates){
