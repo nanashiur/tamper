@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️仮予約ログインバック
-// @version      1.02
+// @version      1.03
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/login/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
@@ -55,33 +55,42 @@ let fired = false;
 const panel = document.createElement('div');
 Object.assign(panel.style, {
     position: 'fixed',
-    top: '50px',
-    right: '10px',
-    zIndex: '999999',
-    minWidth: '82px',
-    padding: '8px 12px',
-    textAlign: 'center',
+    right: '6px',
+    top: '96px',
+    zIndex: '2147483647',
+    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,sans-serif',
+    fontSize: '15px',
+    fontWeight: '900',
+    lineHeight: '1',
+    padding: '5px 7px',
+    borderRadius: '7px',
     background: '#e65100',
     color: '#fff',
-    fontSize: '16px',
-    fontWeight: 'bold',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    userSelect: 'none'
+    boxShadow: '0 1px 6px rgba(0,0,0,.35)',
+    textAlign: 'center',
+    minWidth: '42px',
+    userSelect: 'none',
+    cursor: 'pointer'
 });
 document.body.appendChild(panel);
 
 panel.addEventListener('click', () => {
     enabled = !enabled;
     fired = false;
-    if (enabled) deadline = Date.now() + WAIT;
+
+    if (enabled) {
+        deadline = Date.now() + WAIT;
+    }
+
     update();
 });
 
 function update() {
     if (!enabled) {
         panel.textContent = 'OFF';
-        panel.style.background = '#777';
+        panel.title = 'カウントOFF / クリックでON';
+        panel.style.background = 'rgba(0,0,0,.45)';
+        panel.style.color = '#fff';
         return;
     }
 
@@ -90,11 +99,14 @@ function update() {
     const min = Math.floor(sec / 60);
     const s = String(sec % 60).padStart(2, '0');
 
-    panel.textContent = `ON ${min}:${s}`;
+    panel.textContent = `${min}:${s}`;
+    panel.title = '5分後に戻る / クリックでOFF';
     panel.style.background = '#e65100';
+    panel.style.color = '#fff';
 
     if (remain <= 0 && !fired) {
         const back = document.querySelector('p.btnBack.headerBack');
+
         if (back) {
             fired = true;
             panel.textContent = '戻る';
