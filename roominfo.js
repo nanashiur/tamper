@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      1.84
+// @version      1.95
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -11,36 +11,58 @@
 (() => {
   'use strict';
 
-  if (!location.pathname.startsWith('/online/sp/wv/roominfo')) return;
+  const PAGE_MODE = getPageMode();
+  if (PAGE_MODE === 'other') return;
 
   const STORAGE_KEY_NOTIFY = 'tdr_roominfo_notify_enabled';
   const LAST_ROOMINFO_KEY = 'tdr_roominfo_last_data';
   const STORAGE_TIMER_TRIGGER_TIME_KEY = 'tdr_11am_timer_trigger_time';
 
-  const PHASE_25 = '25';
-  const PHASE_1 = '1';
-
-  const PHASE_MS = {
-    [PHASE_25]: 25 * 60 * 1000,
-    [PHASE_1]: 1 * 60 * 1000
-  };
+  const COUNTDOWN_MS = 5 * 60 * 1000;
 
   const COLOR_NORMAL = 0x00ff66;
   const COLOR_ERROR = 0xffcc00;
 
-  let timerPhase = PHASE_25;
-  let timerEndAt = Date.now() + PHASE_MS[PHASE_25];
+  let timerEndAt = Date.now() + COUNTDOWN_MS;
   let countdownTimer = null;
   let notifiedThisPage = false;
   let errorNotifiedThisPage = false;
-  let autoAgreeRunning = false;
+  let autoActionRunning = false;
   let autoAdvanceNotified = false;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v1.84 起動');
+  console.log('[ℹ️客室情報画面] v1.95 起動:', PAGE_MODE);
+
+  function getPageMode() {
+    const path = location.pathname.replace(/\/+$/, '');
+
+    if (path === '/online/sp/wv/roominfo/next') return 'next';
+    if (path === '/online/sp/wv/roominfo/back') return 'normal';
+    if (path === '/online/sp/wv/roominfo') return 'normal';
+
+    return 'other';
+  }
+
+  function getCurrentPath() {
+    return location.pathname.replace(/\/+$/, '');
+  }
+
+  function canAutoPressBack() {
+    return PAGE_MODE === 'next' &&
+      getCurrentPath() === '/online/sp/wv/roominfo/next';
+  }
+
+  function canAutoPressNext() {
+    const path = getCurrentPath();
+
+    return PAGE_MODE === 'normal' && (
+      path === '/online/sp/wv/roominfo' ||
+      path === '/online/sp/wv/roominfo/back'
+    );
+  }
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.hotel || '';
@@ -55,19 +77,8 @@
     localStorage.setItem(STORAGE_KEY_NOTIFY, enabled ? '1' : '0');
   }
 
-  function resetTimerPhase(phase) {
-    timerPhase = phase;
-    timerEndAt = Date.now() + PHASE_MS[phase];
-  }
-
-  function toggleTimer() {
-    resetTimerPhase(timerPhase === PHASE_25 ? PHASE_1 : PHASE_25);
-    updateCountdownPanel();
-
-    console.log(
-      '[ℹ️客室情報画面] カウントダウン切替:',
-      timerPhase === PHASE_25 ? '25分' : '1分'
-    );
+  function resetTimer() {
+    timerEndAt = Date.now() + COUNTDOWN_MS;
   }
 
   function normalize(s) {
@@ -200,15 +211,8 @@
       'box-shadow:0 1px 6px rgba(0,0,0,.35)',
       'text-align:center',
       'min-width:42px',
-      'user-select:none',
-      'cursor:pointer'
+      'user-select:none'
     ].join(';');
-
-    panel.addEventListener('click', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      toggleTimer();
-    });
 
     document.body.appendChild(panel);
     return panel;
@@ -221,11 +225,11 @@
     const remainMs = Math.max(0, timerEndAt - Date.now());
 
     panel.textContent = formatRemain(remainMs);
-    panel.title = timerPhase === PHASE_25
-      ? '25分カウントダウン中 / クリックで1分へ'
-      : '1分カウントダウン中 / クリックで25分へ';
+    panel.title = PAGE_MODE === 'next'
+      ? '5分後に戻る'
+      : '5分後に次へ進む';
 
-    panel.style.background = timerPhase === PHASE_1
+    panel.style.background = PAGE_MODE === 'next'
       ? 'rgba(180,0,0,.88)'
       : 'rgba(0,0,0,.82)';
     panel.style.color = '#fff';
@@ -290,14 +294,21 @@
     }
   }
 
-  function makeErrorRoomInfo() {
+  function makeStoredRoomInfo() {
     const last = getLastRoomInfo();
 
     return {
-      error: true,
       date: last.date || '日程取得不可',
       room: last.room || '客室取得不可'
     };
+  }
+
+  function getRoomInfoForNotification() {
+    const data = parseRoomInfo();
+
+    if (data?.date && data?.room) return data;
+
+    return makeStoredRoomInfo();
   }
 
   async function notifyDiscord(data, note = '', color = COLOR_NORMAL, mode = 'start') {
@@ -371,7 +382,7 @@
       return;
     }
 
-    notifyDiscord(makeErrorRoomInfo(), 'エラー', COLOR_ERROR, 'start');
+    notifyDiscord(makeStoredRoomInfo(), 'エラー', COLOR_ERROR, 'start');
   }
 
   function isVisible(el) {
@@ -401,9 +412,30 @@
     return matched || (getText().includes('同意する') ? boxes[0] : null);
   }
 
-  function findNextButton() {
+  function findNormalNextButton() {
+    if (!canAutoPressNext()) return null;
+
     return [...document.querySelectorAll('a,button,input[type="button"],input[type="submit"]')]
       .find(el => normalize(el.innerText || el.value || '').includes('次へ進む') && isVisible(el));
+  }
+
+  function findNextModeBackButton() {
+    if (!canAutoPressBack()) return null;
+
+    const primary = document.querySelector('a.back.prevSubmit.ui-link');
+
+    if (primary && normalize(primary.innerText || primary.value || '').includes('戻る') && isVisible(primary)) {
+      return primary;
+    }
+
+    return [...document.querySelectorAll('a,button,input[type="button"],input[type="submit"]')]
+      .find(el => normalize(el.innerText || el.value || '').includes('戻る') && isVisible(el));
+  }
+
+  function findActionButton() {
+    return PAGE_MODE === 'next'
+      ? findNextModeBackButton()
+      : findNormalNextButton();
   }
 
   function isButtonDisabled(el) {
@@ -437,23 +469,51 @@
     if (autoAdvanceNotified) return;
     if (!getNotifyEnabled()) return;
 
-    const data = parseRoomInfo();
-    if (!data?.date || !data?.room) return;
-
     autoAdvanceNotified = true;
-    await notifyDiscord(data, '25分経過', COLOR_NORMAL, 'move');
+    await notifyDiscord(getRoomInfoForNotification(), '5分経過', COLOR_NORMAL, 'move');
   }
 
-  async function autoAgreeAndNext() {
-    if (autoAgreeRunning) return;
-    autoAgreeRunning = true;
+  async function autoAction() {
+    if (autoActionRunning) return;
+    autoActionRunning = true;
+
+    if (PAGE_MODE === 'next') {
+      if (!canAutoPressBack()) {
+        console.warn('[ℹ️客室情報画面] 安全停止: nextモード以外では自動で戻るを押しません');
+        autoActionRunning = false;
+        return;
+      }
+
+      for (let i = 0; i < 20; i++) {
+        const btn = findNextModeBackButton();
+
+        if (btn && !isButtonDisabled(btn)) {
+          await notifyAutoAdvance();
+          console.log('[ℹ️客室情報画面] nextモード: 自動で戻ります');
+          btn.click();
+          return;
+        }
+
+        await sleep(250);
+      }
+
+      console.warn('[ℹ️客室情報画面] nextモードの戻るボタンが見つかりません');
+      autoActionRunning = false;
+      return;
+    }
+
+    if (!canAutoPressNext()) {
+      console.warn('[ℹ️客室情報画面] 安全停止: 通常モード以外では自動で次へ進みません');
+      autoActionRunning = false;
+      return;
+    }
 
     const cb = findAgreeCheckbox();
-    const next = findNextButton();
+    const next = findNormalNextButton();
 
     if (!cb || !next) {
       console.warn('[ℹ️客室情報画面] 同意チェックまたは次へ進むボタンが見つかりません');
-      autoAgreeRunning = false;
+      autoActionRunning = false;
       return;
     }
 
@@ -464,7 +524,7 @@
     for (let i = 0; i < 20; i++) {
       await sleep(250);
 
-      const btn = findNextButton();
+      const btn = findNormalNextButton();
       if (btn && !isButtonDisabled(btn)) {
         await notifyAutoAdvance();
         console.log('[ℹ️客室情報画面] 自動で次へ進みます');
@@ -474,22 +534,27 @@
     }
 
     console.warn('[ℹ️客室情報画面] 次へ進むボタンが有効化されませんでした');
-    autoAgreeRunning = false;
+    autoActionRunning = false;
   }
 
-  function isAgreeScreen() {
+  function isCountdownTargetScreen() {
     const text = getText();
 
+    if (PAGE_MODE === 'next') {
+      return canAutoPressBack() && !!findNextModeBackButton();
+    }
+
     return (
+      canAutoPressNext() &&
       text.includes('同意する') &&
       text.includes('次へ進む') &&
       findAgreeCheckbox() &&
-      findNextButton()
+      findNormalNextButton()
     );
   }
 
   function handleCountdownTick() {
-    if (!isAgreeScreen()) {
+    if (!isCountdownTargetScreen()) {
       removeCountdownPanel();
       return;
     }
@@ -501,24 +566,22 @@
       return;
     }
 
-    if (timerPhase === PHASE_25) {
-      console.log('[ℹ️客室情報画面] 25分終了。1分カウントダウンへ移行');
-      resetTimerPhase(PHASE_1);
-      updateCountdownPanel();
-      return;
-    }
+    console.log(
+      PAGE_MODE === 'next'
+        ? '[ℹ️客室情報画面] 5分終了。自動で戻ります'
+        : '[ℹ️客室情報画面] 5分終了。自動で次へ進みます'
+    );
 
-    console.log('[ℹ️客室情報画面] 1分終了。自動進行して25分カウントダウンへ戻ります');
-    resetTimerPhase(PHASE_25);
+    resetTimer();
     updateCountdownPanel();
-    autoAgreeAndNext();
+    autoAction();
   }
 
   function startCountdownWatcher() {
     if (countdownTimer) return;
-    if (!isAgreeScreen()) return;
+    if (!isCountdownTargetScreen()) return;
 
-    resetTimerPhase(PHASE_25);
+    resetTimer();
     updateCountdownPanel();
 
     countdownTimer = setInterval(handleCountdownTick, 500);
