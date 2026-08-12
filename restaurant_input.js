@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.05
+// @version      1.06
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -17,23 +17,19 @@
   const STORAGE_KEY_NOTIFY = 'tdr_restaurant_input_notify_enabled';
   const PHONE_FALLBACK = '090';
 
-  const PHASE_25 = '25';
+  const PHASE_MAIN = 'main';
   const PHASE_1 = '1';
 
-  const PHASE_MS = {
-    [PHASE_25]: 25 * 60 * 1000,
-    [PHASE_1]: 1 * 60 * 1000
-  };
-
-  let timerPhase = PHASE_25;
-  let timerEndAt = Date.now() + PHASE_MS[PHASE_25];
+  let timerPhase = PHASE_MAIN;
+  let timerEndAt = Date.now() + getPhaseMs(PHASE_MAIN);
   let countdownTimer = null;
   let notifiedThisPage = false;
+  let errorNotifiedThisPage = false;
   let autoAgreeRunning = false;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  console.log(`[${SCRIPT_NAME}] v1.05 起動`);
+  console.log(`[${SCRIPT_NAME}] v1.06 起動`);
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
@@ -47,6 +43,16 @@
     return phone || PHONE_FALLBACK;
   }
 
+  function getMainPhaseMinutes() {
+    return location.pathname.includes('/restaurant/input/indexBack') ? 5 : 20;
+  }
+
+  function getPhaseMs(phase) {
+    return phase === PHASE_1
+      ? 1 * 60 * 1000
+      : getMainPhaseMinutes() * 60 * 1000;
+  }
+
   function getNotifyEnabled() {
     const v = localStorage.getItem(STORAGE_KEY_NOTIFY);
     return v === null ? true : v === '1';
@@ -58,16 +64,16 @@
 
   function resetTimerPhase(phase) {
     timerPhase = phase;
-    timerEndAt = Date.now() + PHASE_MS[phase];
+    timerEndAt = Date.now() + getPhaseMs(phase);
   }
 
   function toggleTimer() {
-    resetTimerPhase(timerPhase === PHASE_25 ? PHASE_1 : PHASE_25);
+    resetTimerPhase(timerPhase === PHASE_MAIN ? PHASE_1 : PHASE_MAIN);
     updateCountdownPanel();
 
     console.log(
       `[${SCRIPT_NAME}] カウントダウン切替:`,
-      timerPhase === PHASE_25 ? '25分' : '1分'
+      timerPhase === PHASE_MAIN ? `${getMainPhaseMinutes()}分` : '1分'
     );
   }
 
@@ -87,6 +93,9 @@
   function isErrorPage(text) {
     return (
       text.includes('まことに申し訳ございません') ||
+      text.includes('処理に失敗しました') ||
+      text.includes('ＴＯＰページから再度お手続きをお願いします') ||
+      text.includes('TOPページから再度お手続きをお願いします') ||
       text.includes('処理を中断させていただきました') ||
       text.includes('はじめからお手続きをお願いします')
     );
@@ -197,9 +206,9 @@
     const remainMs = Math.max(0, timerEndAt - Date.now());
 
     panel.textContent = formatRemain(remainMs);
-    panel.title = timerPhase === PHASE_25
-      ? '25分カウントダウン中 / クリックで1分へ'
-      : '1分カウントダウン中 / クリックで25分へ';
+    panel.title = timerPhase === PHASE_MAIN
+      ? `${getMainPhaseMinutes()}分カウントダウン中 / クリックで1分へ`
+      : `1分カウントダウン中 / クリックで${getMainPhaseMinutes()}分へ`;
 
     panel.style.background = timerPhase === PHASE_1
       ? 'rgba(180,0,0,.88)'
@@ -328,6 +337,50 @@
     } catch (e) {
       console.warn(`[${SCRIPT_NAME}] Discord通知失敗:`, e);
       console.warn(`[${SCRIPT_NAME}] fetchで失敗しました。必要な場合のみGM_xmlhttpRequest版に切り替えてください。`);
+    }
+  }
+
+  async function notifyErrorDiscord() {
+    const webhookUrl = getDiscordWebhookUrl();
+
+    if (!webhookUrl) {
+      console.warn(`[${SCRIPT_NAME}] Discord Webhook未設定: window.TDR_WEBHOOKS.restaurant が見つかりません`);
+      return;
+    }
+
+    const payload = {
+      username: SCRIPT_NAME,
+      embeds: [
+        {
+          description: [
+            '**エラー画面を検知**',
+            '',
+            'まことに申し訳ございません。',
+            '処理に失敗しました。',
+            'TOPページから再度お手続きをお願いします。',
+            '',
+            `path: ${location.pathname}`
+          ].join('\n'),
+          color: 0xff0000
+        }
+      ],
+      allowed_mentions: {
+        parse: []
+      }
+    };
+
+    try {
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      console.log(`[${SCRIPT_NAME}] エラー画面Discord通知送信:`, res.status);
+    } catch (e) {
+      console.warn(`[${SCRIPT_NAME}] エラー画面Discord通知失敗:`, e);
     }
   }
 
@@ -515,7 +568,7 @@
     const data = parseRestaurantInfo();
 
     if (data && !data.error && getNotifyEnabled()) {
-      await notifyDiscord(data, '25分経過');
+      await notifyDiscord(data, `${getMainPhaseMinutes()}分経過`);
     }
 
     autoFillPhoneNumber();
@@ -563,15 +616,15 @@
       return;
     }
 
-    if (timerPhase === PHASE_25) {
-      console.log(`[${SCRIPT_NAME}] 25分終了。1分カウントダウンへ移行`);
+    if (timerPhase === PHASE_MAIN) {
+      console.log(`[${SCRIPT_NAME}] ${getMainPhaseMinutes()}分終了。1分カウントダウンへ移行`);
       resetTimerPhase(PHASE_1);
       updateCountdownPanel();
       return;
     }
 
-    console.log(`[${SCRIPT_NAME}] 1分終了。自動進行して25分カウントダウンへ戻ります`);
-    resetTimerPhase(PHASE_25);
+    console.log(`[${SCRIPT_NAME}] 1分終了。自動進行して${getMainPhaseMinutes()}分カウントダウンへ戻ります`);
+    resetTimerPhase(PHASE_MAIN);
     updateCountdownPanel();
     autoAgreeAndNext();
   }
@@ -580,7 +633,7 @@
     if (countdownTimer) return;
     if (!isAgreeScreen()) return;
 
-    resetTimerPhase(PHASE_25);
+    resetTimerPhase(PHASE_MAIN);
     updateCountdownPanel();
 
     countdownTimer = setInterval(handleCountdownTick, 500);
@@ -590,7 +643,11 @@
     const data = parseRestaurantInfo();
 
     if (data?.error) {
-      console.warn(`[${SCRIPT_NAME}] エラー画面のため通知しません`);
+      if (!errorNotifiedThisPage) {
+        errorNotifiedThisPage = true;
+        console.warn(`[${SCRIPT_NAME}] エラー画面を検知。強制通知します`);
+        notifyErrorDiscord();
+      }
       return;
     }
 
