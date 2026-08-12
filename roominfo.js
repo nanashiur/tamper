@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      1.96
+// @version      2.06
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -23,6 +23,7 @@
 
   let timerEndAt = Date.now() + getCountdownMs();
   let countdownTimer = null;
+  let countdownEnabled = true;
   let notifiedThisPage = false;
   let errorNotifiedThisPage = false;
   let autoActionRunning = false;
@@ -32,7 +33,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v1.96 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
+  console.log('[ℹ️客室情報画面] v2.06 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
 
   function getPageMode() {
     const path = location.pathname.replace(/\/+$/, '');
@@ -95,6 +96,19 @@
 
   function resetTimer() {
     timerEndAt = Date.now() + getCountdownMs();
+  }
+
+  function toggleCountdown() {
+    countdownEnabled = !countdownEnabled;
+
+    if (countdownEnabled) {
+      resetTimer();
+      console.log('[ℹ️客室情報画面] カウントON');
+    } else {
+      console.log('[ℹ️客室情報画面] カウントOFF');
+    }
+
+    updateCountdownPanel();
   }
 
   function normalize(s) {
@@ -227,8 +241,15 @@
       'box-shadow:0 1px 6px rgba(0,0,0,.35)',
       'text-align:center',
       'min-width:42px',
-      'user-select:none'
+      'user-select:none',
+      'cursor:pointer'
     ].join(';');
+
+    panel.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleCountdown();
+    });
 
     document.body.appendChild(panel);
     return panel;
@@ -238,13 +259,21 @@
     const panel = createCountdownPanel();
     if (!panel) return;
 
+    if (!countdownEnabled) {
+      panel.textContent = 'OFF';
+      panel.title = 'カウントOFF / クリックでON';
+      panel.style.background = 'rgba(0,0,0,.45)';
+      panel.style.color = '#fff';
+      return;
+    }
+
     const remainMs = Math.max(0, timerEndAt - Date.now());
     const min = getCountdownMinutes();
 
     panel.textContent = formatRemain(remainMs);
     panel.title = PAGE_MODE === 'next'
-      ? `${min}分後に戻る`
-      : `${min}分後に次へ進む`;
+      ? `${min}分後に戻る / クリックでOFF`
+      : `${min}分後に次へ進む / クリックでOFF`;
 
     panel.style.background = PAGE_MODE === 'next'
       ? 'rgba(180,0,0,.88)'
@@ -488,6 +517,11 @@
     if (autoActionRunning) return;
     autoActionRunning = true;
 
+    if (!countdownEnabled) {
+      autoActionRunning = false;
+      return;
+    }
+
     if (PAGE_MODE === 'next') {
       if (!canAutoPressBack()) {
         console.warn('[ℹ️客室情報画面] 安全停止: nextモード以外では自動で戻るを押しません');
@@ -567,6 +601,11 @@
   function handleCountdownTick() {
     if (!isCountdownTargetScreen()) {
       removeCountdownPanel();
+      return;
+    }
+
+    if (!countdownEnabled) {
+      updateCountdownPanel();
       return;
     }
 
