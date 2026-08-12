@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️仮予約ログインバック
-// @version      1.01
+// @version      1.02
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/login/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
@@ -10,6 +10,40 @@
 
 (() => {
 'use strict';
+
+let errorNotified = false;
+
+function checkError() {
+    if (errorNotified || !document.body?.innerText.includes('まことに申し訳ございません。')) return;
+
+    errorNotified = true;
+
+    const webhook = window.TDR_WEBHOOKS?.hotel;
+    if (!webhook) {
+        console.error('[仮予約ログインバック] Webhook取得失敗');
+        return;
+    }
+
+    fetch(webhook, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            embeds: [{
+                title: '⚠️ 仮予約ログインエラー',
+                description: '「まことに申し訳ございません。」画面を検知しました。',
+                color: 15094016
+            }]
+        })
+    }).catch(e => console.error('[仮予約ログインバック] 通知失敗', e));
+}
+
+checkError();
+
+new MutationObserver(checkError).observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true
+});
 
 if (!new URLSearchParams(location.search).has('receiptNO')) return;
 
