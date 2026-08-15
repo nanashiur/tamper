@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️仮予約ログインバック
-// @version      1.03
+// @version      1.04
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/login/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
@@ -11,30 +11,91 @@
 (() => {
 'use strict';
 
+const SCRIPT_NAME = 'ℹ️仮予約ログインバック';
+const RECEIPT_KEY = 'tdr_login_receipt_no';
+const WAIT = 5 * 60 * 1000;
+
 let errorNotified = false;
 
-function checkError() {
-    if (errorNotified || !document.body?.innerText.includes('まことに申し訳ございません。')) return;
+const currentReceiptNO = new URLSearchParams(location.search).get('receiptNO');
+
+if (currentReceiptNO) {
+    sessionStorage.setItem(RECEIPT_KEY, currentReceiptNO);
+}
+
+function getReceiptNO() {
+    return new URLSearchParams(location.search).get('receiptNO')
+        || sessionStorage.getItem(RECEIPT_KEY)
+        || '不明';
+}
+
+async function getPublicIp() {
+    try {
+        const res = await fetch('https://api.ipify.org?format=json');
+
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        return data.ip || '取得失敗';
+    } catch (e) {
+        console.warn(`[${SCRIPT_NAME}] IP取得失敗:`, e);
+        return '取得失敗';
+    }
+}
+
+async function checkError() {
+    if (
+        errorNotified ||
+        !document.body?.innerText.includes('まことに申し訳ございません。')
+    ) {
+        return;
+    }
 
     errorNotified = true;
 
     const webhook = window.TDR_WEBHOOKS?.hotel;
+
     if (!webhook) {
-        console.error('[仮予約ログインバック] Webhook取得失敗');
+        console.error(`[${SCRIPT_NAME}] Webhook取得失敗`);
         return;
     }
 
-    fetch(webhook, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            embeds: [{
-                title: '⚠️ 仮予約ログインエラー',
-                description: '「まことに申し訳ございません。」画面を検知しました。',
-                color: 15094016
-            }]
-        })
-    }).catch(e => console.error('[仮予約ログインバック] 通知失敗', e));
+    const ip = await getPublicIp();
+    const receiptNO = getReceiptNO();
+
+    const payload = {
+        username: SCRIPT_NAME,
+        embeds: [{
+            title: '⚠️ 仮予約ログインエラー',
+            description: [
+                '「まことに申し訳ございません。」画面を検知しました。',
+                '',
+                `IP：${ip}`,
+                `receiptNO：${receiptNO}`
+            ].join('\n'),
+            color: 15094016
+        }],
+        allowed_mentions: {
+            parse: []
+        }
+    };
+
+    try {
+        const res = await fetch(webhook, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload),
+            keepalive: true
+        });
+
+        console.log(`[${SCRIPT_NAME}] エラー通知送信:`, res.status);
+    } catch (e) {
+        console.error(`[${SCRIPT_NAME}] エラー通知失敗:`, e);
+    }
 }
 
 checkError();
@@ -45,9 +106,8 @@ new MutationObserver(checkError).observe(document.body, {
     characterData: true
 });
 
-if (!new URLSearchParams(location.search).has('receiptNO')) return;
+if (!currentReceiptNO) return;
 
-const WAIT = 5 * 60 * 1000;
 let enabled = true;
 let deadline = Date.now() + WAIT;
 let fired = false;
@@ -72,6 +132,7 @@ Object.assign(panel.style, {
     userSelect: 'none',
     cursor: 'pointer'
 });
+
 document.body.appendChild(panel);
 
 panel.addEventListener('click', () => {
@@ -117,4 +178,5 @@ function update() {
 
 update();
 setInterval(update, 200);
+
 })();
