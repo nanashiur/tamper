@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      2.06
+// @version      2.27
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -14,7 +14,11 @@
   const PAGE_MODE = getPageMode();
   if (PAGE_MODE === 'other') return;
 
+  if (window.__tdr_roominfo_installed) return;
+  window.__tdr_roominfo_installed = true;
+
   const STORAGE_KEY_NOTIFY = 'tdr_roominfo_notify_enabled';
+  const STORAGE_KEY_NOTIFY_DATE = 'tdr_roominfo_notify_date';
   const LAST_ROOMINFO_KEY = 'tdr_roominfo_last_data';
   const STORAGE_TIMER_TRIGGER_TIME_KEY = 'tdr_11am_timer_trigger_time';
 
@@ -27,13 +31,12 @@
   let notifiedThisPage = false;
   let errorNotifiedThisPage = false;
   let autoActionRunning = false;
-  let autoAdvanceNotified = false;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v2.06 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
+  console.log('[ℹ️客室情報画面] v2.27 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
 
   function getPageMode() {
     const path = location.pathname.replace(/\/+$/, '');
@@ -63,8 +66,14 @@
     return getCountdownMinutes() * 60 * 1000;
   }
 
-  function getElapsedNote() {
-    return `${getCountdownMinutes()}分経過`;
+  function getTodayKey() {
+    const d = new Date();
+
+    return [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0')
+    ].join('');
   }
 
   function canAutoPressBack() {
@@ -86,12 +95,22 @@
   }
 
   function getNotifyEnabled() {
+    const today = getTodayKey();
+    const savedDate = localStorage.getItem(STORAGE_KEY_NOTIFY_DATE);
+
+    if (savedDate !== today) {
+      localStorage.setItem(STORAGE_KEY_NOTIFY, '1');
+      localStorage.setItem(STORAGE_KEY_NOTIFY_DATE, today);
+      return true;
+    }
+
     const v = localStorage.getItem(STORAGE_KEY_NOTIFY);
     return v === null ? true : v === '1';
   }
 
   function setNotifyEnabled(enabled) {
     localStorage.setItem(STORAGE_KEY_NOTIFY, enabled ? '1' : '0');
+    localStorage.setItem(STORAGE_KEY_NOTIFY_DATE, getTodayKey());
   }
 
   function resetTimer() {
@@ -147,6 +166,34 @@
       (h === 10 && m === 59 && s >= 40) ||
       (h === 11 && m === 0 && s <= 40)
     );
+  }
+
+  function getLoadSuffix() {
+    return isStartTimeInLoadWindow()
+      ? `　（読込：${getLoadTimeText()}）`
+      : '';
+  }
+
+  function getOpenNotifyNote() {
+    const path = getCurrentPath();
+    const suffix = getLoadSuffix();
+
+    if (path === '/online/sp/wv/roominfo') {
+      return `仮予約 開始：${SCRIPT_START_TIME_TEXT}${suffix}`;
+    }
+
+    if (path === '/online/sp/wv/roominfo/back') {
+      return `仮予約 継続：${SCRIPT_START_TIME_TEXT}${suffix}`;
+    }
+
+    return '';
+  }
+
+  function getErrorNotifyLines() {
+    return [
+      'エラー',
+      `開始：${SCRIPT_START_TIME_TEXT}${getLoadSuffix()}`
+    ];
   }
 
   function isErrorPage(text) {
@@ -349,15 +396,7 @@
     };
   }
 
-  function getRoomInfoForNotification() {
-    const data = parseRoomInfo();
-
-    if (data?.date && data?.room) return data;
-
-    return makeStoredRoomInfo();
-  }
-
-  async function notifyDiscord(data, note = '', color = COLOR_NORMAL, mode = 'start') {
+  async function notifyDiscord(data, noteLines = '', color = COLOR_NORMAL) {
     const webhookUrl = getDiscordWebhookUrl();
 
     if (!webhookUrl) {
@@ -367,20 +406,18 @@
 
     const lines = [
       `**${data.date || '-'}**`,
-      `**${data.room || '-'}**`,
-      ''
+      `**${data.room || '-'}**`
     ];
 
-    if (note) lines.push(`**${note}**`);
+    const notes = Array.isArray(noteLines)
+      ? noteLines
+      : noteLines
+        ? [noteLines]
+        : [];
 
-    if (mode === 'move') {
-      lines.push(`**移動：${formatTimeText(new Date())}**`);
-    } else {
-      const startLine = isStartTimeInLoadWindow()
-        ? `開始：${SCRIPT_START_TIME_TEXT}　（読込：${getLoadTimeText()}）`
-        : `開始：${SCRIPT_START_TIME_TEXT}`;
-
-      lines.push(`**${startLine}**`);
+    if (notes.length) {
+      lines.push('');
+      notes.forEach(note => lines.push(`**${note}**`));
     }
 
     const payload = {
@@ -422,7 +459,7 @@
     errorNotifiedThisPage = true;
 
     console.warn('[ℹ️客室情報画面] エラーページを検出');
-    notifyDiscord(makeStoredRoomInfo(), 'エラー', COLOR_ERROR, 'start');
+    notifyDiscord(makeStoredRoomInfo(), getErrorNotifyLines(), COLOR_ERROR);
   }
 
   function isVisible(el) {
@@ -505,14 +542,6 @@
     return cb.checked;
   }
 
-  async function notifyAutoAdvance() {
-    if (autoAdvanceNotified) return;
-    if (!getNotifyEnabled()) return;
-
-    autoAdvanceNotified = true;
-    await notifyDiscord(getRoomInfoForNotification(), getElapsedNote(), COLOR_NORMAL, 'move');
-  }
-
   async function autoAction() {
     if (autoActionRunning) return;
     autoActionRunning = true;
@@ -533,7 +562,6 @@
         const btn = findNextModeBackButton();
 
         if (btn && !isButtonDisabled(btn)) {
-          await notifyAutoAdvance();
           console.log('[ℹ️客室情報画面] nextモード: 自動で戻ります');
           btn.click();
           return;
@@ -571,7 +599,6 @@
 
       const btn = findNormalNextButton();
       if (btn && !isButtonDisabled(btn)) {
-        await notifyAutoAdvance();
         console.log('[ℹ️客室情報画面] 自動で次へ進みます');
         btn.click();
         return;
@@ -648,6 +675,14 @@
     if (!data?.date || !data?.room) return;
     if (notifiedThisPage) return;
 
+    const note = getOpenNotifyNote();
+
+    if (!note) {
+      notifiedThisPage = true;
+      console.log('[ℹ️客室情報画面] 通常通知対象外:', getCurrentPath());
+      return;
+    }
+
     console.log('[ℹ️客室情報画面] 日程:', data.date);
     console.log('[ℹ️客室情報画面] 客室:', data.room);
 
@@ -658,7 +693,7 @@
     }
 
     notifiedThisPage = true;
-    notifyDiscord(data, '仮予約', COLOR_NORMAL, 'start');
+    notifyDiscord(data, note, COLOR_NORMAL);
   }
 
   function tick() {
