@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         📋️日時指定在庫モニター
-// @version      1.88
+// @name         🏨📋️日付指定在庫モニター
+// @version      1.89
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -17,9 +17,9 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.87';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.89';
 
-  const SCRIPT_NAME = '📋️日時指定在庫モニター';
+  const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
   const SNAPSHOT_SCHEMA = 'sp-url-useDate-only-v1.79';
@@ -99,7 +99,10 @@
       offset: 0,
       label: '当日API',
       buttonText: '当',
-      top: '42px',
+      top: '8px',
+      right: '48px',
+      modeTop: '38px',
+      modeRight: '48px',
       buttonBackground: '#00838f',
       buttonBorder: '#006064',
       modeId: IDS.currentMode,
@@ -110,7 +113,10 @@
       offset: 1,
       label: '翌日API',
       buttonText: '翌',
-      top: '74px',
+      top: '8px',
+      right: '14px',
+      modeTop: '38px',
+      modeRight: '14px',
       buttonBackground: '#6a1b9a',
       buttonBorder: '#4a148c',
       modeId: IDS.nextMode,
@@ -127,9 +133,13 @@
 
   const PANEL = {
     right: '14px',
-    modeRight: '48px',
+    currentRight: '48px',
+    notifyRight: '82px',
+    rareRight: '116px',
     minWidth: '28px',
-    height: '26px'
+    height: '26px',
+    top1: '8px',
+    top2: '38px'
   };
 
   let notifyPanel = null;
@@ -147,6 +157,7 @@
   let rareFilterEnabled = false;
   let apiBusy = false;
   let apiBusyKind = '';
+  let apiBusyStartAt = 0;
   let activeUseDateOverride = '';
   let activeSourceLabel = '';
   let customApiPriorityUntil = 0;
@@ -270,6 +281,13 @@
 
   function isRareRoomRow(row) {
     return RARE_ROOM_CODES.has(normalize(row?.roomCd || '').toUpperCase());
+  }
+
+  function getApiBusyElapsedText() {
+    if (!apiBusyStartAt) return '01';
+
+    const elapsed = Math.ceil(Math.max(0, nowMs() - apiBusyStartAt) / 1000);
+    return pad(Math.min(99, Math.max(1, elapsed)), 2);
   }
 
   function randomInt(min, max) {
@@ -594,16 +612,16 @@
     document.getElementById(IDS.auto)?.remove();
     document.getElementById(IDS.oldAuto)?.remove();
 
-    if (!rarePanel || !document.body.contains(rarePanel)) rarePanel = makePanel(IDS.rare, '8px', toggleRareFilter, PANEL.modeRight);
-    if (!notifyPanel || !document.body.contains(notifyPanel)) notifyPanel = makePanel(IDS.notify, '8px', toggleNotify, PANEL.right);
+    if (!rarePanel || !document.body.contains(rarePanel)) rarePanel = makePanel(IDS.rare, PANEL.top1, toggleRareFilter, PANEL.rareRight);
+    if (!notifyPanel || !document.body.contains(notifyPanel)) notifyPanel = makePanel(IDS.notify, PANEL.top1, toggleNotify, PANEL.notifyRight);
 
     Object.keys(API_KIND).forEach(kind => {
       const cfg = API_KIND[kind];
       if (!apiModePanels[kind] || !document.body.contains(apiModePanels[kind])) {
-        apiModePanels[kind] = makePanel(cfg.modeId, cfg.top, () => setApiAutoMode(kind, nextApiMode(kind)), PANEL.modeRight);
+        apiModePanels[kind] = makePanel(cfg.modeId, cfg.modeTop, () => setApiAutoMode(kind, nextApiMode(kind)), cfg.modeRight);
       }
       if (!apiButtonPanels[kind] || !document.body.contains(apiButtonPanels[kind])) {
-        apiButtonPanels[kind] = makePanel(cfg.buttonId, cfg.top, () => runStockApiOnce(kind, '手動ボタン'), PANEL.right);
+        apiButtonPanels[kind] = makePanel(cfg.buttonId, cfg.top, () => runStockApiOnce(kind, '手動ボタン'), cfg.right);
       }
     });
 
@@ -679,7 +697,7 @@
       opacity: '1'
     });
 
-    panel.textContent = isThisBusy ? '取' : cfg.buttonText;
+    panel.textContent = isThisBusy ? getApiBusyElapsedText() : cfg.buttonText;
   }
 
   function toggleRareFilter() {
@@ -1049,6 +1067,7 @@
     customApiPriorityUntil = nowMs() + 15000;
     apiBusy = true;
     apiBusyKind = kind;
+    apiBusyStartAt = nowMs();
     Object.keys(API_KIND).forEach(updateApiButtonPanel);
 
     let result = { ok: false, status: 0, backoffMs: 0, stopAuto: false };
@@ -1060,6 +1079,7 @@
       customApiPriorityUntil = nowMs() + 5000;
       apiBusy = false;
       apiBusyKind = '';
+      apiBusyStartAt = 0;
       Object.keys(API_KIND).forEach(updateApiButtonPanel);
 
       if (result.stopAuto) {
@@ -1840,5 +1860,5 @@
   startPanelTicker();
   startInitialApiAuto();
 
-  internalLog('official DOM-order logger ready / rare room filter / v1.87');
+  internalLog('official DOM-order logger ready / rare room filter / v1.89');
 })();
