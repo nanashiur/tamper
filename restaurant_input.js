@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.07
+// @version      1.08
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -26,8 +26,10 @@
   let autoAgreeRunning = false;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const SCRIPT_START_DATE = new Date();
+  const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log(`[${SCRIPT_NAME}] v1.07 起動: ${getCountdownMinutes()}分`);
+  console.log(`[${SCRIPT_NAME}] v1.08 起動: ${getCountdownMinutes()}分`);
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
@@ -47,6 +49,20 @@
 
   function getCountdownMs() {
     return getCountdownMinutes() * 60 * 1000;
+  }
+
+  function isIndexBackPage() {
+    return location.pathname.includes('/restaurant/input/indexBack');
+  }
+
+  function formatTimeText(d) {
+    return `${d.getHours()}時${String(d.getMinutes()).padStart(2, '0')}分${String(d.getSeconds()).padStart(2, '0')}秒`;
+  }
+
+  function getOpenNote() {
+    return isIndexBackPage()
+      ? `仮予約 継続：${SCRIPT_START_TIME_TEXT}`
+      : `仮予約 開始：${SCRIPT_START_TIME_TEXT}`;
   }
 
   function getTodayKey() {
@@ -330,7 +346,7 @@
 
     if (comment) {
       lines.push('');
-      lines.push(comment);
+      lines.push(`**${comment}**`);
     }
 
     const payload = {
@@ -594,8 +610,6 @@
       return;
     }
 
-    const data = parseRestaurantInfo();
-
     autoFillPhoneNumber();
 
     console.log(`[${SCRIPT_NAME}] 自動同意チェック実行`);
@@ -607,10 +621,6 @@
 
       const btn = findNextButton();
       if (btn && !isButtonDisabled(btn)) {
-        if (data && !data.error && getNotifyEnabled()) {
-          await notifyDiscord(data, `${getCountdownMinutes()}分経過`);
-        }
-
         console.log(`[${SCRIPT_NAME}] 自動で次へ進みます`);
         btn.click();
         return;
@@ -692,7 +702,7 @@
     }
 
     notifiedThisPage = true;
-    notifyDiscord(data, '仮予約');
+    notifyDiscord(data, getOpenNote());
   }
 
   function tick() {
