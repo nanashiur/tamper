@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      1.51
+// @version      1.62
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -14,42 +14,23 @@ if(window.__tdr_weekly_restaurant_monitor)return;
 window.__tdr_weekly_restaurant_monitor=true;
 
 const NAME='🍴💻️レストラン週間モニター';
-const WAIT=60000,UI_TICK=1000,PENDING_ERROR_MS=300000;
+const WAIT=60000,UI_TICK=1000,PENDING_ERROR_MS=300000,IP_TIMEOUT=5000;
 const YELLOW=16776960,ORANGE=16753920;
-const AUTO_PREFIX='tdr_weekly_restaurant_auto_';
-const OLD_AUTO_KEY='tdr_weekly_restaurant_auto';
-const NOTIFY_KEY='tdr_weekly_restaurant_notify';
+const AUTO_PREFIX='tdr_weekly_restaurant_auto_',OLD_AUTO_KEY='tdr_weekly_restaurant_auto',NOTIFY_KEY='tdr_weekly_restaurant_notify';
 const MEALS=['朝食','昼食','夕食'];
-const PATHS=[
-  '/restaurant/weekReservation/',
-  '/restaurant/ajaxNextWeekList/',
-  '/restaurant/ajaxPreWeekList/'
-];
+const PATHS=['/restaurant/weekReservation/','/restaurant/ajaxNextWeekList/','/restaurant/ajaxPreWeekList/'];
+const blocks=new Map(),commodityMeal=new Map(),mealStates=new Map(),snapshots=new Map(),unresolved=[],errorNotifyHistory=new Map();
 
-const blocks=new Map();
-const commodityMeal=new Map();
-const mealStates=new Map();
-const unresolved=[];
-const snapshots=new Map();
-const errorNotifyHistory=new Map();
-
-let panelRoot=null;
-let notifyPanel=null;
-let autoHint='';
-let refreshTimer=null;
-let wasMaintenance=isMaintenance();
-let notifyState=loadNotifyState();
+let panelRoot=null,notifyPanel=null,autoHint='',refreshTimer=null,wasMaintenance=isMaintenance(),notifyState=loadNotifyState();
 
 function ymd(){
   const d=new Date();
   return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
 }
-
 function isMaintenance(){
   const h=new Date().getHours();
   return h>=3&&h<5;
 }
-
 function loadNotifyState(){
   try{
     const v=JSON.parse(localStorage.getItem(NOTIFY_KEY)||'null');
@@ -59,19 +40,16 @@ function loadNotifyState(){
   localStorage.setItem(NOTIFY_KEY,JSON.stringify(v));
   return v;
 }
-
 function syncNotifyDay(){
   if(notifyState.date!==ymd()){
     notifyState={date:ymd(),enabled:true};
     localStorage.setItem(NOTIFY_KEY,JSON.stringify(notifyState));
   }
 }
-
 function normalizeMeal(text){
   const t=String(text||'').replace(/\s+/g,'');
   return MEALS.find(x=>t.includes(x))||'';
 }
-
 function getMealFromBox(box){
   const h=box.querySelector('.heading');
   return normalizeMeal([
@@ -81,20 +59,13 @@ function getMealFromBox(box){
     box.querySelector('img[alt*="朝食"],img[alt*="昼食"],img[alt*="夕食"]')?.alt
   ].filter(Boolean).join(' '));
 }
-
 function restaurantName(){
-  return document
-    .querySelector('.boxRestaurant02 .header h1.heading')
-    ?.textContent.replace(/\s+/g,' ').trim()
-    ||'レストラン名取得失敗';
+  return document.querySelector('.boxRestaurant02 .header h1.heading')
+    ?.textContent.replace(/\s+/g,' ').trim()||'レストラン名取得失敗';
 }
-
 function getState(meal){
   if(mealStates.has(meal))return mealStates.get(meal);
-
-  const saved=localStorage.getItem(AUTO_PREFIX+meal);
-  const old=localStorage.getItem(OLD_AUTO_KEY);
-
+  const saved=localStorage.getItem(AUTO_PREFIX+meal),old=localStorage.getItem(OLD_AUTO_KEY);
   const s={
     meal,
     enabled:saved!==null?saved!=='0':old!=='0',
@@ -103,13 +74,12 @@ function getState(meal){
     deadline:0,
     timer:null,
     panel:null,
-    error403:false
+    error403:false,
+    pendingError:false
   };
-
   mealStates.set(meal,s);
   return s;
 }
-
 function scanCommodityMap(){
   document.querySelectorAll('.boxRestaurant04').forEach(box=>{
     const meal=getMealFromBox(box);
@@ -117,32 +87,25 @@ function scanCommodityMap(){
     if(meal&&commodity)commodityMeal.set(commodity,meal);
   });
 }
-
 function resolveMeal(commodity){
   if(!commodity)return '';
-  if(!commodityMeal.has(commodity))scanCommodityMap();
+  if(commodityMeal.has(commodity))return commodityMeal.get(commodity);
+  scanCommodityMap();
   return commodityMeal.get(commodity)||'';
 }
-
 function refreshBlocks(){
   blocks.clear();
-
   document.querySelectorAll('.boxRestaurant04').forEach(box=>{
-    const meal=getMealFromBox(box);
-    const next=box.querySelector('.nextWeekLink');
+    const meal=getMealFromBox(box),next=box.querySelector('.nextWeekLink');
     if(!meal||!next)return;
-
     const commodity=box.querySelector('.commodityCd,.commodityCD')?.value?.trim()||'';
-
     blocks.set(meal,{box,next,commodity});
     if(commodity)commodityMeal.set(commodity,meal);
     getState(meal);
   });
-
   createPanels();
   drainUnresolved();
 }
-
 function queueRefresh(){
   clearTimeout(refreshTimer);
   refreshTimer=setTimeout(refreshBlocks,100);
@@ -153,7 +116,6 @@ function createPanels(){
 
   if(!panelRoot){
     panelRoot=document.createElement('div');
-
     Object.assign(panelRoot.style,{
       position:'fixed',
       top:'14px',
@@ -163,7 +125,6 @@ function createPanels(){
       flexDirection:'column',
       gap:'5px'
     });
-
     document.body.appendChild(panelRoot);
   }
 
@@ -177,7 +138,6 @@ function createPanels(){
 
     if(!s.panel){
       const p=document.createElement('div');
-
       Object.assign(p.style,{
         order:String(i),
         width:'90px',
@@ -195,7 +155,6 @@ function createPanels(){
         border:'1px solid rgba(0,0,0,.2)',
         fontFamily:'Arial,"Yu Gothic",sans-serif'
       });
-
       p.title=`${meal} 自動監視 ON / OFF`;
       p.onclick=()=>toggleMeal(meal);
       s.panel=p;
@@ -207,7 +166,6 @@ function createPanels(){
 
   if(!notifyPanel){
     notifyPanel=document.createElement('div');
-
     Object.assign(notifyPanel.style,{
       order:'10',
       width:'90px',
@@ -224,7 +182,6 @@ function createPanels(){
       border:'1px solid rgba(0,0,0,.2)',
       fontFamily:'Arial,"Yu Gothic",sans-serif'
     });
-
     notifyPanel.title='Discord通知 ON / OFF';
     notifyPanel.onclick=toggleNotify;
     panelRoot.appendChild(notifyPanel);
@@ -236,7 +193,6 @@ function createPanels(){
 function toggleMeal(meal){
   const s=getState(meal);
   s.enabled=!s.enabled;
-
   localStorage.setItem(AUTO_PREFIX+meal,s.enabled?'1':'0');
 
   if(!s.enabled)clearTimer(s);
@@ -244,40 +200,32 @@ function toggleMeal(meal){
 
   renderPanels();
 }
-
 function toggleNotify(){
   syncNotifyDay();
   notifyState.enabled=!notifyState.enabled;
   localStorage.setItem(NOTIFY_KEY,JSON.stringify(notifyState));
   renderPanels();
 }
-
 function clearTimer(s){
   if(s.timer)clearTimeout(s.timer);
   s.timer=null;
   s.deadline=0;
 }
-
 function schedule(meal){
   const s=getState(meal);
   clearTimer(s);
-
   if(!s.enabled||isMaintenance())return;
 
   s.deadline=performance.now()+WAIT;
-
   s.timer=setTimeout(()=>{
     s.timer=null;
     s.deadline=0;
     fireSameWeek(meal);
   },WAIT);
 }
-
 function renderPanels(){
   syncNotifyDay();
-
-  const now=performance.now();
-  const maintenance=isMaintenance();
+  const now=performance.now(),maintenance=isMaintenance();
 
   MEALS.forEach(meal=>{
     const s=mealStates.get(meal);
@@ -299,33 +247,31 @@ function renderPanels(){
 
     if(s.error403){
       s.panel.style.background='#ff8c00';
-      s.panel.style.color='#fff';
+      s.panel.style.color='#000';
+      s.panel.textContent=s.deadline
+        ?`${meal} 403 ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`
+        :`${meal} 403`;
+      return;
+    }
 
-      if(s.pending>0){
-        const sec=Math.floor((now-s.startedAt)/1000);
-        s.panel.textContent=`${meal} 403 ${sec}`;
-      }else if(s.deadline){
-        const sec=Math.max(0,Math.ceil((s.deadline-now)/1000));
-        s.panel.textContent=`${meal} 403 ${sec}`;
-      }else{
-        s.panel.textContent=`${meal} 403`;
-      }
+    if(s.pendingError){
+      s.panel.style.background='#ff8c00';
+      s.panel.style.color='#000';
+      s.panel.textContent=`${meal} 5分超`;
       return;
     }
 
     if(s.pending>0){
-      const sec=Math.floor((now-s.startedAt)/1000);
       s.panel.style.background='#7b2cbf';
       s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} 読込 ${sec}`;
+      s.panel.textContent=`${meal} 読込 ${Math.floor((now-s.startedAt)/1000)}`;
       return;
     }
 
     if(s.deadline){
-      const sec=Math.max(0,Math.ceil((s.deadline-now)/1000));
       s.panel.style.background='#1976d2';
       s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} ON ${sec}`;
+      s.panel.textContent=`${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`;
       return;
     }
 
@@ -352,12 +298,10 @@ function maintenanceTick(){
     console.log(`[${NAME}] メンテナンス停止`);
   }else{
     refreshBlocks();
-
     MEALS.forEach(meal=>{
       const s=mealStates.get(meal);
       if(s?.enabled&&!s.pending)fireSameWeek(meal);
     });
-
     console.log(`[${NAME}] メンテナンス終了・再開`);
   }
 
@@ -371,27 +315,26 @@ function fireSameWeek(meal){
   refreshBlocks();
 
   const block=blocks.get(meal);
-
   if(!block){
-    console.warn(`[${NAME}] ${meal} DOM未検出`);
     schedule(meal);
     return;
   }
 
   const link=block.next;
-  const header=link.closest('.header');
-  const timeList=header?.nextElementSibling;
-  const display=timeList?.querySelector('.date li:first-child .display');
+  const display=link.closest('.header')
+    ?.nextElementSibling
+    ?.querySelector('.date li:first-child .display');
+
   const jq=window.jQuery||window.$;
   const format=window.webapiFormat;
 
   if(!display||!jq?.datepicker||!format){
-    console.warn(`[${NAME}] ${meal} 日付DOM/datepicker未検出`);
+    console.warn(`[${NAME}] ${meal} 日付DOM未検出`);
     schedule(meal);
     return;
   }
 
-  const current=display.innerHTML.trim();
+  const current=display.textContent.trim();
   let prev;
 
   try{
@@ -399,7 +342,7 @@ function fireSameWeek(meal){
     d.setDate(d.getDate()-7);
     prev=jq.datepicker.formatDate(format,d,{});
   }catch(e){
-    console.warn(`[${NAME}] ${meal} 日付変換失敗`,current,e);
+    console.warn(`[${NAME}] ${meal} 日付変換失敗`,e);
     schedule(meal);
     return;
   }
@@ -407,7 +350,7 @@ function fireSameWeek(meal){
   const hadNoData=link.classList.contains('hasNoData');
   const before=s.pending;
 
-  display.innerHTML=prev;
+  display.textContent=prev;
   link.classList.remove('hasNoData');
   autoHint=meal;
 
@@ -422,14 +365,11 @@ function fireSameWeek(meal){
 
   if(s.pending===before){
     const d2=block.box.querySelector('.timeList .date li:first-child .display');
-    if(d2)d2.innerHTML=current;
+    if(d2)d2.textContent=current;
     if(hadNoData)link.classList.add('hasNoData');
 
-    console.warn(`[${NAME}] ${meal} ajaxNextWeekList未発火`);
     sendErrorDiscord(meal,'ajaxNextWeekList未発火');
     schedule(meal);
-  }else{
-    console.log(`[${NAME}] ${meal} 自動発火`);
   }
 }
 
@@ -438,7 +378,6 @@ function bodyString(body){
   if(body instanceof URLSearchParams)return body.toString();
   return '';
 }
-
 function watched(url){
   try{
     return PATHS.includes(new URL(url,location.href).pathname);
@@ -446,93 +385,92 @@ function watched(url){
     return false;
   }
 }
+function has(obj,key){
+  return Object.prototype.hasOwnProperty.call(obj,key);
+}
+function slotStatus(li){
+  if(
+    li.classList.contains('reservationAble')||
+    li.querySelector('a[onclick*="toOrderForWeek"]')||
+    li.querySelector('img[alt="予約する"]')
+  )return '空席';
 
-function addDays(v,n){
-  if(!/^\d{8}$/.test(v||''))return v;
+  if(
+    li.classList.contains('full')||
+    li.querySelector('.text')?.textContent.includes('満席')
+  )return '満席';
 
-  const d=new Date(
-    +v.slice(0,4),
-    +v.slice(4,6)-1,
-    +v.slice(6,8)
-  );
-
-  d.setDate(d.getDate()+n);
-
-  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return '不明';
 }
 
-function fmtDate(v){
-  return /^\d{8}$/.test(v||'')
-    ?`${+v.slice(4,6)}/${+v.slice(6,8)}`
-    :v;
-}
+function readCurrentSlots(meal){
+  const block=blocks.get(meal);
+  if(!block)throw new Error('食事区分DOMなし');
 
-function parseSlots(html,params){
-  const start=params.get('useDate');
-  if(!start)throw new Error('useDateなし');
+  const dates=[...block.box.querySelectorAll('.timeList .date li .display')]
+    .map(e=>e.textContent.trim())
+    .filter(Boolean);
 
-  const doc=new DOMParser().parseFromString(html,'text/html');
-  const lists=[...doc.querySelectorAll('.slider .view > ul.cf')];
+  const lists=[...block.box.querySelectorAll('.timeTable .slider .view > ul.cf')];
 
+  if(!dates.length)throw new Error('日付DOMなし');
   if(!lists.length)throw new Error('週間在庫DOMなし');
+  if(dates.length!==lists.length)throw new Error(`週間DOM不整合 ${dates.length}/${lists.length}`);
 
   const slots={};
 
-  lists.forEach((ul,dayIndex)=>{
-    const date=addDays(start,dayIndex);
+  lists.forEach((ul,i)=>{
+    const date=dates[i];
 
     [...ul.children].forEach(li=>{
       const time=li.querySelector('.time')?.textContent?.trim();
+
+      // 時間が存在する = 時間枠あり
       if(!time)return;
 
-      let status='';
-
-      if(li.classList.contains('reservationAble')){
-        status='空席';
-      }else if(li.classList.contains('full')){
-        status='満席';
-      }else{
-        return;
-      }
-
-      slots[`${date}|${time}`]=status;
+      slots[`${date}|${time}`]=slotStatus(li);
     });
   });
 
-  return slots;
+  return {
+    weekStart:dates[0],
+    weekEnd:dates[dates.length-1],
+    slots
+  };
 }
 
-function snapshotKey(params){
+function snapshotKey(meta,meal,current){
+  const p=new URLSearchParams(meta.body);
+
   return [
-    'commodityCD',
-    'useDate',
-    'adultNum',
-    'childNum',
-    'childAgeInform',
-    'contentsCd',
-    'nameCd',
-    'wheelchairCount',
-    'stretcherCount'
-  ].map(k=>`${k}=${params.get(k)||''}`).join('&');
+    meal,
+    p.get('commodityCD')||'',
+    current.weekStart,
+    current.weekEnd,
+    p.get('adultNum')||'',
+    p.get('childNum')||'',
+    p.get('childAgeInform')||'',
+    p.get('wheelchairCount')||'',
+    p.get('stretcherCount')||''
+  ].join('|');
 }
 
-function compareAndSave(meta,html,meal){
-  const params=new URLSearchParams(meta.body);
-  const key=snapshotKey(params);
-  const current=parseSlots(html,params);
+function compareAndSave(meta,meal,current){
+  const key=snapshotKey(meta,meal,current);
   const previous=snapshots.get(key);
 
-  snapshots.set(key,current);
+  if(!previous){
+    snapshots.set(key,current.slots);
+    return [];
+  }
 
-  if(!previous)return [];
-
+  const prev=previous;
+  const curr=current.slots;
   const changes=[];
-  const prevKeys=new Set(Object.keys(previous));
-  const currKeys=new Set(Object.keys(current));
 
-  // 1. 時間枠の増加
-  currKeys.forEach(slot=>{
-    if(prevKeys.has(slot))return;
+  // 1. 時間枠の増減を最優先
+  Object.keys(curr).forEach(slot=>{
+    if(has(prev,slot))return;
 
     const [date,time]=slot.split('|');
 
@@ -541,13 +479,12 @@ function compareAndSave(meta,html,meal){
       meal,
       date,
       time,
-      to:current[slot]
+      to:curr[slot]
     });
   });
 
-  // 2. 時間枠の減少
-  prevKeys.forEach(slot=>{
-    if(currKeys.has(slot))return;
+  Object.keys(prev).forEach(slot=>{
+    if(has(curr,slot))return;
 
     const [date,time]=slot.split('|');
 
@@ -559,14 +496,14 @@ function compareAndSave(meta,html,meal){
     });
   });
 
-  // 3. 共通時間枠の空席・満席変化
-  currKeys.forEach(slot=>{
-    if(!prevKeys.has(slot))return;
+  // 2. 両方に存在する時間枠だけ空席・満席を比較
+  Object.keys(curr).forEach(slot=>{
+    if(!has(prev,slot))return;
 
-    const from=previous[slot];
-    const to=current[slot];
+    const from=prev[slot];
+    const to=curr[slot];
 
-    if(from===to)return;
+    if(from==='不明'||to==='不明'||from===to)return;
 
     const [date,time]=slot.split('|');
 
@@ -580,6 +517,18 @@ function compareAndSave(meta,html,meal){
     });
   });
 
+  // 状態不明でも時間枠の存在は保持。
+  // 前回状態が判明済みなら、その状態だけ保持する。
+  const next={};
+
+  Object.keys(curr).forEach(slot=>{
+    next[slot]=
+      curr[slot]==='不明'&&has(prev,slot)&&prev[slot]!=='不明'
+        ?prev[slot]
+        :curr[slot];
+  });
+
+  snapshots.set(key,next);
   return changes;
 }
 
@@ -607,17 +556,16 @@ XMLHttpRequest.prototype.send=function(body){
     const meta={
       body:str,
       commodity,
-      url:x.url,
       pendingTimer:null
     };
 
     if(meal){
       const s=getState(meal);
-
       clearTimer(s);
 
       if(s.pending++===0){
         s.startedAt=performance.now();
+        s.pendingError=false;
       }
 
       renderPanels();
@@ -625,20 +573,18 @@ XMLHttpRequest.prototype.send=function(body){
 
     meta.pendingTimer=setTimeout(()=>{
       const pendingMeal=meal||resolveMeal(commodity)||'食事区分不明';
+      const s=mealStates.get(pendingMeal);
 
-      console.warn(`[${NAME}] ${pendingMeal} Pending 5分超過`);
-      sendErrorDiscord(
-        pendingMeal,
-        'Pending 5分超過',
-        meta.url
-      );
+      if(s)s.pendingError=true;
+
+      renderPanels();
+      sendErrorDiscord(pendingMeal,'Pending 5分超過');
     },PENDING_ERROR_MS);
 
     this.addEventListener('loadend',()=>{
       clearTimeout(meta.pendingTimer);
 
       let text='';
-
       try{
         text=this.responseText||'';
       }catch{}
@@ -656,12 +602,16 @@ XMLHttpRequest.prototype.send=function(body){
         return;
       }
 
-      finishRequest(
-        resolved,
-        meta,
-        this.status,
-        text
-      );
+      // 公式サイト側のsuccess処理によるDOM更新後に判定
+      setTimeout(()=>{
+        finishRequest(
+          resolved,
+          meta,
+          this.status,
+          text
+        );
+      },30);
+
     },{once:true});
   }
 
@@ -673,28 +623,26 @@ function finishRequest(meal,meta,status,text){
 
   if(status===403){
     s.error403=true;
-    sendErrorDiscord(meal,'HTTP 403',meta.url);
+    sendErrorDiscord(meal,'HTTP 403');
 
   }else if(status<200||status>=300){
     sendErrorDiscord(
       meal,
-      status===0?'通信失敗（status 0）':`HTTP ${status}`,
-      meta.url
+      status===0?'通信失敗（status 0）':`HTTP ${status}`
     );
 
   }else if(!text){
-    sendErrorDiscord(meal,'空レスポンス',meta.url);
+    sendErrorDiscord(meal,'空レスポンス');
 
   }else if(text.includes('paramErrorDiv')){
-    sendErrorDiscord(
-      meal,
-      'サイト内部エラー（paramErrorDiv）',
-      meta.url
-    );
+    sendErrorDiscord(meal,'サイト内部エラー（paramErrorDiv）');
 
   }else{
     try{
-      const changes=compareAndSave(meta,text,meal);
+      refreshBlocks();
+
+      const current=readCurrentSlots(meal);
+      const changes=compareAndSave(meta,meal,current);
 
       s.error403=false;
 
@@ -704,11 +652,9 @@ function finishRequest(meal,meta,status,text){
 
     }catch(e){
       console.error(`[${NAME}] ${meal} 解析失敗`,e);
-
       sendErrorDiscord(
         meal,
-        `Response解析エラー：${e.message||e}`,
-        meta.url
+        `Response解析エラー：${e.message||e}`
       );
     }
   }
@@ -717,6 +663,7 @@ function finishRequest(meal,meta,status,text){
 
   if(!s.pending){
     s.startedAt=0;
+    s.pendingError=false;
     schedule(meal);
   }
 
@@ -727,19 +674,27 @@ function finishRequest(meal,meta,status,text){
 function drainUnresolved(){
   for(let i=unresolved.length-1;i>=0;i--){
     const x=unresolved[i];
-    const meal=commodityMeal.get(x.meta.commodity)||'';
+    const meal=resolveMeal(x.meta.commodity);
 
     if(!meal)continue;
 
     unresolved.splice(i,1);
 
-    finishRequest(
-      meal,
-      x.meta,
-      x.status,
-      x.text
-    );
+    setTimeout(()=>{
+      finishRequest(
+        meal,
+        x.meta,
+        x.status,
+        x.text
+      );
+    },30);
   }
+}
+
+function statusText(status){
+  if(status==='空席')return '🟥空席';
+  if(status==='満席')return '⬛満席';
+  return '状態不明';
 }
 
 function postDiscord(description,color){
@@ -752,9 +707,7 @@ function postDiscord(description,color){
 
   fetch(webhook,{
     method:'POST',
-    headers:{
-      'Content-Type':'application/json'
-    },
+    headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       username:NAME,
       embeds:[{
@@ -765,12 +718,6 @@ function postDiscord(description,color){
   }).catch(e=>{
     console.error(`[${NAME}] Discord通知失敗`,e);
   });
-}
-
-function statusText(status){
-  return status==='空席'
-    ?'🟥空席'
-    :'⬛満席';
 }
 
 function sendDiscord(changes){
@@ -788,7 +735,9 @@ function sendDiscord(changes){
 
     if(g!==group){
       if(group)lines.push('');
-      lines.push(`【${fmtDate(c.date)} ${c.meal}】`);
+      lines.push(
+        `【${+c.date.slice(4,6)}/${+c.date.slice(6,8)} ${c.meal}】`
+      );
       group=g;
     }
 
@@ -815,7 +764,34 @@ function sendDiscord(changes){
   );
 }
 
-function sendErrorDiscord(meal,error,url=''){
+async function getPublicIp(){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),IP_TIMEOUT);
+
+  try{
+    const r=await fetch(
+      'https://api.ipify.org?format=json',
+      {
+        cache:'no-store',
+        signal:controller.signal
+      }
+    );
+
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+
+    const data=await r.json();
+    return data.ip||'取得不可';
+
+  }catch(e){
+    console.warn(`[${NAME}] IP取得失敗`,e);
+    return '取得不可';
+
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
+async function sendErrorDiscord(meal,error){
   syncNotifyDay();
 
   if(!notifyState.enabled)return;
@@ -824,9 +800,9 @@ function sendErrorDiscord(meal,error,url=''){
   const now=Date.now();
 
   if(now-(errorNotifyHistory.get(key)||0)<60000)return;
-
   errorNotifyHistory.set(key,now);
 
+  const ip=await getPublicIp();
   const d=new Date();
 
   const time=
@@ -835,27 +811,20 @@ function sendErrorDiscord(meal,error,url=''){
     `${String(d.getMinutes()).padStart(2,'0')}:`+
     `${String(d.getSeconds()).padStart(2,'0')}`;
 
-  let path='';
-
-  try{
-    path=new URL(url,location.href).pathname;
-  }catch{}
-
   postDiscord(
     [
       restaurantName(),
       `【${meal}】`,
       `⚠️ ${error}`,
-      path?`🌐 ${path}`:'',
+      `🌍 IP：${ip}`,
       `🕐 ${time}`
-    ].filter(Boolean).join('\n'),
+    ].join('\n'),
     ORANGE
   );
 }
 
 function init(){
   refreshBlocks();
-
   setTimeout(refreshBlocks,300);
   setTimeout(refreshBlocks,1000);
 
@@ -886,5 +855,5 @@ setInterval(()=>{
   renderPanels();
 },UI_TICK);
 
-console.log(`[${NAME}] v1.51 起動`);
+console.log(`[${NAME}] v1.62 起動`);
 })();
