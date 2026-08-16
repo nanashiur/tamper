@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.08
+// @version      1.09
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -18,6 +18,9 @@
   const STORAGE_KEY_NOTIFY_DATE = 'tdr_restaurant_input_notify_date';
   const PHONE_FALLBACK = '090';
 
+  const COLOR_NORMAL = 0x00ff66;
+  const COLOR_ERROR = 0xffcc00;
+
   let timerEndAt = Date.now() + getCountdownMs();
   let countdownTimer = null;
   let countdownEnabled = true;
@@ -29,7 +32,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log(`[${SCRIPT_NAME}] v1.08 起動: ${getCountdownMinutes()}分`);
+  console.log(`[${SCRIPT_NAME}] v1.09 起動: ${getCountdownMinutes()}分`);
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
@@ -43,8 +46,12 @@
     return phone || PHONE_FALLBACK;
   }
 
+  function getIpText() {
+    return String(window.TDR_WEBHOOKS?.ip || '').trim() || 'IP未設定';
+  }
+
   function getCountdownMinutes() {
-    return location.pathname.includes('/restaurant/input/indexBack') ? 5 : 20;
+    return 10;
   }
 
   function getCountdownMs() {
@@ -339,22 +346,19 @@
       return;
     }
 
-    const lines = [
-      `**${data.dateTime || '-'}**`,
-      `**${data.restaurant || '-'}**`
-    ];
-
-    if (comment) {
-      lines.push('');
-      lines.push(`**${comment}**`);
-    }
-
     const payload = {
       username: SCRIPT_NAME,
       embeds: [
         {
-          description: lines.join('\n'),
-          color: 0x00ff66
+          title: [
+            data.dateTime || '-',
+            data.restaurant || '-'
+          ].join('\n'),
+          description: comment ? `**${comment}**` : '',
+          color: COLOR_NORMAL,
+          footer: {
+            text: `IP: ${getIpText()}`
+          }
         }
       ],
       allowed_mentions: {
@@ -391,16 +395,18 @@
       username: SCRIPT_NAME,
       embeds: [
         {
+          title: 'エラー画面を検知',
           description: [
-            '**エラー画面を検知**',
-            '',
-            'まことに申し訳ございません。',
-            '処理に失敗しました。',
-            'TOPページから再度お手続きをお願いします。',
+            '**まことに申し訳ございません。**',
+            '**処理に失敗しました。**',
+            '**TOPページから再度お手続きをお願いします。**',
             '',
             `path: ${location.pathname}`
           ].join('\n'),
-          color: 0xff0000
+          color: COLOR_ERROR,
+          footer: {
+            text: `IP: ${getIpText()}`
+          }
         }
       ],
       allowed_mentions: {
