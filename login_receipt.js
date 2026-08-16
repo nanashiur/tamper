@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️仮予約ログインバック
-// @version      1.34
+// @version      1.35
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/login/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
@@ -157,10 +157,20 @@ panel.addEventListener('click', () => {
     update();
 });
 
+function formatRemain(ms) {
+    const totalSec = Math.max(0, Math.ceil(ms / 1000));
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+
+    return `${min}:${String(sec).padStart(2, '0')}`;
+}
+
 function update() {
     if (!enabled) {
-        panel.textContent = 'OFF';
-        panel.title = 'カウント停止中 / クリックで再開';
+        const remainText = formatRemain(remainingMs);
+
+        panel.textContent = remainText;
+        panel.title = `カウント停止中 残り${remainText} / クリックで再開`;
         panel.style.background = 'rgba(0,0,0,.45)';
         panel.style.color = '#fff';
         return;
@@ -168,11 +178,9 @@ function update() {
 
     remainingMs = Math.max(0, deadline - Date.now());
 
-    const sec = Math.ceil(remainingMs / 1000);
-    const min = Math.floor(sec / 60);
-    const s = String(sec % 60).padStart(2, '0');
+    const remainText = formatRemain(remainingMs);
 
-    panel.textContent = `${min}:${s}`;
+    panel.textContent = remainText;
     panel.title = '10分後に戻る / クリックで停止';
     panel.style.background = 'rgba(0,0,0,.82)';
     panel.style.color = '#fff';
