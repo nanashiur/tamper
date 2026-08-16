@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️仮予約ログインバック
-// @version      1.04
+// @version      1.14
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/login/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
@@ -13,7 +13,7 @@
 
 const SCRIPT_NAME = 'ℹ️仮予約ログインバック';
 const RECEIPT_KEY = 'tdr_login_receipt_no';
-const WAIT = 5 * 60 * 1000;
+const WAIT = 10 * 60 * 1000;
 
 let errorNotified = false;
 
@@ -75,7 +75,7 @@ async function checkError() {
                 `IP：${ip}`,
                 `receiptNO：${receiptNO}`
             ].join('\n'),
-            color: 15094016
+            color: 0xff0000
         }],
         allowed_mentions: {
             parse: []
@@ -113,6 +113,7 @@ let deadline = Date.now() + WAIT;
 let fired = false;
 
 const panel = document.createElement('div');
+
 Object.assign(panel.style, {
     position: 'fixed',
     right: '6px',
@@ -124,8 +125,8 @@ Object.assign(panel.style, {
     lineHeight: '1',
     padding: '5px 7px',
     borderRadius: '7px',
-    background: '#e65100',
-    color: '#fff',
+    background: 'rgba(255,140,0,.9)',
+    color: '#000',
     boxShadow: '0 1px 6px rgba(0,0,0,.35)',
     textAlign: 'center',
     minWidth: '42px',
@@ -161,9 +162,9 @@ function update() {
     const s = String(sec % 60).padStart(2, '0');
 
     panel.textContent = `${min}:${s}`;
-    panel.title = '5分後に戻る / クリックでOFF';
-    panel.style.background = '#e65100';
-    panel.style.color = '#fff';
+    panel.title = '10分後に戻る / クリックでOFF';
+    panel.style.background = 'rgba(255,140,0,.9)';
+    panel.style.color = '#000';
 
     if (remain <= 0 && !fired) {
         const back = document.querySelector('p.btnBack.headerBack');
