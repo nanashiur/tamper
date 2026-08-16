@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.12
+// @version      1.13
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -13,27 +13,43 @@
 
   if (!location.pathname.includes('/restaurant/input')) return;
 
+  if (window.__tdr_restaurant_input_installed) return;
+  window.__tdr_restaurant_input_installed = true;
+
   const SCRIPT_NAME = 'ℹ️レストラン予約情報入力';
   const STORAGE_KEY_NOTIFY = 'tdr_restaurant_input_notify_enabled';
   const STORAGE_KEY_NOTIFY_DATE = 'tdr_restaurant_input_notify_date';
   const LAST_RESTAURANT_INPUT_KEY = 'tdr_restaurant_input_last_data';
+  const STORAGE_TIMER_TRIGGER_TIME_KEY = 'tdr_11am_timer_trigger_time';
+
+  const IP_API_URL = 'https://api.ipify.org?format=json';
   const PHONE_FALLBACK = '090';
 
-  const COLOR_NORMAL = 0x00ff66;
-  const COLOR_ERROR = 0xffcc00;
+  const COLOR_START = 0x00ff66;
+  const COLOR_START_LOAD = 0x66ff99;
+  const COLOR_CONTINUE = 0x009933;
+  const COLOR_ERROR = 0xff9900;
+
+  const COUNTDOWN_MINUTES = 10;
 
   let timerEndAt = Date.now() + getCountdownMs();
+  let pausedRemainMs = null;
   let countdownTimer = null;
   let countdownEnabled = true;
   let notifiedThisPage = false;
   let errorNotifiedThisPage = false;
   let autoAgreeRunning = false;
+  let publicIpCache = null;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log(`[${SCRIPT_NAME}] v1.12 起動: ${getCountdownMinutes()}分`);
+  console.log(`[${SCRIPT_NAME}] v1.13 起動: ${getCountdownMinutes()}分`);
+
+  function getCurrentPath() {
+    return location.pathname.replace(/\/+$/, '');
+  }
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
@@ -47,26 +63,8 @@
     return phone || PHONE_FALLBACK;
   }
 
-  async function getIpText() {
-    try {
-      const res = await fetch('https://api.ipify.org?format=json', {
-        cache: 'no-store'
-      });
-
-      if (!res.ok) throw new Error(`status ${res.status}`);
-
-      const data = await res.json();
-      const ip = String(data?.ip || '').trim();
-
-      return ip || 'IP取得不可';
-    } catch (e) {
-      console.warn(`[${SCRIPT_NAME}] IP取得失敗:`, e);
-      return 'IP取得不可';
-    }
-  }
-
   function getCountdownMinutes() {
-    return 10;
+    return COUNTDOWN_MINUTES;
   }
 
   function getCountdownMs() {
@@ -74,17 +72,11 @@
   }
 
   function isIndexBackPage() {
-    return location.pathname.includes('/restaurant/input/indexBack');
+    return getCurrentPath() === '/online/sp/restaurant/input/indexBack';
   }
 
-  function formatTimeText(d) {
-    return `${d.getHours()}時${String(d.getMinutes()).padStart(2, '0')}分${String(d.getSeconds()).padStart(2, '0')}秒`;
-  }
-
-  function getOpenNote() {
-    return isIndexBackPage()
-      ? `仮予約 継続：${SCRIPT_START_TIME_TEXT}`
-      : `仮予約 開始：${SCRIPT_START_TIME_TEXT}`;
+  function isNormalInputPage() {
+    return getCurrentPath() === '/online/sp/restaurant/input';
   }
 
   function getTodayKey() {
@@ -118,16 +110,19 @@
 
   function resetTimer() {
     timerEndAt = Date.now() + getCountdownMs();
+    pausedRemainMs = null;
   }
 
   function toggleCountdown() {
-    countdownEnabled = !countdownEnabled;
-
     if (countdownEnabled) {
-      resetTimer();
-      console.log(`[${SCRIPT_NAME}] カウントON`);
+      pausedRemainMs = Math.max(0, timerEndAt - Date.now());
+      countdownEnabled = false;
+      console.log(`[${SCRIPT_NAME}] カウントOFF 停止:`, formatRemain(pausedRemainMs));
     } else {
-      console.log(`[${SCRIPT_NAME}] カウントOFF`);
+      timerEndAt = Date.now() + Math.max(0, pausedRemainMs ?? getCountdownMs());
+      pausedRemainMs = null;
+      countdownEnabled = true;
+      console.log(`[${SCRIPT_NAME}] カウントON 再開`);
     }
 
     updateCountdownPanel();
@@ -137,21 +132,82 @@
     return String(s || '')
       .replace(/\u00a0/g, ' ')
       .replace(/\r/g, '')
-      .replace(/\n+/g, '\n')
+      .replace(/\n+/g, ' ')
       .replace(/[ \t]+/g, ' ')
       .trim();
+  }
+
+  function esc(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   function getText() {
     return document.body ? document.body.innerText || '' : '';
   }
 
+  function formatTimeText(d) {
+    return `${d.getHours()}時${String(d.getMinutes()).padStart(2, '0')}分${String(d.getSeconds()).padStart(2, '0')}秒`;
+  }
+
+  function getLoadTimeText() {
+    const saved = String(localStorage.getItem(STORAGE_TIMER_TRIGGER_TIME_KEY) || '').trim();
+    return saved && saved !== 'OFF' ? saved : '不明';
+  }
+
+  function isStartTimeInLoadWindow() {
+    const d = SCRIPT_START_DATE;
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const s = d.getSeconds();
+
+    return (
+      (h === 10 && m === 59 && s >= 40) ||
+      (h === 11 && m === 0 && s <= 40)
+    );
+  }
+
+  function getLoadSuffix() {
+    return isStartTimeInLoadWindow()
+      ? `　（読込：${getLoadTimeText()}）`
+      : '';
+  }
+
+  function getOpenNotifyNote() {
+    const suffix = getLoadSuffix();
+
+    if (isNormalInputPage()) {
+      return `仮予約 開始：${SCRIPT_START_TIME_TEXT}${suffix}`;
+    }
+
+    if (isIndexBackPage()) {
+      return `仮予約 継続：${SCRIPT_START_TIME_TEXT}${suffix}`;
+    }
+
+    return '';
+  }
+
+  function getOpenNotifyColor() {
+    if (isNormalInputPage() && isStartTimeInLoadWindow()) {
+      return COLOR_START_LOAD;
+    }
+
+    if (isIndexBackPage()) {
+      return COLOR_CONTINUE;
+    }
+
+    return COLOR_START;
+  }
+
+  function getErrorNotifyLines() {
+    return [
+      'エラー',
+      `開始：${SCRIPT_START_TIME_TEXT}${getLoadSuffix()}`
+    ];
+  }
+
   function isErrorPage(text) {
     return (
       text.includes('まことに申し訳ございません') ||
-      text.includes('処理に失敗しました') ||
-      text.includes('ＴＯＰページから再度お手続きをお願いします') ||
-      text.includes('TOPページから再度お手続きをお願いします') ||
       text.includes('処理を中断させていただきました') ||
       text.includes('はじめからお手続きをお願いします')
     );
@@ -162,6 +218,35 @@
     const min = Math.floor(totalSec / 60);
     const sec = totalSec % 60;
     return `${min}:${String(sec).padStart(2, '0')}`;
+  }
+
+  async function getPublicIpText() {
+    if (publicIpCache !== null) return publicIpCache;
+
+    try {
+      const res = await fetch(IP_API_URL, { cache: 'no-store' });
+      const json = await res.json();
+
+      publicIpCache = json?.ip || '不明';
+      return publicIpCache;
+    } catch (e) {
+      console.warn(`[${SCRIPT_NAME}] IP取得失敗:`, e);
+      publicIpCache = '不明';
+      return publicIpCache;
+    }
+  }
+
+  function makeEmbedTitle(data) {
+    const date = data.dateTime || '-';
+    let restaurant = data.restaurant || '-';
+    const maxLen = 250;
+    const fixedLen = date.length + 1;
+
+    if (fixedLen + restaurant.length > maxLen) {
+      restaurant = restaurant.slice(0, Math.max(1, maxLen - fixedLen - 1)) + '…';
+    }
+
+    return `${date}\n${restaurant}`;
   }
 
   function createTogglePanel() {
@@ -236,8 +321,8 @@
       'line-height:1',
       'padding:5px 7px',
       'border-radius:7px',
-      'background:rgba(255,140,0,.90)',
-      'color:#000',
+      'background:rgba(0,0,0,.82)',
+      'color:#fff',
       'box-shadow:0 1px 6px rgba(0,0,0,.35)',
       'text-align:center',
       'min-width:42px',
@@ -261,7 +346,9 @@
 
     if (!countdownEnabled) {
       panel.textContent = 'OFF';
-      panel.title = 'カウントOFF / クリックでON';
+      panel.title = pausedRemainMs !== null
+        ? `カウント停止中 残り${formatRemain(pausedRemainMs)} / クリックで再開`
+        : 'カウントOFF / クリックで再開';
       panel.style.background = 'rgba(0,0,0,.45)';
       panel.style.color = '#fff';
       return;
@@ -271,9 +358,9 @@
     const min = getCountdownMinutes();
 
     panel.textContent = formatRemain(remainMs);
-    panel.title = `${min}分後に次へ進む / クリックでOFF`;
-    panel.style.background = 'rgba(255,140,0,.90)';
-    panel.style.color = '#000';
+    panel.title = `${min}分後に次へ進む / クリックで停止`;
+    panel.style.background = 'rgba(0,0,0,.82)';
+    panel.style.color = '#fff';
   }
 
   function removeCountdownPanel() {
@@ -286,24 +373,21 @@
     if (panel) panel.remove();
   }
 
-  function extractValue(text, label, stopLabels) {
-    const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
+  function extractBetween(text, label, stopLabels) {
     const stops = stopLabels
-      .map(s => esc(s) + '\\s*[:：]')
+      .map(x => esc(x) + '\\s*[:：]')
       .join('|');
 
     const re = new RegExp(
-      esc(label) +
-      '\\s*[:：]\\s*([\\s\\S]*?)(?=\\s*(?:' + stops + ')|$)'
+      esc(label) + '\\s*[:：]\\s*([\\s\\S]*?)(?=\\s*(?:' + stops + ')|$)'
     );
 
     const m = text.match(re);
-    return m ? normalize(m[1]).replace(/\n/g, ' ').trim() : '';
+    return m ? normalize(m[1]) : '';
   }
 
   function parseRestaurantInfo() {
-    const text = normalize(getText());
+    const text = getText();
 
     if (isErrorPage(text)) return { error: true };
 
@@ -339,10 +423,10 @@
       '同意する'
     ];
 
-    const restaurant = extractValue(text, 'レストラン名', stopLabels);
+    const restaurant = extractBetween(text, 'レストラン名', stopLabels);
     const dateTime =
-      extractValue(text, 'ご利用日時', stopLabels) ||
-      extractValue(text, '予約日時', stopLabels);
+      extractBetween(text, 'ご利用日時', stopLabels) ||
+      extractBetween(text, '予約日時', stopLabels);
 
     if (!restaurant && !dateTime) return null;
 
@@ -373,7 +457,7 @@
     };
   }
 
-  async function notifyDiscord(data, comment = '', color = COLOR_NORMAL) {
+  async function notifyDiscord(data, noteLines = '', color = COLOR_START) {
     const webhookUrl = getDiscordWebhookUrl();
 
     if (!webhookUrl) {
@@ -381,21 +465,26 @@
       return;
     }
 
-    const ip = await getIpText();
+    const ip = await getPublicIpText();
+
+    const notes = Array.isArray(noteLines)
+      ? noteLines
+      : noteLines
+        ? [noteLines]
+        : [];
+
+    const lines = [];
+
+    notes.forEach(note => lines.push(note));
+    lines.push(`IP：${ip}`);
 
     const payload = {
       username: SCRIPT_NAME,
       embeds: [
         {
-          title: [
-            data.dateTime || '-',
-            data.restaurant || '-'
-          ].join('\n'),
-          description: comment || '',
-          color,
-          footer: {
-            text: `IP: ${ip}`
-          }
+          title: makeEmbedTitle(data),
+          description: lines.join('\n'),
+          color
         }
       ],
       allowed_mentions: {
@@ -420,58 +509,16 @@
     }
   }
 
-  async function notifyErrorDiscord() {
-    const webhookUrl = getDiscordWebhookUrl();
+  function tryErrorNotify() {
+    if (errorNotifiedThisPage) return;
 
-    if (!webhookUrl) {
-      console.warn(`[${SCRIPT_NAME}] Discord Webhook未設定: window.TDR_WEBHOOKS.restaurant が見つかりません`);
-      return;
-    }
+    const text = getText();
+    if (!isErrorPage(text)) return;
 
-    const data = makeStoredRestaurantInfo();
-    const ip = await getIpText();
+    errorNotifiedThisPage = true;
 
-    const payload = {
-      username: SCRIPT_NAME,
-      embeds: [
-        {
-          title: [
-            data.dateTime || '-',
-            data.restaurant || '-'
-          ].join('\n'),
-          description: [
-            'エラー',
-            'まことに申し訳ございません。',
-            '処理に失敗しました。',
-            'TOPページから再度お手続きをお願いします。',
-            '',
-            `path: ${location.pathname}`
-          ].join('\n'),
-          color: COLOR_ERROR,
-          footer: {
-            text: `IP: ${ip}`
-          }
-        }
-      ],
-      allowed_mentions: {
-        parse: []
-      }
-    };
-
-    try {
-      const res = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload),
-        keepalive: true
-      });
-
-      console.log(`[${SCRIPT_NAME}] エラー画面Discord通知送信:`, res.status);
-    } catch (e) {
-      console.warn(`[${SCRIPT_NAME}] エラー画面Discord通知失敗:`, e);
-    }
+    console.warn(`[${SCRIPT_NAME}] エラーページを検出`);
+    notifyDiscord(makeStoredRestaurantInfo(), getErrorNotifyLines(), COLOR_ERROR);
   }
 
   function isVisible(el) {
@@ -721,7 +768,7 @@
     if (countdownTimer) return;
     if (!isAgreeScreen()) return;
 
-    resetTimer();
+    if (countdownEnabled) resetTimer();
     updateCountdownPanel();
 
     countdownTimer = setInterval(handleCountdownTick, 500);
@@ -731,16 +778,20 @@
     const data = parseRestaurantInfo();
 
     if (data?.error) {
-      if (!errorNotifiedThisPage) {
-        errorNotifiedThisPage = true;
-        console.warn(`[${SCRIPT_NAME}] エラー画面を検知。強制通知します`);
-        notifyErrorDiscord();
-      }
+      tryErrorNotify();
       return;
     }
 
-    if (!data) return;
+    if (!data?.restaurant && !data?.dateTime) return;
     if (notifiedThisPage) return;
+
+    const note = getOpenNotifyNote();
+
+    if (!note) {
+      notifiedThisPage = true;
+      console.log(`[${SCRIPT_NAME}] 通常通知対象外:`, getCurrentPath());
+      return;
+    }
 
     console.log(`[${SCRIPT_NAME}] ご利用日時:`, data.dateTime || '-');
     console.log(`[${SCRIPT_NAME}] レストラン名:`, data.restaurant || '-');
@@ -752,12 +803,13 @@
     }
 
     notifiedThisPage = true;
-    notifyDiscord(data, getOpenNote(), COLOR_NORMAL);
+    notifyDiscord(data, note, getOpenNotifyColor());
   }
 
   function tick() {
     createTogglePanel();
     autoFillPhoneNumber();
+    tryErrorNotify();
     tryRestaurantNotify();
     startCountdownWatcher();
   }
