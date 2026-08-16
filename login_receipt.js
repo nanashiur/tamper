@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️仮予約ログインバック
-// @version      1.35
+// @version      1.45
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/login/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
@@ -17,6 +17,14 @@ const RECEIPT_SESSION_KEY = 'tdr_login_receipt_no_session';
 const WAIT = 10 * 60 * 1000;
 
 let errorNotified = false;
+
+Object.defineProperty(window, 'NO', {
+    configurable: true,
+    get() {
+        const receiptNO = localStorage.getItem(RECEIPT_KEY);
+        return receiptNO ? `?receiptNO=${receiptNO}` : '受付番号なし';
+    }
+});
 
 const currentReceiptNO = new URLSearchParams(location.search).get('receiptNO');
 
