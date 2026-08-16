@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.11
+// @version      1.12
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -33,7 +33,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log(`[${SCRIPT_NAME}] v1.11 起動: ${getCountdownMinutes()}分`);
+  console.log(`[${SCRIPT_NAME}] v1.12 起動: ${getCountdownMinutes()}分`);
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
@@ -47,8 +47,22 @@
     return phone || PHONE_FALLBACK;
   }
 
-  function getIpText() {
-    return String(window.TDR_WEBHOOKS?.ip || '').trim() || 'IP未設定';
+  async function getIpText() {
+    try {
+      const res = await fetch('https://api.ipify.org?format=json', {
+        cache: 'no-store'
+      });
+
+      if (!res.ok) throw new Error(`status ${res.status}`);
+
+      const data = await res.json();
+      const ip = String(data?.ip || '').trim();
+
+      return ip || 'IP取得不可';
+    } catch (e) {
+      console.warn(`[${SCRIPT_NAME}] IP取得失敗:`, e);
+      return 'IP取得不可';
+    }
   }
 
   function getCountdownMinutes() {
@@ -367,6 +381,8 @@
       return;
     }
 
+    const ip = await getIpText();
+
     const payload = {
       username: SCRIPT_NAME,
       embeds: [
@@ -378,7 +394,7 @@
           description: comment || '',
           color,
           footer: {
-            text: `IP: ${getIpText()}`
+            text: `IP: ${ip}`
           }
         }
       ],
@@ -413,6 +429,7 @@
     }
 
     const data = makeStoredRestaurantInfo();
+    const ip = await getIpText();
 
     const payload = {
       username: SCRIPT_NAME,
@@ -432,7 +449,7 @@
           ].join('\n'),
           color: COLOR_ERROR,
           footer: {
-            text: `IP: ${getIpText()}`
+            text: `IP: ${ip}`
           }
         }
       ],
