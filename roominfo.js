@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      2.38
+// @version      2.48
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -32,6 +32,7 @@
   const COUNTDOWN_MINUTES = 10;
 
   let timerEndAt = Date.now() + getCountdownMs();
+  let pausedRemainMs = null;
   let countdownTimer = null;
   let countdownEnabled = true;
   let notifiedThisPage = false;
@@ -43,7 +44,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v2.38 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
+  console.log('[ℹ️客室情報画面] v2.48 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
 
   function getPageMode() {
     const path = location.pathname.replace(/\/+$/, '');
@@ -116,16 +117,19 @@
 
   function resetTimer() {
     timerEndAt = Date.now() + getCountdownMs();
+    pausedRemainMs = null;
   }
 
   function toggleCountdown() {
-    countdownEnabled = !countdownEnabled;
-
     if (countdownEnabled) {
-      resetTimer();
-      console.log('[ℹ️客室情報画面] カウントON');
+      pausedRemainMs = Math.max(0, timerEndAt - Date.now());
+      countdownEnabled = false;
+      console.log('[ℹ️客室情報画面] カウントOFF 停止:', formatRemain(pausedRemainMs));
     } else {
-      console.log('[ℹ️客室情報画面] カウントOFF');
+      timerEndAt = Date.now() + Math.max(0, pausedRemainMs ?? getCountdownMs());
+      pausedRemainMs = null;
+      countdownEnabled = true;
+      console.log('[ℹ️客室情報画面] カウントON 再開');
     }
 
     updateCountdownPanel();
@@ -327,8 +331,8 @@
       'line-height:1',
       'padding:5px 7px',
       'border-radius:7px',
-      'background:rgba(255,140,0,.90)',
-      'color:#000',
+      'background:rgba(0,0,0,.82)',
+      'color:#fff',
       'box-shadow:0 1px 6px rgba(0,0,0,.35)',
       'text-align:center',
       'min-width:42px',
@@ -352,7 +356,9 @@
 
     if (!countdownEnabled) {
       panel.textContent = 'OFF';
-      panel.title = 'カウントOFF / クリックでON';
+      panel.title = pausedRemainMs !== null
+        ? `カウント停止中 残り${formatRemain(pausedRemainMs)} / クリックで再開`
+        : 'カウントOFF / クリックで再開';
       panel.style.background = 'rgba(0,0,0,.45)';
       panel.style.color = '#fff';
       return;
@@ -363,11 +369,11 @@
 
     panel.textContent = formatRemain(remainMs);
     panel.title = PAGE_MODE === 'next'
-      ? `${min}分後に戻る / クリックでOFF`
-      : `${min}分後に次へ進む / クリックでOFF`;
+      ? `${min}分後に戻る / クリックで停止`
+      : `${min}分後に次へ進む / クリックで停止`;
 
-    panel.style.background = 'rgba(255,140,0,.90)';
-    panel.style.color = '#000';
+    panel.style.background = 'rgba(0,0,0,.82)';
+    panel.style.color = '#fff';
   }
 
   function removeCountdownPanel() {
@@ -692,7 +698,7 @@
     if (countdownTimer) return;
     if (!isCountdownTargetScreen()) return;
 
-    resetTimer();
+    if (countdownEnabled) resetTimer();
     updateCountdownPanel();
 
     countdownTimer = setInterval(handleCountdownTick, 500);
