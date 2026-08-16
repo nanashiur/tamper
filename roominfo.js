@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      2.27
+// @version      2.38
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -22,8 +22,14 @@
   const LAST_ROOMINFO_KEY = 'tdr_roominfo_last_data';
   const STORAGE_TIMER_TRIGGER_TIME_KEY = 'tdr_11am_timer_trigger_time';
 
-  const COLOR_NORMAL = 0x00ff66;
-  const COLOR_ERROR = 0xffcc00;
+  const IP_API_URL = 'https://api.ipify.org?format=json';
+
+  const COLOR_START = 0x00ff66;
+  const COLOR_START_LOAD = 0x66ff99;
+  const COLOR_CONTINUE = 0x009933;
+  const COLOR_ERROR = 0xff9900;
+
+  const COUNTDOWN_MINUTES = 10;
 
   let timerEndAt = Date.now() + getCountdownMs();
   let countdownTimer = null;
@@ -31,12 +37,13 @@
   let notifiedThisPage = false;
   let errorNotifiedThisPage = false;
   let autoActionRunning = false;
+  let publicIpCache = null;
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v2.27 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
+  console.log('[ℹ️客室情報画面] v2.38 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
 
   function getPageMode() {
     const path = location.pathname.replace(/\/+$/, '');
@@ -53,13 +60,7 @@
   }
 
   function getCountdownMinutes() {
-    const path = getCurrentPath();
-
-    if (path === '/online/sp/wv/roominfo') return 20;
-    if (path === '/online/sp/wv/roominfo/next') return 5;
-    if (path === '/online/sp/wv/roominfo/back') return 5;
-
-    return 5;
+    return COUNTDOWN_MINUTES;
   }
 
   function getCountdownMs() {
@@ -189,6 +190,20 @@
     return '';
   }
 
+  function getOpenNotifyColor() {
+    const path = getCurrentPath();
+
+    if (path === '/online/sp/wv/roominfo' && isStartTimeInLoadWindow()) {
+      return COLOR_START_LOAD;
+    }
+
+    if (path === '/online/sp/wv/roominfo/back') {
+      return COLOR_CONTINUE;
+    }
+
+    return COLOR_START;
+  }
+
   function getErrorNotifyLines() {
     return [
       'エラー',
@@ -209,6 +224,35 @@
     const min = Math.floor(totalSec / 60);
     const sec = totalSec % 60;
     return `${min}:${String(sec).padStart(2, '0')}`;
+  }
+
+  async function getPublicIpText() {
+    if (publicIpCache !== null) return publicIpCache;
+
+    try {
+      const res = await fetch(IP_API_URL, { cache: 'no-store' });
+      const json = await res.json();
+
+      publicIpCache = json?.ip || '不明';
+      return publicIpCache;
+    } catch (e) {
+      console.warn('[ℹ️客室情報画面] IP取得失敗:', e);
+      publicIpCache = '不明';
+      return publicIpCache;
+    }
+  }
+
+  function makeEmbedTitle(data) {
+    const date = data.date || '-';
+    let room = data.room || '-';
+    const maxLen = 250;
+    const fixedLen = date.length + 1;
+
+    if (fixedLen + room.length > maxLen) {
+      room = room.slice(0, Math.max(1, maxLen - fixedLen - 1)) + '…';
+    }
+
+    return `${date}\n${room}`;
   }
 
   function createTogglePanel() {
@@ -283,8 +327,8 @@
       'line-height:1',
       'padding:5px 7px',
       'border-radius:7px',
-      'background:rgba(0,0,0,.82)',
-      'color:#fff',
+      'background:rgba(255,140,0,.90)',
+      'color:#000',
       'box-shadow:0 1px 6px rgba(0,0,0,.35)',
       'text-align:center',
       'min-width:42px',
@@ -322,10 +366,8 @@
       ? `${min}分後に戻る / クリックでOFF`
       : `${min}分後に次へ進む / クリックでOFF`;
 
-    panel.style.background = PAGE_MODE === 'next'
-      ? 'rgba(180,0,0,.88)'
-      : 'rgba(0,0,0,.82)';
-    panel.style.color = '#fff';
+    panel.style.background = 'rgba(255,140,0,.90)';
+    panel.style.color = '#000';
   }
 
   function removeCountdownPanel() {
@@ -396,7 +438,7 @@
     };
   }
 
-  async function notifyDiscord(data, noteLines = '', color = COLOR_NORMAL) {
+  async function notifyDiscord(data, noteLines = '', color = COLOR_START) {
     const webhookUrl = getDiscordWebhookUrl();
 
     if (!webhookUrl) {
@@ -404,10 +446,7 @@
       return;
     }
 
-    const lines = [
-      `**${data.date || '-'}**`,
-      `**${data.room || '-'}**`
-    ];
+    const ip = await getPublicIpText();
 
     const notes = Array.isArray(noteLines)
       ? noteLines
@@ -415,15 +454,16 @@
         ? [noteLines]
         : [];
 
-    if (notes.length) {
-      lines.push('');
-      notes.forEach(note => lines.push(`**${note}**`));
-    }
+    const lines = [];
+
+    notes.forEach(note => lines.push(note));
+    lines.push(`IP：${ip}`);
 
     const payload = {
       username: 'ℹ️客室情報画面',
       embeds: [
         {
+          title: makeEmbedTitle(data),
           description: lines.join('\n'),
           color
         }
@@ -507,12 +547,6 @@
 
     return [...document.querySelectorAll('a,button,input[type="button"],input[type="submit"]')]
       .find(el => normalize(el.innerText || el.value || '').includes('戻る') && isVisible(el));
-  }
-
-  function findActionButton() {
-    return PAGE_MODE === 'next'
-      ? findNextModeBackButton()
-      : findNormalNextButton();
   }
 
   function isButtonDisabled(el) {
@@ -693,7 +727,7 @@
     }
 
     notifiedThisPage = true;
-    notifyDiscord(data, note, COLOR_NORMAL);
+    notifyDiscord(data, note, getOpenNotifyColor());
   }
 
   function tick() {
