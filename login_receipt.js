@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️仮予約ログインバック
-// @version      1.24
+// @version      1.34
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/login/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/login_receipt.js
@@ -42,10 +42,10 @@ async function getPublicIp() {
         }
 
         const data = await res.json();
-        return data.ip || '取得失敗';
+        return data.ip || 'IP取得不可';
     } catch (e) {
         console.warn(`[${SCRIPT_NAME}] IP取得失敗:`, e);
-        return '取得失敗';
+        return 'IP取得不可';
     }
 }
 
@@ -104,16 +104,19 @@ async function checkError() {
 
 checkError();
 
-new MutationObserver(checkError).observe(document.body, {
-    childList: true,
-    subtree: true,
-    characterData: true
-});
+if (document.body) {
+    new MutationObserver(checkError).observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+}
 
 if (!currentReceiptNO) return;
 
 let enabled = true;
-let deadline = Date.now() + WAIT;
+let remainingMs = WAIT;
+let deadline = Date.now() + remainingMs;
 let fired = false;
 
 const panel = document.createElement('div');
@@ -129,8 +132,8 @@ Object.assign(panel.style, {
     lineHeight: '1',
     padding: '5px 7px',
     borderRadius: '7px',
-    background: 'rgba(255,140,0,.9)',
-    color: '#000',
+    background: 'rgba(0,0,0,.82)',
+    color: '#fff',
     boxShadow: '0 1px 6px rgba(0,0,0,.35)',
     textAlign: 'center',
     minWidth: '42px',
@@ -141,11 +144,14 @@ Object.assign(panel.style, {
 document.body.appendChild(panel);
 
 panel.addEventListener('click', () => {
-    enabled = !enabled;
-    fired = false;
-
     if (enabled) {
-        deadline = Date.now() + WAIT;
+        remainingMs = Math.max(0, deadline - Date.now());
+        enabled = false;
+        console.log(`[${SCRIPT_NAME}] カウント停止`);
+    } else {
+        enabled = true;
+        deadline = Date.now() + remainingMs;
+        console.log(`[${SCRIPT_NAME}] カウント再開`);
     }
 
     update();
@@ -154,28 +160,30 @@ panel.addEventListener('click', () => {
 function update() {
     if (!enabled) {
         panel.textContent = 'OFF';
-        panel.title = 'カウントOFF / クリックでON';
+        panel.title = 'カウント停止中 / クリックで再開';
         panel.style.background = 'rgba(0,0,0,.45)';
         panel.style.color = '#fff';
         return;
     }
 
-    const remain = Math.max(0, deadline - Date.now());
-    const sec = Math.ceil(remain / 1000);
+    remainingMs = Math.max(0, deadline - Date.now());
+
+    const sec = Math.ceil(remainingMs / 1000);
     const min = Math.floor(sec / 60);
     const s = String(sec % 60).padStart(2, '0');
 
     panel.textContent = `${min}:${s}`;
-    panel.title = '10分後に戻る / クリックでOFF';
-    panel.style.background = 'rgba(255,140,0,.9)';
-    panel.style.color = '#000';
+    panel.title = '10分後に戻る / クリックで停止';
+    panel.style.background = 'rgba(0,0,0,.82)';
+    panel.style.color = '#fff';
 
-    if (remain <= 0 && !fired) {
+    if (remainingMs <= 0 && !fired) {
         const back = document.querySelector('p.btnBack.headerBack');
 
         if (back) {
             fired = true;
             panel.textContent = '戻る';
+            console.log(`[${SCRIPT_NAME}] 10分終了。戻ります`);
             back.click();
         }
     }
