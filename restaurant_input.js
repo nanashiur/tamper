@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.10
+// @version      1.11
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -33,7 +33,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log(`[${SCRIPT_NAME}] v1.10 起動: ${getCountdownMinutes()}分`);
+  console.log(`[${SCRIPT_NAME}] v1.11 起動: ${getCountdownMinutes()}分`);
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
@@ -367,22 +367,19 @@
       return;
     }
 
-    const lines = [
-      data.dateTime || '-',
-      data.restaurant || '-',
-      ''
-    ];
-
-    if (comment) lines.push(comment);
-
-    lines.push(`IP: ${getIpText()}`);
-
     const payload = {
       username: SCRIPT_NAME,
       embeds: [
         {
-          description: lines.join('\n'),
-          color
+          title: [
+            data.dateTime || '-',
+            data.restaurant || '-'
+          ].join('\n'),
+          description: comment || '',
+          color,
+          footer: {
+            text: `IP: ${getIpText()}`
+          }
         }
       ],
       allowed_mentions: {
@@ -421,19 +418,22 @@
       username: SCRIPT_NAME,
       embeds: [
         {
-          description: [
+          title: [
             data.dateTime || '-',
-            data.restaurant || '-',
-            '',
+            data.restaurant || '-'
+          ].join('\n'),
+          description: [
             'エラー',
             'まことに申し訳ございません。',
             '処理に失敗しました。',
             'TOPページから再度お手続きをお願いします。',
             '',
-            `path: ${location.pathname}`,
-            `IP: ${getIpText()}`
+            `path: ${location.pathname}`
           ].join('\n'),
-          color: COLOR_ERROR
+          color: COLOR_ERROR,
+          footer: {
+            text: `IP: ${getIpText()}`
+          }
         }
       ],
       allowed_mentions: {
