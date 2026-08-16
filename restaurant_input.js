@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.09
+// @version      1.10
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -16,6 +16,7 @@
   const SCRIPT_NAME = 'ℹ️レストラン予約情報入力';
   const STORAGE_KEY_NOTIFY = 'tdr_restaurant_input_notify_enabled';
   const STORAGE_KEY_NOTIFY_DATE = 'tdr_restaurant_input_notify_date';
+  const LAST_RESTAURANT_INPUT_KEY = 'tdr_restaurant_input_last_data';
   const PHONE_FALLBACK = '090';
 
   const COLOR_NORMAL = 0x00ff66;
@@ -32,7 +33,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log(`[${SCRIPT_NAME}] v1.09 起動: ${getCountdownMinutes()}分`);
+  console.log(`[${SCRIPT_NAME}] v1.10 起動: ${getCountdownMinutes()}分`);
 
   function getDiscordWebhookUrl() {
     return window.TDR_WEBHOOKS?.restaurant || '';
@@ -221,8 +222,8 @@
       'line-height:1',
       'padding:5px 7px',
       'border-radius:7px',
-      'background:rgba(0,0,0,.82)',
-      'color:#fff',
+      'background:rgba(255,140,0,.90)',
+      'color:#000',
       'box-shadow:0 1px 6px rgba(0,0,0,.35)',
       'text-align:center',
       'min-width:42px',
@@ -257,8 +258,8 @@
 
     panel.textContent = formatRemain(remainMs);
     panel.title = `${min}分後に次へ進む / クリックでOFF`;
-    panel.style.background = 'rgba(0,0,0,.82)';
-    panel.style.color = '#fff';
+    panel.style.background = 'rgba(255,140,0,.90)';
+    panel.style.color = '#000';
   }
 
   function removeCountdownPanel() {
@@ -331,14 +332,34 @@
 
     if (!restaurant && !dateTime) return null;
 
-    return {
+    const data = {
       error: false,
       restaurant,
       dateTime
     };
+
+    sessionStorage.setItem(LAST_RESTAURANT_INPUT_KEY, JSON.stringify(data));
+    return data;
   }
 
-  async function notifyDiscord(data, comment = '') {
+  function getLastRestaurantInfo() {
+    try {
+      return JSON.parse(sessionStorage.getItem(LAST_RESTAURANT_INPUT_KEY) || '{}');
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function makeStoredRestaurantInfo() {
+    const last = getLastRestaurantInfo();
+
+    return {
+      dateTime: last.dateTime || '日時取得不可',
+      restaurant: last.restaurant || 'レストラン取得不可'
+    };
+  }
+
+  async function notifyDiscord(data, comment = '', color = COLOR_NORMAL) {
     const webhookUrl = getDiscordWebhookUrl();
 
     if (!webhookUrl) {
@@ -346,19 +367,22 @@
       return;
     }
 
+    const lines = [
+      data.dateTime || '-',
+      data.restaurant || '-',
+      ''
+    ];
+
+    if (comment) lines.push(comment);
+
+    lines.push(`IP: ${getIpText()}`);
+
     const payload = {
       username: SCRIPT_NAME,
       embeds: [
         {
-          title: [
-            data.dateTime || '-',
-            data.restaurant || '-'
-          ].join('\n'),
-          description: comment ? `**${comment}**` : '',
-          color: COLOR_NORMAL,
-          footer: {
-            text: `IP: ${getIpText()}`
-          }
+          description: lines.join('\n'),
+          color
         }
       ],
       allowed_mentions: {
@@ -391,22 +415,25 @@
       return;
     }
 
+    const data = makeStoredRestaurantInfo();
+
     const payload = {
       username: SCRIPT_NAME,
       embeds: [
         {
-          title: 'エラー画面を検知',
           description: [
-            '**まことに申し訳ございません。**',
-            '**処理に失敗しました。**',
-            '**TOPページから再度お手続きをお願いします。**',
+            data.dateTime || '-',
+            data.restaurant || '-',
             '',
-            `path: ${location.pathname}`
+            'エラー',
+            'まことに申し訳ございません。',
+            '処理に失敗しました。',
+            'TOPページから再度お手続きをお願いします。',
+            '',
+            `path: ${location.pathname}`,
+            `IP: ${getIpText()}`
           ].join('\n'),
-          color: COLOR_ERROR,
-          footer: {
-            text: `IP: ${getIpText()}`
-          }
+          color: COLOR_ERROR
         }
       ],
       allowed_mentions: {
@@ -708,7 +735,7 @@
     }
 
     notifiedThisPage = true;
-    notifyDiscord(data, getOpenNote());
+    notifyDiscord(data, getOpenNote(), COLOR_NORMAL);
   }
 
   function tick() {
