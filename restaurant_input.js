@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.13
+// @version      1.14
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -45,7 +45,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log(`[${SCRIPT_NAME}] v1.13 起動: ${getCountdownMinutes()}分`);
+  console.log(`[${SCRIPT_NAME}] v1.14 起動: ${getCountdownMinutes()}分`);
 
   function getCurrentPath() {
     return location.pathname.replace(/\/+$/, '');
@@ -345,10 +345,10 @@
     if (!panel) return;
 
     if (!countdownEnabled) {
-      panel.textContent = 'OFF';
-      panel.title = pausedRemainMs !== null
-        ? `カウント停止中 残り${formatRemain(pausedRemainMs)} / クリックで再開`
-        : 'カウントOFF / クリックで再開';
+      const remainText = formatRemain(pausedRemainMs ?? Math.max(0, timerEndAt - Date.now()));
+
+      panel.textContent = remainText;
+      panel.title = `カウント停止中 残り${remainText} / クリックで再開`;
       panel.style.background = 'rgba(0,0,0,.45)';
       panel.style.color = '#fff';
       return;
