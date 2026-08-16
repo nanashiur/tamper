@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      2.48
+// @version      2.49
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -44,7 +44,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v2.48 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
+  console.log('[ℹ️客室情報画面] v2.49 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
 
   function getPageMode() {
     const path = location.pathname.replace(/\/+$/, '');
@@ -355,10 +355,10 @@
     if (!panel) return;
 
     if (!countdownEnabled) {
-      panel.textContent = 'OFF';
-      panel.title = pausedRemainMs !== null
-        ? `カウント停止中 残り${formatRemain(pausedRemainMs)} / クリックで再開`
-        : 'カウントOFF / クリックで再開';
+      const remainText = formatRemain(pausedRemainMs ?? Math.max(0, timerEndAt - Date.now()));
+
+      panel.textContent = remainText;
+      panel.title = `カウント停止中 残り${remainText} / クリックで再開`;
       panel.style.background = 'rgba(0,0,0,.45)';
       panel.style.color = '#fff';
       return;
