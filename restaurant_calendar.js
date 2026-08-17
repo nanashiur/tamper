@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      1.82
+// @version      1.92
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -15,7 +15,7 @@ window.__tdr_weekly_restaurant_monitor=true;
 
 const NAME='🍴💻️レストラン週間モニター';
 const WAIT=60000,UI_TICK=1000,PENDING_ERROR_MS=300000,IP_TIMEOUT=5000;
-const RED=0xFF0000,BLACK=0x000000,BLUE=0x3498DB,GREEN=0x2ECC71,ORANGE=0xFFA500;
+const RED=0xFF0000,BLACK=0x333333,BLUE=0x007BFF,GREEN=0x28A745,ORANGE=0xFFA500;
 const AUTO_PREFIX='tdr_weekly_restaurant_auto_',OLD_AUTO_KEY='tdr_weekly_restaurant_auto';
 const NOTIFY_KEY='tdr_weekly_restaurant_notify_v2',OLD_NOTIFY_KEY='tdr_weekly_restaurant_notify',OLD_NOTIFY_MODE_KEY='tdr_weekly_restaurant_notify_mode';
 const MEALS=['朝食','昼食','夕食'];
@@ -28,21 +28,31 @@ function ymd(){
   const d=new Date();
   return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
 }
+
 function nowText(){
   const d=new Date();
-  return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
+
 function fmtDateJa(v){
-  const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8),dt=new Date(y,m-1,d);
-  return `${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;
+  const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8);
+  const dt=new Date(y,m-1,d);
+  return `${y}年${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;
 }
-function isMaintenance(){const h=new Date().getHours();return h>=3&&h<5}
+
+function isMaintenance(){
+  const h=new Date().getHours();
+  return h>=3&&h<5;
+}
+
 function loadNotifyState(){
   try{
     const v=JSON.parse(localStorage.getItem(NOTIFY_KEY)||'null');
     if(v?.date===ymd()&&['all','vacancy','off'].includes(v.mode))return v;
   }catch{}
+
   let mode='all';
+
   try{
     const old=JSON.parse(localStorage.getItem(OLD_NOTIFY_KEY)||'null');
     if(old?.date===ymd()){
@@ -50,56 +60,108 @@ function loadNotifyState(){
       else if(localStorage.getItem(OLD_NOTIFY_MODE_KEY)==='noFull')mode='vacancy';
     }
   }catch{}
+
   const v={date:ymd(),mode};
   localStorage.setItem(NOTIFY_KEY,JSON.stringify(v));
   return v;
 }
+
 function syncNotifyDay(){
   if(notifyState.date!==ymd()){
     notifyState={date:ymd(),mode:'all'};
     localStorage.setItem(NOTIFY_KEY,JSON.stringify(notifyState));
   }
 }
-function normalizeMeal(text){const t=String(text||'').replace(/\s+/g,'');return MEALS.find(x=>t.includes(x))||''}
+
+function normalizeMeal(text){
+  const t=String(text||'').replace(/\s+/g,'');
+  return MEALS.find(x=>t.includes(x))||'';
+}
+
 function getMealFromBox(box){
   const h=box.querySelector('.heading');
-  return normalizeMeal([h?.textContent,h?.getAttribute('title'),h?.querySelector('img')?.alt,box.querySelector('img[alt*="朝食"],img[alt*="昼食"],img[alt*="夕食"]')?.alt].filter(Boolean).join(' '));
+  return normalizeMeal([
+    h?.textContent,
+    h?.getAttribute('title'),
+    h?.querySelector('img')?.alt,
+    box.querySelector('img[alt*="朝食"],img[alt*="昼食"],img[alt*="夕食"]')?.alt
+  ].filter(Boolean).join(' '));
 }
+
 function restaurantName(){
-  return document.querySelector('.boxRestaurant02 .header h1.heading')?.textContent.replace(/\s+/g,' ').trim()||'レストラン名取得失敗';
+  return document.querySelector('.boxRestaurant02 .header h1.heading')
+    ?.textContent.replace(/\s+/g,' ').trim()
+    ||'レストラン名取得失敗';
 }
+
 function getState(meal){
   if(mealStates.has(meal))return mealStates.get(meal);
-  const saved=localStorage.getItem(AUTO_PREFIX+meal),old=localStorage.getItem(OLD_AUTO_KEY);
-  const s={meal,enabled:saved!==null?saved!=='0':old!=='0',pending:0,startedAt:0,deadline:0,timer:null,row:null,manual:null,panel:null,error403:false,pendingError:false};
+
+  const saved=localStorage.getItem(AUTO_PREFIX+meal);
+  const old=localStorage.getItem(OLD_AUTO_KEY);
+
+  const s={
+    meal,
+    enabled:saved!==null?saved!=='0':old!=='0',
+    pending:0,
+    startedAt:0,
+    deadline:0,
+    timer:null,
+    row:null,
+    manual:null,
+    panel:null,
+    error403:false,
+    pendingError:false
+  };
+
   mealStates.set(meal,s);
   return s;
 }
+
 function scanCommodityMap(){
   document.querySelectorAll('.boxRestaurant04').forEach(box=>{
-    const meal=getMealFromBox(box),commodity=box.querySelector('.commodityCd,.commodityCD')?.value?.trim()||'';
-    if(meal&&commodity)commodityMeal.set(commodity,meal);
+    const meal=getMealFromBox(box);
+    const commodity=box.querySelector('.commodityCd,.commodityCD')?.value?.trim()||'';
+
+    if(meal&&commodity){
+      commodityMeal.set(commodity,meal);
+    }
   });
 }
+
 function resolveMeal(commodity){
   if(!commodity)return '';
   if(commodityMeal.has(commodity))return commodityMeal.get(commodity);
+
   scanCommodityMap();
+
   return commodityMeal.get(commodity)||'';
 }
+
 function refreshBlocks(){
   blocks.clear();
+
   document.querySelectorAll('.boxRestaurant04').forEach(box=>{
-    const meal=getMealFromBox(box),next=box.querySelector('.nextWeekLink');
+    const meal=getMealFromBox(box);
+    const next=box.querySelector('.nextWeekLink');
+
     if(!meal||!next)return;
+
     const commodity=box.querySelector('.commodityCd,.commodityCD')?.value?.trim()||'';
+
     blocks.set(meal,{box,next,commodity});
-    if(commodity)commodityMeal.set(commodity,meal);
+
+    if(commodity){
+      commodityMeal.set(commodity,meal);
+    }
+
     getState(meal);
   });
+
   createPanels();
   drainUnresolved();
 }
+
 function queueRefresh(){
   clearTimeout(refreshTimer);
   refreshTimer=setTimeout(refreshBlocks,100);
@@ -121,11 +183,13 @@ function baseButtonStyle(el){
     fontFamily:'Arial,"Yu Gothic",sans-serif'
   });
 }
+
 function createPanels(){
   if(!document.body)return;
 
   if(!panelRoot){
     panelRoot=document.createElement('div');
+
     Object.assign(panelRoot.style,{
       position:'fixed',
       top:'14px',
@@ -135,6 +199,7 @@ function createPanels(){
       flexDirection:'column',
       gap:'5px'
     });
+
     document.body.appendChild(panelRoot);
   }
 
@@ -148,6 +213,7 @@ function createPanels(){
 
     if(!s.row){
       const row=document.createElement('div');
+
       Object.assign(row.style,{
         order:String(i),
         display:'flex',
@@ -155,7 +221,9 @@ function createPanels(){
       });
 
       const manual=document.createElement('div');
+
       baseButtonStyle(manual);
+
       Object.assign(manual.style,{
         width:'32px',
         background:'#444',
@@ -163,21 +231,26 @@ function createPanels(){
         fontSize:'18px',
         padding:'3px 0'
       });
+
       manual.textContent='↻';
       manual.title=`${meal} 手動発火`;
       manual.onclick=()=>manualFire(meal);
 
       const panel=document.createElement('div');
+
       baseButtonStyle(panel);
+
       Object.assign(panel.style,{
         width:'90px',
         color:'#fff'
       });
+
       panel.title=`${meal} 自動監視 ON / OFF`;
       panel.onclick=()=>toggleMeal(meal);
 
       row.append(manual,panel);
       panelRoot.appendChild(row);
+
       s.row=row;
       s.manual=manual;
       s.panel=panel;
@@ -188,13 +261,17 @@ function createPanels(){
 
   if(!notifyPanel){
     notifyPanel=document.createElement('div');
+
     baseButtonStyle(notifyPanel);
+
     Object.assign(notifyPanel.style,{
       order:'10',
       width:'127px'
     });
+
     notifyPanel.title='通知モード：全通知 → 空席通知 → OFF';
     notifyPanel.onclick=toggleNotify;
+
     panelRoot.appendChild(notifyPanel);
   }
 
@@ -203,55 +280,101 @@ function createPanels(){
 
 function toggleMeal(meal){
   const s=getState(meal);
-  s.enabled=!s.enabled;
-  localStorage.setItem(AUTO_PREFIX+meal,s.enabled?'1':'0');
 
-  if(!s.enabled)clearTimer(s);
-  else if(!s.pending&&!isMaintenance())schedule(meal);
+  s.enabled=!s.enabled;
+
+  localStorage.setItem(
+    AUTO_PREFIX+meal,
+    s.enabled?'1':'0'
+  );
+
+  if(!s.enabled){
+    clearTimer(s);
+  }else if(!s.pending&&!isMaintenance()){
+    schedule(meal);
+  }
 
   renderPanels();
 }
+
 function manualFire(meal){
   const s=getState(meal);
+
   if(s.pending||isMaintenance())return;
+
   fireSameWeek(meal,true);
 }
+
 function toggleNotify(){
   syncNotifyDay();
-  notifyState.mode=notifyState.mode==='all'?'vacancy':notifyState.mode==='vacancy'?'off':'all';
-  localStorage.setItem(NOTIFY_KEY,JSON.stringify(notifyState));
+
+  notifyState.mode=
+    notifyState.mode==='all'
+      ?'vacancy'
+      :notifyState.mode==='vacancy'
+        ?'off'
+        :'all';
+
+  localStorage.setItem(
+    NOTIFY_KEY,
+    JSON.stringify(notifyState)
+  );
+
   renderPanels();
 }
+
 function clearTimer(s){
   if(s.timer)clearTimeout(s.timer);
+
   s.timer=null;
   s.deadline=0;
 }
+
 function schedule(meal){
   const s=getState(meal);
+
   clearTimer(s);
+
   if(!s.enabled||isMaintenance())return;
 
   s.deadline=performance.now()+WAIT;
+
   s.timer=setTimeout(()=>{
     s.timer=null;
     s.deadline=0;
+
     fireSameWeek(meal,false);
   },WAIT);
 }
+
 function renderPanels(){
   syncNotifyDay();
-  const now=performance.now(),maintenance=isMaintenance();
+
+  const now=performance.now();
+  const maintenance=isMaintenance();
 
   MEALS.forEach(meal=>{
     const s=mealStates.get(meal);
+
     if(!s?.panel||!blocks.has(meal))return;
 
     if(s.manual){
-      s.manual.style.background=maintenance||s.pending?'#777':'#444';
+      s.manual.style.background=
+        maintenance||s.pending
+          ?'#777'
+          :'#444';
+
       s.manual.style.color='#fff';
-      s.manual.style.cursor=maintenance||s.pending?'default':'pointer';
-      s.manual.style.opacity=maintenance||s.pending?'0.6':'1';
+
+      s.manual.style.cursor=
+        maintenance||s.pending
+          ?'default'
+          :'pointer';
+
+      s.manual.style.opacity=
+        maintenance||s.pending
+          ?'0.6'
+          :'1';
     }
 
     if(maintenance){
@@ -264,9 +387,12 @@ function renderPanels(){
     if(s.error403){
       s.panel.style.background='#ff8c00';
       s.panel.style.color='#000';
-      s.panel.textContent=s.deadline
-        ?`${meal} 403 ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`
-        :`${meal} 403`;
+
+      s.panel.textContent=
+        s.deadline
+          ?`${meal} 403 ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`
+          :`${meal} 403`;
+
       return;
     }
 
@@ -280,7 +406,10 @@ function renderPanels(){
     if(s.pending>0){
       s.panel.style.background='#7b2cbf';
       s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} 読込 ${Math.floor((now-s.startedAt)/1000)}`;
+
+      s.panel.textContent=
+        `${meal} 読込 ${Math.floor((now-s.startedAt)/1000)}`;
+
       return;
     }
 
@@ -294,7 +423,10 @@ function renderPanels(){
     if(s.deadline){
       s.panel.style.background='#1976d2';
       s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`;
+
+      s.panel.textContent=
+        `${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`;
+
       return;
     }
 
@@ -305,15 +437,17 @@ function renderPanels(){
 
   if(notifyPanel){
     if(notifyState.mode==='all'){
-      notifyPanel.style.background='#1976d2';
+      notifyPanel.style.background='#007bff';
       notifyPanel.style.color='#fff';
       notifyPanel.textContent='📢 全通知';
+
     }else if(notifyState.mode==='vacancy'){
-      notifyPanel.style.background='#d32f2f';
+      notifyPanel.style.background='#ff0000';
       notifyPanel.style.color='#fff';
-      notifyPanel.textContent='🟥 空席通知';
+      notifyPanel.textContent='🔴 空席通知';
+
     }else{
-      notifyPanel.style.background='#555';
+      notifyPanel.style.background='#333';
       notifyPanel.style.color='#fff';
       notifyPanel.textContent='🔕 OFF';
     }
@@ -322,20 +456,32 @@ function renderPanels(){
 
 function maintenanceTick(){
   const maintenance=isMaintenance();
+
   if(maintenance===wasMaintenance)return;
 
   wasMaintenance=maintenance;
 
   if(maintenance){
     mealStates.forEach(clearTimer);
-    console.log(`[${NAME}] メンテナンス停止`);
+
+    console.log(
+      `[${NAME}] メンテナンス停止`
+    );
+
   }else{
     refreshBlocks();
+
     MEALS.forEach(meal=>{
       const s=mealStates.get(meal);
-      if(s?.enabled&&!s.pending)fireSameWeek(meal,false);
+
+      if(s?.enabled&&!s.pending){
+        fireSameWeek(meal,false);
+      }
     });
-    console.log(`[${NAME}] メンテナンス終了・再開`);
+
+    console.log(
+      `[${NAME}] メンテナンス終了・再開`
+    );
   }
 
   renderPanels();
@@ -343,113 +489,246 @@ function maintenanceTick(){
 
 function fireSameWeek(meal,manual=false){
   const s=getState(meal);
-  if((!manual&&!s.enabled)||s.pending||isMaintenance())return;
+
+  if(
+    (!manual&&!s.enabled)||
+    s.pending||
+    isMaintenance()
+  ){
+    return;
+  }
 
   refreshBlocks();
 
   const block=blocks.get(meal);
+
   if(!block){
     if(!manual)schedule(meal);
     return;
   }
 
   const link=block.next;
-  const display=link.closest('.header')
-    ?.nextElementSibling
-    ?.querySelector('.date li:first-child .display');
+
+  const display=
+    link
+      .closest('.header')
+      ?.nextElementSibling
+      ?.querySelector(
+        '.date li:first-child .display'
+      );
 
   const jq=window.jQuery||window.$;
   const format=window.webapiFormat;
 
-  if(!display||!jq?.datepicker||!format){
-    console.warn(`[${NAME}] ${meal} 日付DOM未検出`);
+  if(
+    !display||
+    !jq?.datepicker||
+    !format
+  ){
+    console.warn(
+      `[${NAME}] ${meal} 日付DOM未検出`
+    );
+
     if(!manual)schedule(meal);
+
     return;
   }
 
-  const current=display.textContent.trim();
+  const current=
+    display.textContent.trim();
+
   let prev;
 
   try{
-    const d=jq.datepicker.parseDate(format,current,{});
-    d.setDate(d.getDate()-7);
-    prev=jq.datepicker.formatDate(format,d,{});
+    const d=
+      jq.datepicker.parseDate(
+        format,
+        current,
+        {}
+      );
+
+    d.setDate(
+      d.getDate()-7
+    );
+
+    prev=
+      jq.datepicker.formatDate(
+        format,
+        d,
+        {}
+      );
+
   }catch(e){
-    console.warn(`[${NAME}] ${meal} 日付変換失敗`,e);
+    console.warn(
+      `[${NAME}] ${meal} 日付変換失敗`,
+      e
+    );
+
     if(!manual)schedule(meal);
+
     return;
   }
 
-  const hadNoData=link.classList.contains('hasNoData');
+  const hadNoData=
+    link.classList.contains(
+      'hasNoData'
+    );
+
   const before=s.pending;
 
   display.textContent=prev;
-  link.classList.remove('hasNoData');
+
+  link.classList.remove(
+    'hasNoData'
+  );
+
   autoHint=meal;
 
   try{
     link.click();
+
   }catch(e){
-    console.error(`[${NAME}] ${meal} 発火失敗`,e);
-    sendErrorDiscord(meal,'発火エラー');
+    console.error(
+      `[${NAME}] ${meal} 発火失敗`,
+      e
+    );
+
+    sendErrorDiscord(
+      meal,
+      '発火エラー'
+    );
+
   }finally{
     autoHint='';
   }
 
   if(s.pending===before){
-    const d2=block.box.querySelector('.timeList .date li:first-child .display');
-    if(d2)d2.textContent=current;
-    if(hadNoData)link.classList.add('hasNoData');
+    const d2=
+      block.box.querySelector(
+        '.timeList .date li:first-child .display'
+      );
 
-    sendErrorDiscord(meal,'ajaxNextWeekList未発火');
+    if(d2){
+      d2.textContent=current;
+    }
 
-    if(!manual)schedule(meal);
+    if(hadNoData){
+      link.classList.add(
+        'hasNoData'
+      );
+    }
+
+    sendErrorDiscord(
+      meal,
+      'ajaxNextWeekList未発火'
+    );
+
+    if(!manual){
+      schedule(meal);
+    }
   }
 }
 
 function bodyString(body){
-  if(typeof body==='string')return body;
-  if(body instanceof URLSearchParams)return body.toString();
+  if(typeof body==='string'){
+    return body;
+  }
+
+  if(body instanceof URLSearchParams){
+    return body.toString();
+  }
+
   return '';
 }
+
 function watched(url){
   try{
-    return PATHS.includes(new URL(url,location.href).pathname);
+    return PATHS.includes(
+      new URL(
+        url,
+        location.href
+      ).pathname
+    );
+
   }catch{
     return false;
   }
 }
+
 function has(obj,key){
-  return Object.prototype.hasOwnProperty.call(obj,key);
+  return Object.prototype.hasOwnProperty.call(
+    obj,
+    key
+  );
 }
+
 function slotStatus(li){
   if(
     li.classList.contains('reservationAble')||
-    li.querySelector('a[onclick*="toOrderForWeek"]')||
-    li.querySelector('img[alt="予約する"]')
-  )return '空席';
+    li.querySelector(
+      'a[onclick*="toOrderForWeek"]'
+    )||
+    li.querySelector(
+      'img[alt="予約する"]'
+    )
+  ){
+    return '空席';
+  }
 
   if(
     li.classList.contains('full')||
-    li.querySelector('.text')?.textContent.includes('満席')
-  )return '満席';
+    li.querySelector('.text')
+      ?.textContent
+      .includes('満席')
+  ){
+    return '満席';
+  }
 
   return '不明';
 }
 
 function readCurrentSlots(meal){
   const block=blocks.get(meal);
-  if(!block)throw new Error('食事区分DOMなし');
 
-  const dates=[...block.box.querySelectorAll('.timeList .date li .display')]
-    .map(e=>e.textContent.trim())
+  if(!block){
+    throw new Error(
+      '食事区分DOMなし'
+    );
+  }
+
+  const dates=[
+    ...block.box.querySelectorAll(
+      '.timeList .date li .display'
+    )
+  ]
+    .map(
+      e=>e.textContent.trim()
+    )
     .filter(Boolean);
 
-  const lists=[...block.box.querySelectorAll('.timeTable .slider .view > ul.cf')];
+  const lists=[
+    ...block.box.querySelectorAll(
+      '.timeTable .slider .view > ul.cf'
+    )
+  ];
 
-  if(!dates.length)throw new Error('日付DOMなし');
-  if(!lists.length)throw new Error('週間在庫DOMなし');
-  if(dates.length!==lists.length)throw new Error(`週間DOM不整合 ${dates.length}/${lists.length}`);
+  if(!dates.length){
+    throw new Error(
+      '日付DOMなし'
+    );
+  }
+
+  if(!lists.length){
+    throw new Error(
+      '週間在庫DOMなし'
+    );
+  }
+
+  if(dates.length!==lists.length){
+    throw new Error(
+      `週間DOM不整合 ${dates.length}/${lists.length}`
+    );
+  }
 
   const slots={};
 
@@ -457,11 +736,17 @@ function readCurrentSlots(meal){
     const date=dates[i];
 
     [...ul.children].forEach(li=>{
-      const time=li.querySelector('.time')?.textContent?.trim();
+      const time=
+        li
+          .querySelector('.time')
+          ?.textContent
+          ?.trim();
 
       if(!time)return;
 
-      slots[`${date}|${time}`]=slotStatus(li);
+      slots[
+        `${date}|${time}`
+      ]=slotStatus(li);
     });
   });
 
@@ -473,7 +758,10 @@ function readCurrentSlots(meal){
 }
 
 function snapshotKey(meta,meal,current){
-  const p=new URLSearchParams(meta.body);
+  const p=
+    new URLSearchParams(
+      meta.body
+    );
 
   return [
     meal,
@@ -489,11 +777,22 @@ function snapshotKey(meta,meal,current){
 }
 
 function compareAndSave(meta,meal,current){
-  const key=snapshotKey(meta,meal,current);
-  const previous=snapshots.get(key);
+  const key=
+    snapshotKey(
+      meta,
+      meal,
+      current
+    );
+
+  const previous=
+    snapshots.get(key);
 
   if(!previous){
-    snapshots.set(key,current.slots);
+    snapshots.set(
+      key,
+      current.slots
+    );
+
     return [];
   }
 
@@ -504,7 +803,8 @@ function compareAndSave(meta,meal,current){
   Object.keys(curr).forEach(slot=>{
     if(has(prev,slot))return;
 
-    const [date,time]=slot.split('|');
+    const [date,time]=
+      slot.split('|');
 
     changes.push({
       type:'added',
@@ -518,7 +818,8 @@ function compareAndSave(meta,meal,current){
   Object.keys(prev).forEach(slot=>{
     if(has(curr,slot))return;
 
-    const [date,time]=slot.split('|');
+    const [date,time]=
+      slot.split('|');
 
     changes.push({
       type:'deleted',
@@ -534,9 +835,16 @@ function compareAndSave(meta,meal,current){
     const from=prev[slot];
     const to=curr[slot];
 
-    if(from==='不明'||to==='不明'||from===to)return;
+    if(
+      from==='不明'||
+      to==='不明'||
+      from===to
+    ){
+      return;
+    }
 
-    const [date,time]=slot.split('|');
+    const [date,time]=
+      slot.split('|');
 
     changes.push({
       type:'changed',
@@ -559,30 +867,57 @@ function compareAndSave(meta,meal,current){
         :curr[slot];
   });
 
-  snapshots.set(key,next);
+  snapshots.set(
+    key,
+    next
+  );
+
   return changes;
 }
 
-const nativeOpen=XMLHttpRequest.prototype.open;
-const nativeSend=XMLHttpRequest.prototype.send;
+const nativeOpen=
+  XMLHttpRequest.prototype.open;
 
-XMLHttpRequest.prototype.open=function(method,url,...args){
+const nativeSend=
+  XMLHttpRequest.prototype.send;
+
+XMLHttpRequest.prototype.open=
+function(method,url,...args){
   this.__tdrWeek={
-    method:String(method||'GET').toUpperCase(),
+    method:String(
+      method||'GET'
+    ).toUpperCase(),
     url
   };
 
-  return nativeOpen.call(this,method,url,...args);
+  return nativeOpen.call(
+    this,
+    method,
+    url,
+    ...args
+  );
 };
 
-XMLHttpRequest.prototype.send=function(body){
+XMLHttpRequest.prototype.send=
+function(body){
   const x=this.__tdrWeek;
 
-  if(x?.method==='POST'&&watched(x.url)){
-    const str=bodyString(body);
-    const params=new URLSearchParams(str);
-    const commodity=params.get('commodityCD')||'';
-    const meal=autoHint||resolveMeal(commodity);
+  if(
+    x?.method==='POST'&&
+    watched(x.url)
+  ){
+    const str=
+      bodyString(body);
+
+    const params=
+      new URLSearchParams(str);
+
+    const commodity=
+      params.get('commodityCD')||'';
+
+    const meal=
+      autoHint||
+      resolveMeal(commodity);
 
     const meta={
       body:str,
@@ -591,63 +926,93 @@ XMLHttpRequest.prototype.send=function(body){
     };
 
     if(meal){
-      const s=getState(meal);
+      const s=
+        getState(meal);
 
       clearTimer(s);
 
       if(s.pending++===0){
-        s.startedAt=performance.now();
+        s.startedAt=
+          performance.now();
+
         s.pendingError=false;
       }
 
       renderPanels();
     }
 
-    meta.pendingTimer=setTimeout(()=>{
-      const pendingMeal=meal||resolveMeal(commodity)||'食事区分不明';
-      const s=mealStates.get(pendingMeal);
-
-      if(s)s.pendingError=true;
-
-      renderPanels();
-      sendErrorDiscord(pendingMeal,'Pending 5分超過');
-    },PENDING_ERROR_MS);
-
-    this.addEventListener('loadend',()=>{
-      clearTimeout(meta.pendingTimer);
-
-      let text='';
-
-      try{
-        text=this.responseText||'';
-      }catch{}
-
-      const resolved=meal||resolveMeal(commodity);
-
-      if(!resolved){
-        unresolved.push({
-          meta,
-          status:this.status,
-          text
-        });
-
-        queueRefresh();
-        return;
-      }
-
+    meta.pendingTimer=
       setTimeout(()=>{
-        finishRequest(
-          resolved,
-          meta,
-          this.status,
-          text
-        );
-      },30);
+        const pendingMeal=
+          meal||
+          resolveMeal(commodity)||
+          '食事区分不明';
 
-    },{once:true});
+        const s=
+          mealStates.get(
+            pendingMeal
+          );
+
+        if(s){
+          s.pendingError=true;
+        }
+
+        renderPanels();
+
+        sendErrorDiscord(
+          pendingMeal,
+          'Pending 5分超過'
+        );
+
+      },PENDING_ERROR_MS);
+
+    this.addEventListener(
+      'loadend',
+      ()=>{
+        clearTimeout(
+          meta.pendingTimer
+        );
+
+        let text='';
+
+        try{
+          text=
+            this.responseText||'';
+        }catch{}
+
+        const resolved=
+          meal||
+          resolveMeal(commodity);
+
+        if(!resolved){
+          unresolved.push({
+            meta,
+            status:this.status,
+            text
+          });
+
+          queueRefresh();
+          return;
+        }
+
+        setTimeout(()=>{
+          finishRequest(
+            resolved,
+            meta,
+            this.status,
+            text
+          );
+        },30);
+
+      },
+      {once:true}
+    );
   }
 
-  return nativeSend.call(this,body);
+  return nativeSend.call(
+    this,
+    body
+  );
 };
 
 function finishRequest(meal,meta,status,text){
@@ -655,9 +1020,16 @@ function finishRequest(meal,meta,status,text){
 
   if(status===403){
     s.error403=true;
-    sendErrorDiscord(meal,'HTTP 403');
 
-  }else if(status<200||status>=300){
+    sendErrorDiscord(
+      meal,
+      'HTTP 403'
+    );
+
+  }else if(
+    status<200||
+    status>=300
+  ){
     sendErrorDiscord(
       meal,
       status===0
@@ -666,26 +1038,48 @@ function finishRequest(meal,meta,status,text){
     );
 
   }else if(!text){
-    sendErrorDiscord(meal,'空レスポンス');
+    sendErrorDiscord(
+      meal,
+      '空レスポンス'
+    );
 
-  }else if(text.includes('paramErrorDiv')){
-    sendErrorDiscord(meal,'サイト内部エラー（paramErrorDiv）');
+  }else if(
+    text.includes(
+      'paramErrorDiv'
+    )
+  ){
+    sendErrorDiscord(
+      meal,
+      'サイト内部エラー（paramErrorDiv）'
+    );
 
   }else{
     try{
       refreshBlocks();
 
-      const current=readCurrentSlots(meal);
-      const changes=compareAndSave(meta,meal,current);
+      const current=
+        readCurrentSlots(meal);
+
+      const changes=
+        compareAndSave(
+          meta,
+          meal,
+          current
+        );
 
       s.error403=false;
 
       if(changes.length){
-        sendChangesDiscord(changes);
+        sendChangesDiscord(
+          changes
+        );
       }
 
     }catch(e){
-      console.error(`[${NAME}] ${meal} 解析失敗`,e);
+      console.error(
+        `[${NAME}] ${meal} 解析失敗`,
+        e
+      );
 
       sendErrorDiscord(
         meal,
@@ -694,7 +1088,9 @@ function finishRequest(meal,meta,status,text){
     }
   }
 
-  if(s.pending>0)s.pending--;
+  if(s.pending>0){
+    s.pending--;
+  }
 
   if(!s.pending){
     s.startedAt=0;
@@ -710,13 +1106,24 @@ function finishRequest(meal,meta,status,text){
 }
 
 function drainUnresolved(){
-  for(let i=unresolved.length-1;i>=0;i--){
+  for(
+    let i=unresolved.length-1;
+    i>=0;
+    i--
+  ){
     const x=unresolved[i];
-    const meal=resolveMeal(x.meta.commodity);
+
+    const meal=
+      resolveMeal(
+        x.meta.commodity
+      );
 
     if(!meal)continue;
 
-    unresolved.splice(i,1);
+    unresolved.splice(
+      i,
+      1
+    );
 
     setTimeout(()=>{
       finishRequest(
@@ -729,152 +1136,270 @@ function drainUnresolved(){
   }
 }
 
-function statusText(status){
-  if(status==='空席')return '🟥空席';
-  if(status==='満席')return '⬛満席';
-  return '状態不明';
-}
 function sortChanges(changes){
-  return [...changes].sort((a,b)=>
-    a.date.localeCompare(b.date)||
-    MEALS.indexOf(a.meal)-MEALS.indexOf(b.meal)||
-    a.time.localeCompare(b.time)
+  return [...changes].sort(
+    (a,b)=>
+      a.date.localeCompare(b.date)||
+      MEALS.indexOf(a.meal)-
+      MEALS.indexOf(b.meal)||
+      a.time.localeCompare(b.time)
   );
 }
-function buildDescription(icon,changes){
-  const lines=[
-    `${icon}${nowText()}`,
-    restaurantName()
-  ];
 
-  let group='';
+function groupDateMeal(changes){
+  const map=new Map();
 
   sortChanges(changes).forEach(c=>{
-    const g=`${c.date}|${c.meal}`;
+    const key=
+      `${c.date}|${c.meal}`;
 
-    if(g!==group){
-      if(group)lines.push('');
-
-      lines.push(
-        `${fmtDateJa(c.date)}【${c.meal}】`
-      );
-
-      group=g;
-    }
-
-    if(c.type==='added'){
-      lines.push(
-        `${c.time}　新規枠追加（${statusText(c.to)}）`
-      );
-
-    }else if(c.type==='deleted'){
-      lines.push(
-        `${c.time}　時間枠削除`
-      );
-
-    }else{
-      lines.push(
-        `${c.time}　${statusText(c.to)}`
+    if(!map.has(key)){
+      map.set(
+        key,
+        {
+          date:c.date,
+          meal:c.meal,
+          changes:[]
+        }
       );
     }
+
+    map.get(key)
+      .changes
+      .push(c);
   });
+
+  return [...map.values()];
+}
+
+function buildTitle(icon,date,meal){
+  return [
+    `${icon}${nowText()}`,
+    restaurantName(),
+    `${fmtDateJa(date)} 【${meal}】`
+  ].join('\n');
+}
+
+function buildTimeOnlyDescription(changes){
+  const times=
+    sortChanges(changes)
+      .map(c=>c.time);
+
+  const lines=[];
+
+  for(
+    let i=0;
+    i<times.length;
+    i+=2
+  ){
+    lines.push(
+      times
+        .slice(i,i+2)
+        .join(' ')
+    );
+  }
 
   return lines.join('\n');
 }
-function postDiscord(description,color){
-  const webhook=window.TDR_WEBHOOKS?.restaurant;
+
+function buildAddedDescription(changes){
+  return sortChanges(changes)
+    .map(c=>{
+      const state=
+        c.to==='空席'
+          ?'🔴空席'
+          :c.to==='満席'
+            ?'⚫️満席'
+            :'状態不明';
+
+      return `${c.time}　🔵新規（${state}）`;
+    })
+    .join('\n');
+}
+
+function buildDeletedDescription(changes){
+  return sortChanges(changes)
+    .map(
+      c=>`${c.time}　🟢削除`
+    )
+    .join('\n');
+}
+
+function postDiscord(title,description,color){
+  const webhook=
+    window.TDR_WEBHOOKS
+      ?.restaurant;
 
   if(!webhook)return;
 
-  fetch(webhook,{
-    method:'POST',
-    headers:{
-      'Content-Type':'application/json'
-    },
-    body:JSON.stringify({
-      username:NAME,
-      embeds:[{
-        description:description.slice(0,4000),
-        color
-      }]
-    })
-  }).catch(e=>{
-    console.error(`[${NAME}] Discord通知失敗`,e);
+  fetch(
+    webhook,
+    {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json'
+      },
+      keepalive:true,
+      body:JSON.stringify({
+        username:NAME,
+        embeds:[{
+          title:title.slice(0,256),
+          description:description.slice(0,4000),
+          color
+        }]
+      })
+    }
+  ).catch(e=>{
+    console.error(
+      `[${NAME}] Discord通知失敗`,
+      e
+    );
   });
 }
+
 function sendChangesDiscord(changes){
   syncNotifyDay();
 
-  const added=changes.filter(c=>c.type==='added');
-  const deleted=changes.filter(c=>c.type==='deleted');
-  let normal=changes.filter(c=>c.type==='changed');
+  const added=
+    changes.filter(
+      c=>c.type==='added'
+    );
+
+  const deleted=
+    changes.filter(
+      c=>c.type==='deleted'
+    );
+
+  let normal=
+    changes.filter(
+      c=>c.type==='changed'
+    );
 
   if(notifyState.mode==='off'){
     normal=[];
 
-  }else if(notifyState.mode==='vacancy'){
-    normal=normal.filter(c=>c.to==='空席');
+  }else if(
+    notifyState.mode==='vacancy'
+  ){
+    normal=
+      normal.filter(
+        c=>c.to==='空席'
+      );
   }
 
-  if(added.length){
+  groupDateMeal(
+    added
+  ).forEach(group=>{
     postDiscord(
-      buildDescription('🟦',added),
+      buildTitle(
+        '🔵',
+        group.date,
+        group.meal
+      ),
+      buildAddedDescription(
+        group.changes
+      ),
       BLUE
     );
-  }
+  });
 
-  if(deleted.length){
+  groupDateMeal(
+    deleted
+  ).forEach(group=>{
     postDiscord(
-      buildDescription('🟩',deleted),
+      buildTitle(
+        '🟢',
+        group.date,
+        group.meal
+      ),
+      buildDeletedDescription(
+        group.changes
+      ),
       GREEN
     );
-  }
+  });
 
-  if(normal.length){
-    const vacancy=normal.some(c=>c.to==='空席');
-    const full=normal.some(c=>c.to==='満席');
-
-    postDiscord(
-      buildDescription(
-        vacancy&&full
-          ?'🟥⬛'
-          :vacancy
-            ?'🟥'
-            :'⬛',
-        normal
-      ),
-      vacancy?RED:BLACK
+  const vacancy=
+    normal.filter(
+      c=>c.to==='空席'
     );
-  }
+
+  const full=
+    normal.filter(
+      c=>c.to==='満席'
+    );
+
+  groupDateMeal(
+    vacancy
+  ).forEach(group=>{
+    postDiscord(
+      buildTitle(
+        '🔴',
+        group.date,
+        group.meal
+      ),
+      buildTimeOnlyDescription(
+        group.changes
+      ),
+      RED
+    );
+  });
+
+  groupDateMeal(
+    full
+  ).forEach(group=>{
+    postDiscord(
+      buildTitle(
+        '⚫️',
+        group.date,
+        group.meal
+      ),
+      buildTimeOnlyDescription(
+        group.changes
+      ),
+      BLACK
+    );
+  });
 }
 
 async function getPublicIp(){
-  const controller=new AbortController();
-  const timer=setTimeout(
-    ()=>controller.abort(),
-    IP_TIMEOUT
-  );
+  const controller=
+    new AbortController();
 
-  try{
-    const r=await fetch(
-      'https://api.ipify.org?format=json',
-      {
-        cache:'no-store',
-        signal:controller.signal
-      }
+  const timer=
+    setTimeout(
+      ()=>controller.abort(),
+      IP_TIMEOUT
     );
 
+  try{
+    const r=
+      await fetch(
+        'https://api.ipify.org?format=json',
+        {
+          cache:'no-store',
+          signal:controller.signal
+        }
+      );
+
     if(!r.ok){
-      throw new Error(`HTTP ${r.status}`);
+      throw new Error(
+        `HTTP ${r.status}`
+      );
     }
 
-    const data=await r.json();
+    const data=
+      await r.json();
 
-    return data.ip||'取得不可';
+    return data.ip||'取得失敗';
 
   }catch(e){
-    console.warn(`[${NAME}] IP取得失敗`,e);
-    return '取得不可';
+    console.warn(
+      `[${NAME}] IP取得失敗`,
+      e
+    );
+
+    return '取得失敗';
 
   }finally{
     clearTimeout(timer);
@@ -882,24 +1407,39 @@ async function getPublicIp(){
 }
 
 async function sendErrorDiscord(meal,error){
-  const key=`${meal}|${error}`;
+  const key=
+    `${meal}|${error}`;
+
   const now=Date.now();
 
-  if(now-(errorNotifyHistory.get(key)||0)<60000){
+  if(
+    now-
+    (
+      errorNotifyHistory.get(key)||
+      0
+    )<
+    60000
+  ){
     return;
   }
 
-  errorNotifyHistory.set(key,now);
+  errorNotifyHistory.set(
+    key,
+    now
+  );
 
-  const ip=await getPublicIp();
+  const ip=
+    await getPublicIp();
 
   postDiscord(
     [
-      `🚫${nowText()}`,
+      `🟠${nowText()}`,
       restaurantName(),
-      `【${meal}】`,
-      `⚠️ ${error}`,
-      `🌍 IP：${ip}`
+      `【${meal}】`
+    ].join('\n'),
+    [
+      `エラー：${error}`,
+      `公開IP：${ip}`
     ].join('\n'),
     ORANGE
   );
@@ -912,36 +1452,46 @@ function snapshotText(){
 
   const out=[];
 
-  snapshots.forEach((slots,key)=>{
-    const p=key.split('|');
-    const meal=p[0];
-    const start=p[2];
-    const end=p[3];
+  snapshots.forEach(
+    (slots,key)=>{
+      const p=
+        key.split('|');
 
-    out.push(
-      `=== ${meal}｜${start}～${end} ===`
-    );
+      const meal=p[0];
+      const start=p[2];
+      const end=p[3];
 
-    Object.keys(slots)
-      .sort()
-      .forEach(k=>{
-        out.push(
-          `${k} = ${slots[k]}`
-        );
-      });
+      out.push(
+        `=== ${meal}｜${start}～${end} ===`
+      );
 
-    out.push('');
-  });
+      Object.keys(slots)
+        .sort()
+        .forEach(k=>{
+          out.push(
+            `${k} = ${slots[k]}`
+          );
+        });
 
-  return out.join('\n').trim();
+      out.push('');
+    }
+  );
+
+  return out
+    .join('\n')
+    .trim();
 }
 
 window.SNAPSHOT=()=>{
-  const text=snapshotText();
+  const text=
+    snapshotText();
 
   console.log(text);
 
-  if(navigator.clipboard?.writeText){
+  if(
+    navigator.clipboard
+      ?.writeText
+  ){
     navigator.clipboard
       .writeText(text)
       .then(()=>{
@@ -969,11 +1519,21 @@ function init(){
   );
 
   if(document.body){
-    new MutationObserver(ms=>{
-      if(ms.some(m=>!panelRoot?.contains(m.target))){
-        queueRefresh();
+    new MutationObserver(
+      ms=>{
+        if(
+          ms.some(
+            m=>
+              !panelRoot
+                ?.contains(
+                  m.target
+                )
+          )
+        ){
+          queueRefresh();
+        }
       }
-    }).observe(
+    ).observe(
       document.body,
       {
         childList:true,
@@ -983,20 +1543,29 @@ function init(){
   }
 }
 
-if(document.readyState==='loading'){
+if(
+  document.readyState===
+  'loading'
+){
   document.addEventListener(
     'DOMContentLoaded',
     init,
     {once:true}
   );
+
 }else{
   init();
 }
 
-setInterval(()=>{
-  maintenanceTick();
-  renderPanels();
-},UI_TICK);
+setInterval(
+  ()=>{
+    maintenanceTick();
+    renderPanels();
+  },
+  UI_TICK
+);
 
-console.log(`[${NAME}] v1.82 起動`);
+console.log(
+  `[${NAME}] v1.92 起動`
+);
 })();
