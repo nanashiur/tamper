@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.40
+// @version      2.41
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -12,6 +12,11 @@
   'use strict';
 
   const win = window;
+
+  const VACANCY_ICON = '❤️';
+  const VACANCY_COLOR = 0xff0000;
+  const ERROR_ICON = '🟠';
+  const ERROR_COLOR = 0xffa500;
 
   const ranges = {
     S: [5, 6],
@@ -246,15 +251,15 @@
       return restaurantName;
     }
 
-    function getDetectDateTime() {
+    function getDetectTime(icon) {
       const d = new Date();
       const h = d.getHours().toString().padStart(2, '0');
       const m = d.getMinutes().toString().padStart(2, '0');
       const s = d.getSeconds().toString().padStart(2, '0');
-      return `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
+      return `${icon}${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
     }
 
-    function formatUseDate(yyyymmdd) {
+    function formatUseDateLong(yyyymmdd) {
       const raw = String(yyyymmdd || '').trim();
       const m = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
       if (!m) return '';
@@ -265,27 +270,41 @@
       const date = new Date(y, month - 1, day);
       const week = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
 
-      return `${month}/${day}（${week}）`;
+      return `${y}年${month}月${day}日（${week}）`;
     }
 
-    function normalizeDisplayDate(raw) {
+    function normalizeDisplayDateLong(raw, ajaxOptions) {
       const text = String(raw || '').replace(/\s+/g, ' ').trim();
       if (!text) return '';
 
       const jp = text.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日\s*[（(]([日月火水木金土])[）)]/);
       if (jp) {
-        return `${Number(jp[2])}/${Number(jp[3])}（${jp[4]}）`;
+        return `${Number(jp[1])}年${Number(jp[2])}月${Number(jp[3])}日（${jp[4]}）`;
       }
 
+      const dataObj = parseAjaxData(ajaxOptions?.data);
+      const yearFromUseDate = String(dataObj.useDate || '').slice(0, 4);
+
       const mdw = text.match(/(\d{1,2})\s*[\/月]\s*(\d{1,2})\s*(?:日)?\s*[（(]?([日月火水木金土])?[）)]?/);
-      if (mdw) {
-        return `${Number(mdw[1])}/${Number(mdw[2])}${mdw[3] ? `（${mdw[3]}）` : ''}`;
+      if (mdw && yearFromUseDate) {
+        const y = Number(yearFromUseDate);
+        const month = Number(mdw[1]);
+        const day = Number(mdw[2]);
+        const week = mdw[3] || ['日', '月', '火', '水', '木', '金', '土'][new Date(y, month - 1, day).getDay()];
+        return `${y}年${month}月${day}日（${week}）`;
       }
 
       return text.replace(/\s*\((.)\)/, '（$1）');
     }
 
-    function getDisplayDate(ajaxOptions) {
+    function getDisplayDateLong(ajaxOptions) {
+      const dataObj = parseAjaxData(ajaxOptions?.data);
+
+      if (dataObj.useDate) {
+        const formatted = formatUseDateLong(dataObj.useDate);
+        if (formatted) return formatted;
+      }
+
       const selectors = [
         '#reservationOfDateDisp1',
         '#reservationOfDateDisp',
@@ -295,19 +314,13 @@
 
       for (const selector of selectors) {
         const el = document.querySelector(selector);
-        const text = normalizeDisplayDate(el?.textContent || '');
+        const text = normalizeDisplayDateLong(el?.textContent || '', ajaxOptions);
         if (text) return text;
-      }
-
-      const dataObj = parseAjaxData(ajaxOptions?.data);
-      if (dataObj.useDate) {
-        const formatted = formatUseDate(dataObj.useDate);
-        if (formatted) return formatted;
       }
 
       try {
         const pageText = $('#content').text() || $('body').text();
-        const text = normalizeDisplayDate(pageText);
+        const text = normalizeDisplayDateLong(pageText, ajaxOptions);
         if (text) return text;
       } catch (e) {
         console.error("日付取得エラー:", e);
@@ -316,34 +329,23 @@
       return "日付不明";
     }
 
-    function formatSlotLines(availableSlots) {
-      const groups = {};
+    function buildVacancyTitle(restaurantName, mealName, ajaxOptions) {
+      const displayDate = getDisplayDateLong(ajaxOptions);
 
-      availableSlots.forEach(time => {
-        const hour = String(time).split(':')[0];
-        if (!groups[hour]) groups[hour] = [];
-        groups[hour].push(time);
-      });
-
-      return Object.keys(groups)
-        .sort((a, b) => Number(a) - Number(b))
-        .map(hour => `⏰ ${groups[hour].join(' ')}`);
+      return [
+        getDetectTime(VACANCY_ICON),
+        `【宿泊特典】${restaurantName}`,
+        `${displayDate}${mealName ? ` 【${mealName}】` : ''}`
+      ].join('\n');
     }
 
-    function buildVacancyMessage(restaurantName, availableSlots, mealName, ajaxOptions) {
-      const displayDate = getDisplayDate(ajaxOptions);
-
-      const lines = [
-        `🍴🏨 ${restaurantName}`,
-        `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`
-      ];
-
-      lines.push(...formatSlotLines(availableSlots));
-
-      return lines.join('\n');
+    function buildVacancyBody(availableSlots) {
+      return availableSlots
+        .map(time => `${time}　${VACANCY_ICON}`)
+        .join('\n');
     }
 
-    function sendDiscord(description) {
+    function sendDiscord(title, description, color) {
       if (!state.notifyEnabled) return;
 
       const url = getDiscordWebhookUrl();
@@ -360,9 +362,9 @@
           username: "🍴🏨宿泊特典レストラン検索",
           embeds: [
             {
-              title: `🔔${getDetectDateTime()}`,
+              title: title,
               description: description,
-              color: 16776960
+              color: color
             }
           ]
         })
@@ -478,9 +480,10 @@
         const detectedName = getRawRestaurantName(ajaxOptions);
         const mealName = ajaxOptions.__tdrMealName || jqXHR.__tdrMealName || '';
 
-        const finalMsg = buildVacancyMessage(detectedName, availableSlots, mealName, ajaxOptions);
+        const title = buildVacancyTitle(detectedName, mealName, ajaxOptions);
+        const body = buildVacancyBody(availableSlots);
 
-        sendDiscord(finalMsg);
+        sendDiscord(title, body, VACANCY_COLOR);
       } catch (e) {
         console.error('空席判定エラー:', e);
       }
