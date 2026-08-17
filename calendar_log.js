@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         📅 客室指定在庫モニター
-// @version      5.27
+// @name         🏨📅 客室指定在庫モニター
+// @version      5.28
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_NAME = '📅 客室指定在庫モニター';
+  const SCRIPT_NAME = '🏨📅 客室指定在庫モニター';
   const SHARED_DATA_KEY = 'tdr_11am_reserve_data';
 
   const getDiscordWebhookUrl = () => {
@@ -25,7 +25,7 @@
   };
 
   const FULL_LABEL = { 0: '空室', 1: '満室', 2: '吸収', 3: '未販' };
-  const TITLE_EMOJI = { 0: '🟥', 1: '⬛️', 2: '🟦', 3: '🟩' };
+  const TITLE_EMOJI = { 0: '🟥', 1: '⬛️', 2: '🟦', 3: '🟩', error: '🟧', reserve: '🟪' };
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
@@ -38,7 +38,14 @@
     3: { txt: '👍', bg: 'red', fg: '#fff' }
   };
 
-  const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
+  const DISCORD_COLOR = {
+    0: 16711680,
+    1: 1,
+    2: 255,
+    3: 32768,
+    error: 0xFFA500,
+    reserve: 0x800080
+  };
 
   const pad = (x, len = 2) => String(x).padStart(len, '0');
 
@@ -216,9 +223,9 @@
     const payload = {
       username: SCRIPT_NAME,
       embeds: [{
-        title: `✅ **${tStrSec()}**\n${foundVacancy.dt} 予約手続き押下\n${foundVacancy.roomName}`,
-        color: 65280,
-        description: `時刻: ${tStrMs()}\n${foundVacancy.totalPrice.toLocaleString()}円 [${foundVacancy.priceRank}]\n在庫${foundVacancy.rm}`
+        title: `${TITLE_EMOJI.reserve} **${tStrSec()}**\n${foundVacancy.dt} 予約手続き押下\n${foundVacancy.roomName}`,
+        color: DISCORD_COLOR.reserve,
+        description: `時刻: ${tStrMs()} (${cachedIP}) ${foundVacancy.totalPrice.toLocaleString()}円 [${foundVacancy.priceRank}]`
       }]
     };
 
@@ -517,6 +524,8 @@
     return cachedIP;
   };
 
+  getIP();
+
   const discordQueue = [];
   let isProcessingQueue = false;
 
@@ -781,7 +790,7 @@
     sendDiscord({
       username: SCRIPT_NAME,
       embeds: [{
-        title: `${icon} ${errStatus} 通信エラー多発`,
+        title: `${TITLE_EMOJI.error} ${icon} ${errStatus} 通信エラー多発`,
         color: DISCORD_COLOR.error,
         description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\n${consecutiveErrorCount}回連続でエラーが発生しました。\n${customMsg}`
       }]
@@ -798,7 +807,7 @@
     sendDiscord({
       username: SCRIPT_NAME,
       embeds: [{
-        title: `${icon} ${errStatus} 通信エラー多発`,
+        title: `${TITLE_EMOJI.error} ${icon} ${errStatus} 通信エラー多発`,
         color: DISCORD_COLOR.error,
         description: `時刻: ${tStrFullMs()} (${ip})\n対象: ${targetInfoStr}\n${customMsg}`
       }]
@@ -1063,7 +1072,7 @@
           embeds: [{
             title: `${TITLE_EMOJI[item.st] ?? ''} **${tStrSec()}**\n${item.dt} ${item.changeTxt}\n${item.roomName}`,
             color: DISCORD_COLOR[item.st] ?? 1,
-            description: `時刻: ${tStrMs()} (${currentIp})\n${item.totalPrice.toLocaleString()}円 [${item.priceRank}]`
+            description: `時刻: ${tStrMs()} (${currentIp}) ${item.totalPrice.toLocaleString()}円 [${item.priceRank}]`
           }]
         });
       }
