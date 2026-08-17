@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.41
+// @version      2.61
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -18,6 +18,12 @@
   const ERROR_ICON = '🟠';
   const ERROR_COLOR = 0xffa500;
 
+  const MEALS = [
+    { key: 'breakfast', label: '朝', full: '朝食', storage: 'tdr_priv_searchStatus_breakfast' },
+    { key: 'lunch', label: '昼', full: '昼食', storage: 'tdr_priv_searchStatus_lunch' },
+    { key: 'dinner', label: '夕', full: '夕食', storage: 'tdr_priv_searchStatus_dinner' }
+  ];
+
   const ranges = {
     S: [5, 6],
     M: [15, 11],
@@ -28,6 +34,10 @@
     const r = ranges[mode];
     if (!r) return 15;
     return Math.floor(Math.random() * r[1]) + r[0];
+  }
+
+  function normalizeStatus(status) {
+    return ranges[status] || status === 'OFF' ? status : 'OFF';
   }
 
   function loadExcludedTimes() {
@@ -41,19 +51,20 @@
 
   const state = {
     notifyEnabled: localStorage.getItem('tdr_priv_notifyEnabled') !== '0',
-    searchStatus: localStorage.getItem('tdr_priv_searchStatus') || 'OFF',
     excludedTimes: loadExcludedTimes(),
-    waitSec: 15
+    mealStates: {},
+    activeReloadMeal: ''
   };
 
-  if (!ranges[state.searchStatus] && state.searchStatus !== 'OFF') {
-    state.searchStatus = 'OFF';
-    localStorage.setItem('tdr_priv_searchStatus', 'OFF');
-  }
+  MEALS.forEach(meal => {
+    const status = normalizeStatus(localStorage.getItem(meal.storage) || 'OFF');
+    state.mealStates[meal.key] = {
+      searchStatus: status,
+      waitSec: status === 'OFF' ? 15 : getRandomWait(status)
+    };
+  });
 
-  if (state.searchStatus !== 'OFF') {
-    state.waitSec = getRandomWait(state.searchStatus);
-  }
+  localStorage.setItem('tdr_priv_searchStatus', 'OFF');
 
   function getDiscordWebhookUrl() {
     return win.TDR_WEBHOOKS?.restaurant || '';
@@ -70,7 +81,7 @@
     if (win.__tdr_priv_restaurant_notify_installed) return;
     win.__tdr_priv_restaurant_notify_installed = true;
 
-    win.lastClickedRestaurantTitle = "レストラン名不明";
+    win.lastClickedRestaurantTitle = 'レストラン名不明';
 
     $(document).on('click', '.js-selectContents, a.ui-link', function () {
       const titleEl = $(this).closest('li').find('p.title');
@@ -90,6 +101,7 @@
     };
 
     let opened_headers = [];
+    let reloadLock = false;
 
     const save_accordion_status = () => {
       opened_headers = [];
@@ -97,6 +109,18 @@
         opened_headers.push(getTextNode(el));
       });
     };
+
+    function normalizeMealKey(text) {
+      const t = String(text || '').replace(/\s+/g, '').trim();
+      if (t.includes('朝食')) return 'breakfast';
+      if (t.includes('昼食')) return 'lunch';
+      if (t.includes('夕食')) return 'dinner';
+      return '';
+    }
+
+    function getMealByKey(key) {
+      return MEALS.find(m => m.key === key) || null;
+    }
 
     function getMealNameBySectionClass(sectionClass) {
       if (!sectionClass) return '';
@@ -117,6 +141,118 @@
       }
 
       return '';
+    }
+
+    function getSectionMealKey(section) {
+      const text = $(section).find('h1#mealDivName').first().text().trim();
+      return normalizeMealKey(text);
+    }
+
+    function getMealSectionByKey(mealKey) {
+      return $('#timeContent section.js-accordion, #timeContent section').filter((_, section) => {
+        return getSectionMealKey(section) === mealKey;
+      }).first();
+    }
+
+    function getTimeType() {
+      const val = String($('#timeType').val() || '').trim();
+      if (val) return val;
+
+      const cls = [];
+      $('#timeContent section').each((_, section) => {
+        section.classList.forEach(c => cls.push(c));
+      });
+
+      const found = cls.find(c => /^[0-9]+Times$/.test(c));
+      return found ? found.replace(/^[0-9]+/, '') : 'Times';
+    }
+
+    function restoreHiddenMealSections($sections) {
+      $sections.each((id, el) => {
+        Array.from(el.classList).forEach(cls => {
+          if (cls.startsWith('__')) {
+            $(el).removeClass(cls).addClass(cls.replace(/^__/, ''));
+          }
+        });
+      });
+    }
+
+    function hideOtherMealSections($targetSection) {
+      const timeType = getTimeType();
+
+      const $siblings = $targetSection.siblings('section').filter((_, section) => {
+        return Array.from(section.classList).some(cls => cls.endsWith(timeType));
+      });
+
+      $siblings.each((id, el) => {
+        Array.from(el.classList).forEach(cls => {
+          if (cls.endsWith(timeType) && !cls.startsWith('__')) {
+            $(el).removeClass(cls).addClass(`__${cls}`);
+          }
+        });
+      });
+
+      return $siblings;
+    }
+
+    function reloadOnlyMeal(mealKey, manual) {
+      if (reloadLock) {
+        if (!manual) {
+          const m = getMealByKey(mealKey);
+          if (m) {
+            const ms = state.mealStates[m.key];
+            if (ms.searchStatus !== 'OFF') ms.waitSec = getRandomWait(ms.searchStatus);
+          }
+        }
+        updatePanels();
+        return;
+      }
+
+      const $section = getMealSectionByKey(mealKey);
+
+      if (!$section.length) {
+        console.warn('対象食事区分 section が見つかりません:', mealKey);
+        return;
+      }
+
+      if (!win.controller || typeof win.controller.getTimeInfo !== 'function') {
+        console.warn('controller.getTimeInfo が見つかりません');
+        return;
+      }
+
+      reloadLock = true;
+      state.activeReloadMeal = mealKey;
+
+      save_accordion_status();
+
+      const $hiddenSections = hideOtherMealSections($section);
+      let task = null;
+
+      try {
+        task = win.controller.getTimeInfo();
+      } catch (e) {
+        restoreHiddenMealSections($hiddenSections);
+        state.activeReloadMeal = '';
+        reloadLock = false;
+        throw e;
+      }
+
+      const finish = () => {
+        restoreHiddenMealSections($hiddenSections);
+        state.activeReloadMeal = '';
+        reloadLock = false;
+        updatePanels();
+      };
+
+      if (task && typeof task.always === 'function') {
+        task.always(finish);
+      } else if (task && typeof task.done === 'function') {
+        task.done(finish);
+      } else {
+        setTimeout(finish, 1200);
+      }
+
+      updatePanels();
     }
 
     function hookSetupAccordion() {
@@ -151,6 +287,12 @@
       const origRefresh = win.timeGet.refresh;
 
       win.timeGet.refresh = function (b, a) {
+        if (!$(`#timeContent section.${b}`).length) {
+          const e = $.Deferred();
+          e.resolve();
+          return e.promise();
+        }
+
         const mealName = getMealNameBySectionClass(b);
         win.__tdr_currentMealName = mealName || '';
 
@@ -220,8 +362,150 @@
       return obj;
     }
 
+    function getValue(row, key) {
+      if (!row || typeof row !== 'object') return '';
+      if (Object.prototype.hasOwnProperty.call(row, key)) return row[key];
+
+      const k = Object.keys(row).find(x => String(x).trim() === key);
+      return k ? row[k] : '';
+    }
+
+    function salesStatus(row) {
+      const a = getValue(row, 'salesStatus');
+      if (a !== '' && a != null) return String(a).trim();
+
+      const b = getValue(row, 'saleStatus');
+      return b !== '' && b != null ? String(b).trim() : '';
+    }
+
+    function timeClosing(row) {
+      const v = getValue(row, 'timeClosing');
+      return v === true || String(v).trim().toLowerCase() === 'true';
+    }
+
+    function statusLabel(row) {
+      const s = salesStatus(row);
+
+      if (timeClosing(row)) return '締切';
+      if (s === '0') return '空席';
+      if (s === '1') return '満席';
+      if (s === '2') return '吸収';
+
+      return `不明(${s || '空'})`;
+    }
+
+    function statusStyle(status) {
+      return status === '空席' ? 'color:red;font-weight:bold;'
+        : status === '満席' ? 'color:black;'
+        : status === '吸収' ? 'color:blue;font-weight:bold;'
+        : status === '締切' ? 'color:gray;font-weight:bold;'
+        : 'color:purple;font-weight:bold;';
+    }
+
+    function splitCommodityCD(code) {
+      const base = String(code || '').split('_')[0].trim();
+
+      let m = base.match(/^(XXXR)([A-Z])([A-Z0-9]{3})([A-Z]{2})(\d{3})$/);
+      if (m) return { base, display: `${m[1]} ${m[2]} ${m[3]} ${m[4]} ${m[5]}` };
+
+      m = base.match(/^(XSS\d{2}R)([A-Z0-9]{3})(\d{4})$/);
+      if (m) return { base, display: `${m[1]} ${m[2]} ${m[3]}` };
+
+      return { base, display: base };
+    }
+
+    function formatConsoleDate(yyyymmdd) {
+      const s = String(yyyymmdd || '').trim();
+      return /^\d{8}$/.test(s)
+        ? `${s.slice(0, 4)}/${s.slice(4, 6)}/${s.slice(6, 8)}`
+        : s;
+    }
+
+    function printTimeGet(source, url, responseText, body) {
+      let data;
+
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        console.warn('[宿泊特典 timeGet] JSON解析失敗', { source, url, responseText });
+        return;
+      }
+
+      const groups = Array.isArray(data) ? data : [data];
+      const dataObj = parseAjaxData(body);
+      const displayDate = formatConsoleDate(dataObj.useDate) || '日付不明';
+      const rows = [];
+      const grouped = {};
+
+      groups.forEach(group => {
+        const list = Array.isArray(group.timeGetDtoList) ? group.timeGetDtoList : [];
+
+        list.forEach(slot => {
+          const commodityCD = String(getValue(slot, 'commodityCD') || '').trim();
+          const time = String(getValue(slot, 'exhibitionTime') || '').trim();
+
+          if (!commodityCD || !time) return;
+
+          const item = {
+            time,
+            status: statusLabel(slot),
+            openNumKey: getValue(slot, 'openNumKey'),
+            salesStatus: salesStatus(slot),
+            commodityCD,
+            commodityDisplay: splitCommodityCD(commodityCD).display,
+            remainStockNum: getValue(slot, 'remainStockNum'),
+            raw: slot
+          };
+
+          rows.push(item);
+          (grouped[commodityCD] ??= []).push(item);
+        });
+      });
+
+      if (!rows.length) return;
+
+      rows.sort((a, b) => {
+        return a.commodityCD.localeCompare(b.commodityCD) || a.time.localeCompare(b.time);
+      });
+
+      Object.values(grouped).forEach(arr => {
+        arr.sort((a, b) => a.time.localeCompare(b.time));
+      });
+
+      const now = new Date().toLocaleTimeString();
+
+      Object.keys(grouped).forEach(code => {
+        console.log(
+          `%c${now}`,
+          'background:#333;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px'
+        );
+
+        console.log(
+          `%c${displayDate} ${splitCommodityCD(code).display}`,
+          'color:#000;font-weight:bold'
+        );
+
+        grouped[code].forEach(r => {
+          console.log(
+            `%c${r.time} ${r.status} ${r.openNumKey}`,
+            statusStyle(r.status)
+          );
+        });
+      });
+
+      window.tdr_priv_last_timeget = {
+        at: new Date().toISOString(),
+        source,
+        url: String(url || ''),
+        payload: dataObj,
+        rows,
+        grouped,
+        raw: data
+      };
+    }
+
     function getRawRestaurantName(ajaxOptions) {
-      let restaurantName = "レストラン名不明";
+      let restaurantName = 'レストラン名不明';
 
       try {
         if (ajaxOptions && ajaxOptions.data) {
@@ -236,7 +520,7 @@
           }
         }
 
-        if (win.lastClickedRestaurantTitle && win.lastClickedRestaurantTitle !== "レストラン名不明") {
+        if (win.lastClickedRestaurantTitle && win.lastClickedRestaurantTitle !== 'レストラン名不明') {
           return win.lastClickedRestaurantTitle;
         }
 
@@ -245,7 +529,7 @@
           return visibleTitle.first().text().trim();
         }
       } catch (e) {
-        console.error("レストラン名取得エラー:", e);
+        console.error('レストラン名取得エラー:', e);
       }
 
       return restaurantName;
@@ -323,10 +607,10 @@
         const text = normalizeDisplayDateLong(pageText, ajaxOptions);
         if (text) return text;
       } catch (e) {
-        console.error("日付取得エラー:", e);
+        console.error('日付取得エラー:', e);
       }
 
-      return "日付不明";
+      return '日付不明';
     }
 
     function buildVacancyTitle(restaurantName, mealName, ajaxOptions) {
@@ -359,7 +643,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: "🍴🏨宿泊特典レストラン検索",
+          username: '🍴🏨宿泊特典レストラン検索',
           embeds: [
             {
               title: title,
@@ -382,10 +666,10 @@
         right: '0px',
         zIndex: '2147483647',
         width: '60px',
-        height: '35px',
+        height: '24px',
         padding: '0',
-        borderRadius: '8px 0 0 8px',
-        fontSize: '18px',
+        borderRadius: '7px 0 0 7px',
+        fontSize: '13px',
         fontWeight: 'bold',
         cursor: 'pointer',
         background: bg,
@@ -405,14 +689,33 @@
       return p;
     }
 
-    function updatePanels() {
-      panels.main.textContent = state.searchStatus === 'OFF'
-        ? 'OFF'
-        : String(state.waitSec);
+    function panelText(meal) {
+      const ms = state.mealStates[meal.key];
 
-      panels.main.style.background = state.searchStatus === 'OFF'
-        ? '#000'
-        : { L: '#007bff', M: '#ff8c00', S: '#e83e8c' }[state.searchStatus];
+      if (state.activeReloadMeal === meal.key) return `${meal.label}読`;
+      if (ms.searchStatus === 'OFF') return `${meal.label}OFF`;
+
+      return `${meal.label}${String(ms.waitSec).padStart(2, '0')}`;
+    }
+
+    function updatePanels() {
+      MEALS.forEach(meal => {
+        const ms = state.mealStates[meal.key];
+        const panel = panels[meal.key];
+        if (!panel) return;
+
+        panel.textContent = panelText(meal);
+
+        if (state.activeReloadMeal === meal.key) {
+          panel.style.background = '#7b2cbf';
+        } else {
+          panel.style.background = ms.searchStatus === 'OFF'
+            ? '#000'
+            : { L: '#007bff', M: '#ff8c00', S: '#e83e8c' }[ms.searchStatus];
+        }
+
+        panel.style.color = '#fff';
+      });
 
       panels.notify.textContent = '🔔';
       panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#000';
@@ -423,26 +726,29 @@
       panels.reset.style.color = '#fff';
     }
 
-    panels.main = createPanel(0, '#000', () => {
-      const next = { OFF: 'L', L: 'M', M: 'S', S: 'OFF' };
-      state.searchStatus = next[state.searchStatus] || 'OFF';
+    MEALS.forEach((meal, index) => {
+      panels[meal.key] = createPanel(index * 24, '#000', () => {
+        const ms = state.mealStates[meal.key];
+        const next = { OFF: 'L', L: 'M', M: 'S', S: 'OFF' };
 
-      localStorage.setItem('tdr_priv_searchStatus', state.searchStatus);
+        ms.searchStatus = next[ms.searchStatus] || 'OFF';
+        localStorage.setItem(meal.storage, ms.searchStatus);
 
-      if (state.searchStatus !== 'OFF') {
-        state.waitSec = getRandomWait(state.searchStatus);
-      }
+        if (ms.searchStatus !== 'OFF') {
+          ms.waitSec = getRandomWait(ms.searchStatus);
+        }
 
-      updatePanels();
+        updatePanels();
+      });
     });
 
-    panels.notify = createPanel(35, '#000', () => {
+    panels.notify = createPanel(72, '#000', () => {
       state.notifyEnabled = !state.notifyEnabled;
       localStorage.setItem('tdr_priv_notifyEnabled', state.notifyEnabled ? '1' : '0');
       updatePanels();
     });
 
-    panels.reset = createPanel(70, '#000', () => {
+    panels.reset = createPanel(96, '#000', () => {
       state.excludedTimes = [];
       localStorage.removeItem('tdr_priv_excludedTimes');
 
@@ -463,7 +769,7 @@
           if (!group.timeGetDtoList) return;
 
           group.timeGetDtoList.forEach(slot => {
-            if (String(slot.saleStatus) === "0") {
+            if (String(slot.saleStatus) === '0') {
               const time = slot.exhibitionTime || slot.time || '';
 
               if (time && !state.excludedTimes.includes(time) && !availableSlots.includes(time)) {
@@ -493,20 +799,20 @@
       if (!ajaxOptions || !ajaxOptions.url) return;
       if (!String(ajaxOptions.url).includes('timeGet')) return;
 
+      printTimeGet('ajaxComplete', ajaxOptions.url, jqXHR.responseText, ajaxOptions.data);
       notifyIfVacant(jqXHR.responseText, ajaxOptions, jqXHR);
     });
 
     function attachMealBarClickEvents() {
       $('h1#mealDivName').not('.click-hooked').each((_, el) => {
+        const mealKey = normalizeMealKey($(el).text());
+
         $(el)
           .addClass('click-hooked')
           .css({ cursor: 'pointer', userSelect: 'none' })
           .on('click', function () {
-            save_accordion_status();
-
-            if (win.controller && typeof win.controller.getTimeInfo === 'function') {
-              win.controller.getTimeInfo();
-            }
+            const key = normalizeMealKey($(this).text()) || mealKey;
+            if (key) reloadOnlyMeal(key, true);
           });
       });
     }
@@ -595,19 +901,19 @@
     }).observe(document.body, { childList: true, subtree: true });
 
     setInterval(() => {
-      if (state.searchStatus === 'OFF') return;
+      MEALS.forEach(meal => {
+        const ms = state.mealStates[meal.key];
 
-      state.waitSec--;
+        if (ms.searchStatus === 'OFF') return;
+        if (reloadLock) return;
 
-      if (state.waitSec <= 0) {
-        state.waitSec = getRandomWait(state.searchStatus);
+        ms.waitSec--;
 
-        save_accordion_status();
-
-        if (win.controller && typeof win.controller.getTimeInfo === 'function') {
-          win.controller.getTimeInfo();
+        if (ms.waitSec <= 0) {
+          ms.waitSec = getRandomWait(ms.searchStatus);
+          reloadOnlyMeal(meal.key, false);
         }
-      }
+      });
 
       updatePanels();
     }, 1000);
