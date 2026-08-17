@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name          🍴📱レストラン一般再検索
-// @version      4.63
+// @version      4.64
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -112,10 +112,7 @@
     const m = d.getMinutes().toString().padStart(2, '0');
     const s = d.getSeconds().toString().padStart(2, '0');
     const detectedAt = `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
-    const errorReloadCount = Math.max(
-      0,
-      Number(localStorage.getItem('errorReloadCount')) || 0
-    );
+    const errorReloadCount = Math.max(0, Number(localStorage.getItem('errorReloadCount')) || 0);
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -124,15 +121,15 @@
       body: JSON.stringify({
         username: 'レストラン一般再検索',
         embeds: [{
-          title: `🚫${detectedAt}`,
+          title: `🟠${detectedAt}`,
           description: [
             'Access Deniedを検出しました。',
-            `🌐 公開IP：${ip}`,
-            `📋 Reference：${reference}`,
-            `🔢 エラーF5：${errorReloadCount}回`,
-            `📍 URL：${location.href}`
+            `公開IP：${ip}`,
+            `Reference：${reference}`,
+            `エラーF5：${errorReloadCount}回`,
+            `URL：${location.href}`
           ].join('\n'),
-          color: 16711680
+          color: 0xFFA500
         }]
       })
     }).catch(e => console.error(e));
@@ -151,9 +148,7 @@
       const h = d.getHours().toString().padStart(2, '0');
       const m = d.getMinutes().toString().padStart(2, '0');
       const s = d.getSeconds().toString().padStart(2, '0');
-      const detectedAt =
-        `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
-
+      const detectedAt = `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
       const errorReloadCount = Math.max(
         0,
         Number(localStorage.getItem('errorReloadCount')) || 0
@@ -166,15 +161,15 @@
         body: JSON.stringify({
           username: 'レストラン一般再検索',
           embeds: [{
-            title: `🚫${detectedAt}`,
+            title: `🟠${detectedAt}`,
             description: [
               'オレンジエラーを検出しました。',
-              `🌐 公開IP：${ip}`,
-              `🔢 エラーF5：${errorReloadCount}回`,
-              `📍 URL：${location.href}`,
-              '🔄 60秒後に強制再読み込みします'
+              `公開IP：${ip}`,
+              `エラーF5：${errorReloadCount}回`,
+              `URL：${location.href}`,
+              '60秒後に強制再読み込みします'
             ].join('\n'),
-            color: 16711680
+            color: 0xFFA500
           }]
         })
       }).catch(e => console.error(e));
@@ -210,18 +205,13 @@
     notifyEnabled: localStorage.getItem('notifyEnabled') !== '0',
     searchStatus: localStorage.getItem('searchStatus') || 'M',
     excludedTimes: JSON.parse(localStorage.getItem('excludedTimes') || '[]'),
-    autoReserveNotifyHistory: JSON.parse(
-      localStorage.getItem('autoReserveNotifyHistory') || '{}'
-    ),
+    autoReserveNotifyHistory: JSON.parse(localStorage.getItem('autoReserveNotifyHistory') || '{}'),
     waitSec: 15,
     f5WaitSec: createF5WaitSec(),
     lastClickedMealName: '',
     commodityMealMap: {},
     autoReserveLockUntil: 0,
-    errorReloadCount: Math.max(
-      0,
-      Number(localStorage.getItem('errorReloadCount')) || 0
-    ),
+    errorReloadCount: Math.max(0, Number(localStorage.getItem('errorReloadCount')) || 0),
     errorReloadScheduled: false,
     freezeReloadScheduled: false,
     ajaxPendingCount: 0,
@@ -236,36 +226,16 @@
   }
 
   function getRestaurantInfo() {
-    const nameEl = document.querySelector(
-      '.box04 .name, .p-restaurantDetail__name'
-    );
-
-    const name = nameEl
-      ? nameEl.textContent.trim()
-      : document.title
-          .split('｜')[0]
-          .replace(/レストラン空き状況確認|予約・購入|詳細/g, '')
-          .trim();
-
+    const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
+    const name = nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
     const dateHid = document.querySelector('#reservationOfDateHid');
-    const dateStr = dateHid
-      ? ` [${dateHid.textContent.trim()}]`
-      : '';
-
+    const dateStr = dateHid ? ` [${dateHid.textContent.trim()}]` : '';
     return name + dateStr;
   }
 
   function getRestaurantName() {
-    const nameEl = document.querySelector(
-      '.box04 .name, .p-restaurantDetail__name'
-    );
-
-    return nameEl
-      ? nameEl.textContent.trim()
-      : document.title
-          .split('｜')[0]
-          .replace(/レストラン空き状況確認|予約・購入|詳細/g, '')
-          .trim();
+    const nameEl = document.querySelector('.box04 .name, .p-restaurantDetail__name');
+    return nameEl ? nameEl.textContent.trim() : document.title.split('｜')[0].replace(/レストラン空き状況確認|予約・購入|詳細/g, '').trim();
   }
 
   function getDisplayDate() {
@@ -276,114 +246,61 @@
 
   function normalizeMealName(text) {
     const t = (text || '').replace(/\s+/g, '').trim();
-
     if (t.includes('朝食')) return '朝食';
     if (t.includes('昼食')) return '昼食';
     if (t.includes('夕食')) return '夕食';
-
     return '';
   }
 
   function refreshCommodityMealMap(root = document) {
     if (!root || !root.querySelectorAll) return;
-
     root.querySelectorAll('section').forEach(section => {
-      const meal = normalizeMealName(
-        section.querySelector('h1.hdg03, h1')?.textContent || ''
-      );
-
+      const meal = normalizeMealName(section.querySelector('h1.hdg03, h1')?.textContent || '');
       if (!meal) return;
-
       section.querySelectorAll('.commodityCD').forEach(input => {
         const code = input.value?.trim();
-
-        if (code) {
-          state.commodityMealMap[code] = meal;
-        }
+        if (code) state.commodityMealMap[code] = meal;
       });
     });
   }
 
   function getCommodityFromRow(row) {
-    const onclick =
-      row
-        .querySelector('a[onclick*="toOrderForDate"]')
-        ?.getAttribute('onclick') || '';
-
-    const m = onclick.match(
-      /toOrderForDate\(\s*["']toOrderForm["']\s*,\s*["']([^"']+)["']/
-    );
-
+    const onclick = row.querySelector('a[onclick*="toOrderForDate"]')?.getAttribute('onclick') || '';
+    const m = onclick.match(/toOrderForDate\(\s*["']toOrderForm["']\s*,\s*["']([^"']+)["']/);
     return m ? m[1] : '';
   }
 
   function getMealNameFromCommodity(commodity) {
     if (!commodity) return '';
-
-    if (state.commodityMealMap[commodity]) {
-      return state.commodityMealMap[commodity];
-    }
-
+    if (state.commodityMealMap[commodity]) return state.commodityMealMap[commodity];
     if (/^XXXRB/.test(commodity)) return '朝食';
     if (/^XXXRL/.test(commodity)) return '昼食';
     if (/^XXXRD/.test(commodity)) return '夕食';
-
     return '';
   }
 
   function getMealName(tempDiv) {
-    const conditionRows = [
-      ...document.querySelectorAll('.conditionBox tr')
-    ];
-
+    const conditionRows = [...document.querySelectorAll('.conditionBox tr')];
     for (const row of conditionRows) {
       const th = row.querySelector('th');
       const td = row.querySelector('td');
-
-      if (
-        th &&
-        td &&
-        th.textContent.includes('時間帯')
-      ) {
+      if (th && td && th.textContent.includes('時間帯')) {
         const meal = normalizeMealName(td.textContent);
-
         if (meal) return meal;
       }
     }
 
-    const mealVal =
-      document
-        .querySelector('input[name="mealDivInform"]')
-        ?.value?.trim();
-
-    const mealFromValue = {
-      '1': '朝食',
-      '2': '昼食',
-      '3': '夕食'
-    }[mealVal];
-
+    const mealVal = document.querySelector('input[name="mealDivInform"]')?.value?.trim();
+    const mealFromValue = { '1': '朝食', '2': '昼食', '3': '夕食' }[mealVal];
     if (mealFromValue) return mealFromValue;
 
-    const tempMealVal =
-      tempDiv
-        .querySelector('input[name="mealDivInform"]')
-        ?.value?.trim();
-
-    const tempMealFromValue = {
-      '1': '朝食',
-      '2': '昼食',
-      '3': '夕食'
-    }[tempMealVal];
-
+    const tempMealVal = tempDiv.querySelector('input[name="mealDivInform"]')?.value?.trim();
+    const tempMealFromValue = { '1': '朝食', '2': '昼食', '3': '夕食' }[tempMealVal];
     if (tempMealFromValue) return tempMealFromValue;
 
-    const h1s = [
-      ...tempDiv.querySelectorAll('h1.hdg03, h1')
-    ];
-
+    const h1s = [...tempDiv.querySelectorAll('h1.hdg03, h1')];
     for (const h1 of h1s) {
       const meal = normalizeMealName(h1.textContent);
-
       if (meal) return meal;
     }
 
@@ -392,24 +309,17 @@
 
   function getMealNameFromRow(row, tempDiv) {
     const commodity = getCommodityFromRow(row);
-    const mealByCommodity =
-      getMealNameFromCommodity(commodity);
-
-    if (mealByCommodity) {
-      return mealByCommodity;
-    }
+    const mealByCommodity = getMealNameFromCommodity(commodity);
+    if (mealByCommodity) return mealByCommodity;
 
     const section = row.closest('section');
-
     if (section) {
       const h1 = section.querySelector('h1.hdg03, h1');
       const meal = normalizeMealName(h1?.textContent || '');
-
       if (meal) return meal;
     }
 
     const meal = getMealName(tempDiv);
-
     if (meal) return meal;
 
     return state.lastClickedMealName || '';
@@ -420,40 +330,13 @@
     const h = d.getHours().toString().padStart(2, '0');
     const m = d.getMinutes().toString().padStart(2, '0');
     const s = d.getSeconds().toString().padStart(2, '0');
-
     return `${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
   }
 
-  function formatSlotLines(availableSlots) {
-    const groups = {};
-
-    availableSlots.forEach(time => {
-      const hour = time.split(':')[0];
-
-      if (!groups[hour]) {
-        groups[hour] = [];
-      }
-
-      groups[hour].push(time);
-    });
-
-    return Object.keys(groups)
-      .sort((a, b) => Number(a) - Number(b))
-      .map(hour => `⏰ ${groups[hour].join(' ')}`);
-  }
-
-  function buildVacancyMessage(availableSlots, mealName) {
-    const restaurantName = getRestaurantName();
-    const displayDate = getDisplayDate();
-
-    const lines = [
-      `🍴 ${restaurantName}`,
-      `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`
-    ];
-
-    lines.push(...formatSlotLines(availableSlots));
-
-    return lines.join('\n');
+  function buildVacancyDescription(availableSlots) {
+    return availableSlots
+      .map(time => `${time}　🔴空席`)
+      .join('\n');
   }
 
   function buildAutoReserveMessage(time, mealName) {
@@ -461,41 +344,30 @@
     const displayDate = getDisplayDate();
 
     return [
-      `🍴 ${restaurantName}`,
-      `📅 ${displayDate}${mealName ? ` 【${mealName}】` : ''}`,
-      '🖱️ 自動予約クリック試行',
-      `⏰ ${time}`
+      restaurantName,
+      `${displayDate}${mealName ? ` 【${mealName}】` : ''}`,
+      '自動予約クリック試行',
+      time
     ].join('\n');
   }
 
   function shouldNotifyAutoReserve(time, mealName) {
     const now = Date.now();
-
-    const key =
-      `${getRestaurantName()}|` +
-      `${getDisplayDate()}|` +
-      `${mealName || ''}|` +
-      `${time}`;
+    const key = `${getRestaurantName()}|${getDisplayDate()}|${mealName || ''}|${time}`;
 
     Object.keys(state.autoReserveNotifyHistory).forEach(k => {
-      if (
-        now - state.autoReserveNotifyHistory[k] >
-        AUTO_RESERVE_NOTIFY_COOLDOWN
-      ) {
+      if (now - state.autoReserveNotifyHistory[k] > AUTO_RESERVE_NOTIFY_COOLDOWN) {
         delete state.autoReserveNotifyHistory[k];
       }
     });
 
     const last = state.autoReserveNotifyHistory[key] || 0;
 
-    if (
-      now - last <= AUTO_RESERVE_NOTIFY_COOLDOWN
-    ) {
+    if (now - last <= AUTO_RESERVE_NOTIFY_COOLDOWN) {
       localStorage.setItem(
         'autoReserveNotifyHistory',
         JSON.stringify(state.autoReserveNotifyHistory)
       );
-
       return false;
     }
 
@@ -509,21 +381,9 @@
     return true;
   }
 
-  function sendDiscord(reasonText, isError = true) {
+  function sendVacancyDiscord(availableSlots, mealName) {
     if (!state.notifyEnabled) return;
     if (!DISCORD_WEBHOOK_URL) return;
-
-    const now = Date.now();
-
-    if (
-      isError &&
-      now - state.lastNotificationTime < 60000
-    ) {
-      return;
-    }
-
-    const colorCode = isError ? 16711680 : 16776960;
-    const emoji = isError ? '🚫' : '🔔';
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -531,20 +391,12 @@
       body: JSON.stringify({
         username: 'レストラン一般再検索',
         embeds: [{
-          title: isError
-            ? `${emoji}${getRestaurantInfo()}`
-            : `🔔${getDetectDateTime()}`,
-          description: reasonText,
-          color: colorCode
+          title: `🔴${getDetectDateTime()}\n${getRestaurantName()}\n${getDisplayDate()}${mealName ? ` 【${mealName}】` : ''}`,
+          description: buildVacancyDescription(availableSlots),
+          color: 0xFF0000
         }]
       })
-    })
-      .then(() => {
-        if (isError) {
-          state.lastNotificationTime = Date.now();
-        }
-      })
-      .catch(e => console.error(e));
+    }).catch(e => console.error(e));
   }
 
   function sendAutoReserveDiscord(time, mealName) {
@@ -558,9 +410,9 @@
       body: JSON.stringify({
         username: 'レストラン一般再検索',
         embeds: [{
-          title: `✅${getDetectDateTime()}`,
+          title: `🟣${getDetectDateTime()}`,
           description: buildAutoReserveMessage(time, mealName),
-          color: 5763719
+          color: 0x800080
         }]
       })
     }).catch(e => console.error(e));
@@ -583,10 +435,7 @@
       .join(' / ');
   }
 
-  async function sendErrorReloadLimitDiscord(
-    statuses,
-    errorReloadCount
-  ) {
+  async function sendErrorReloadLimitDiscord(statuses, errorReloadCount) {
     if (!DISCORD_WEBHOOK_URL) return;
 
     const ip = await getPublicIp();
@@ -599,16 +448,16 @@
       body: JSON.stringify({
         username: 'レストラン一般再検索',
         embeds: [{
-          title: `🚫${getDetectDateTime()}`,
+          title: `🟠${getDetectDateTime()}`,
           description: [
             `通信エラーによるF5再読み込みが${errorReloadCount}回目に達しました。`,
-            `🍴 ${getRestaurantName()}`,
-            `📅 ${getDisplayDate()}`,
-            `⚠️ エラー：${errorText}`,
-            `🔢 エラーF5：${errorReloadCount}回目`,
-            `🌐 公開IP：${ip}`
+            getRestaurantName(),
+            getDisplayDate(),
+            `エラー：${errorText}`,
+            `エラーF5：${errorReloadCount}回目`,
+            `公開IP：${ip}`
           ].join('\n'),
-          color: 16711680
+          color: 0xFFA500
         }]
       })
     }).catch(e => console.error(e));
@@ -627,16 +476,16 @@
       body: JSON.stringify({
         username: 'レストラン一般再検索',
         embeds: [{
-          title: `🚫${getDetectDateTime()}`,
+          title: `🟠${getDetectDateTime()}`,
           description: [
             'フリーズ：応答がありません。',
-            `🍴 ${getRestaurantName()}`,
-            `📅 ${getDisplayDate()}`,
-            '⏳ Pending：120秒超',
-            `🌐 公開IP：${ip}`,
-            '🔄 60秒後に強制再読み込みします'
+            getRestaurantName(),
+            getDisplayDate(),
+            'Pending：120秒超',
+            `公開IP：${ip}`,
+            '60秒後に強制再読み込みします'
           ].join('\n'),
-          color: 16711680
+          color: 0xFFA500
         }]
       })
     }).catch(e => console.error(e));
@@ -664,27 +513,18 @@
     }, FREEZE_RELOAD_DELAY_MS);
   }
 
-  function scheduleErrorReload(
-    statuses,
-    countAsError = true
-  ) {
+  function scheduleErrorReload(statuses, countAsError = true) {
     if (state.errorReloadScheduled) return;
 
     state.errorReloadScheduled = true;
 
     if (countAsError) {
       state.errorReloadCount++;
-
-      localStorage.setItem(
-        'errorReloadCount',
-        String(state.errorReloadCount)
-      );
+      localStorage.setItem('errorReloadCount', String(state.errorReloadCount));
     }
 
     const uniqueStatuses = [...new Set(statuses)];
-    const errorText =
-      formatErrorStatuses(uniqueStatuses);
-
+    const errorText = formatErrorStatuses(uniqueStatuses);
     const popupId = '__restaurant_error_popup';
     let popup = document.getElementById(popupId);
 
@@ -1512,12 +1352,9 @@
                 .entries(slotsByMeal)
                 .forEach(([meal, slots]) => {
                   if (slots.length > 0) {
-                    sendDiscord(
-                      buildVacancyMessage(
-                        slots,
-                        meal
-                      ),
-                      false
+                    sendVacancyDiscord(
+                      slots,
+                      meal
                     );
                   }
                 });
