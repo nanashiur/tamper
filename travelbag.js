@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.22
+// @version      1.23
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.22', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.23', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -383,14 +383,12 @@ function getVacancyCandidates(data){
 }
 function clickVacancy(candidates){
   const items=document.querySelectorAll('#timeSlider li.vacancy');
-
   for(const target of candidates){
     for(const li of items){
       const a=li.querySelector('a');
       const time=a?.textContent?.trim()||'';
       const open=li.querySelector('input[name="openNumKey"]')?.value||'';
       const code=li.querySelector('input[name="commodityCD"]')?.value||'';
-
       if(time===target.time&&String(open)===String(target.openNumKey)&&code===target.commodityCD){
         const p=matchingPriority(target.time);
         console.log('[TDR TravelBag] 時間選択:',target.time,p?`【第${p.index+1}希望 ${p.display}】`:'【強制最早時間】',target.commodityCD,target.openNumKey);
@@ -404,13 +402,11 @@ function clickVacancy(candidates){
 }
 function scheduleVacancySelect(data){
   if(!vacancySelectMode) return;
-
   const vacancies=Array.isArray(data)?data.filter(r=>statusLabel(r)==='空席'):[];
   if(!vacancies.length) return console.log('[TDR TravelBag] 時間選択: 空席なし');
 
   const candidates=getVacancyCandidates(data);
-  if(vacancySelectMode===1&&!candidates.length)
-    return console.log('[TDR TravelBag] 時間選択: 希望条件一致なし → 選択なし');
+  if(vacancySelectMode===1&&!candidates.length) return console.log('[TDR TravelBag] 時間選択: 希望条件一致なし → 選択なし');
   if(!candidates.length) return;
 
   const token=++vacancySelectToken;
@@ -530,7 +526,7 @@ function scheduleNextFire(){
   if(!autoEnabled) return;
 
   const now=new Date(), next=new Date(now);
-  next.setSeconds(59,400);
+  next.setSeconds(59,500);
   if(now>=next) next.setMinutes(next.getMinutes()+1);
   nextFireAt=next.getTime();
 
