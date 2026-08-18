@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.61
+// @version      2.62
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -657,19 +657,19 @@
 
     const panels = {};
 
-    function createPanel(top, bg, onClick) {
+    function createPanel(top, right, bg, onClick) {
       const p = document.createElement('div');
 
       Object.assign(p.style, {
         position: 'fixed',
         top: `${top}px`,
-        right: '0px',
+        right: `${right}px`,
         zIndex: '2147483647',
         width: '60px',
-        height: '24px',
+        height: '35px',
         padding: '0',
         borderRadius: '7px 0 0 7px',
-        fontSize: '13px',
+        fontSize: '18px',
         fontWeight: 'bold',
         cursor: 'pointer',
         background: bg,
@@ -727,7 +727,7 @@
     }
 
     MEALS.forEach((meal, index) => {
-      panels[meal.key] = createPanel(index * 24, '#000', () => {
+      panels[meal.key] = createPanel(index * 35, 0, '#000', () => {
         const ms = state.mealStates[meal.key];
         const next = { OFF: 'L', L: 'M', M: 'S', S: 'OFF' };
 
@@ -742,13 +742,13 @@
       });
     });
 
-    panels.notify = createPanel(72, '#000', () => {
+    panels.notify = createPanel(0, 60, '#000', () => {
       state.notifyEnabled = !state.notifyEnabled;
       localStorage.setItem('tdr_priv_notifyEnabled', state.notifyEnabled ? '1' : '0');
       updatePanels();
     });
 
-    panels.reset = createPanel(96, '#000', () => {
+    panels.reset = createPanel(35, 60, '#000', () => {
       state.excludedTimes = [];
       localStorage.removeItem('tdr_priv_excludedTimes');
 
