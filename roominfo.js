@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️客室情報画面
-// @version      2.49
+// @version      2.50
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/wv/roominfo*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/roominfo.js
@@ -26,7 +26,7 @@
 
   const COLOR_START = 0x00ff66;
   const COLOR_START_LOAD = 0x66ff99;
-  const COLOR_CONTINUE = 0x009933;
+  const COLOR_CONTINUE = 0x8b4513;
   const COLOR_ERROR = 0xff9900;
 
   const COUNTDOWN_MINUTES = 10;
@@ -44,7 +44,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log('[ℹ️客室情報画面] v2.49 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
+  console.log('[ℹ️客室情報画面] v2.50 起動:', PAGE_MODE, `${getCountdownMinutes()}分`);
 
   function getPageMode() {
     const path = location.pathname.replace(/\/+$/, '');
@@ -215,6 +215,18 @@
     ];
   }
 
+  function getTitlePrefix(noteLines) {
+    const notes = Array.isArray(noteLines)
+      ? noteLines.join('\n')
+      : String(noteLines || '');
+
+    if (notes.includes('エラー')) return '🟧 ';
+    if (notes.includes('仮予約 継続')) return '🟫 ';
+    if (notes.includes('仮予約 開始')) return '🟩 ';
+
+    return '';
+  }
+
   function isErrorPage(text) {
     return (
       text.includes('まことに申し訳ございません') ||
@@ -246,17 +258,17 @@
     }
   }
 
-  function makeEmbedTitle(data) {
+  function makeEmbedTitle(data, prefix = '') {
     const date = data.date || '-';
     let room = data.room || '-';
     const maxLen = 250;
-    const fixedLen = date.length + 1;
+    const fixedLen = prefix.length + date.length + 1;
 
     if (fixedLen + room.length > maxLen) {
       room = room.slice(0, Math.max(1, maxLen - fixedLen - 1)) + '…';
     }
 
-    return `${date}\n${room}`;
+    return `${prefix}${date}\n${room}`;
   }
 
   function createTogglePanel() {
@@ -469,7 +481,7 @@
       username: 'ℹ️客室情報画面',
       embeds: [
         {
-          title: makeEmbedTitle(data),
+          title: makeEmbedTitle(data, getTitlePrefix(noteLines)),
           description: lines.join('\n'),
           color
         }
