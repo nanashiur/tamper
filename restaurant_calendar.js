@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      1.92
+// @version      2.02
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -14,8 +14,8 @@ if(window.__tdr_weekly_restaurant_monitor)return;
 window.__tdr_weekly_restaurant_monitor=true;
 
 const NAME='🍴💻️レストラン週間モニター';
-const WAIT=60000,UI_TICK=1000,PENDING_ERROR_MS=300000,IP_TIMEOUT=5000;
-const RED=0xFF0000,BLACK=0x333333,BLUE=0x007BFF,GREEN=0x28A745,ORANGE=0xFFA500;
+const WAIT=60000,UI_TICK=1000,PENDING_ERROR_MS=300000,IP_TIMEOUT=5000,MAX_403=5;
+const RED=0xFF0000,BLACK=0x000001,BLUE=0x007BFF,GREEN=0x28A745,ORANGE=0xFFA500;
 const AUTO_PREFIX='tdr_weekly_restaurant_auto_',OLD_AUTO_KEY='tdr_weekly_restaurant_auto';
 const NOTIFY_KEY='tdr_weekly_restaurant_notify_v2',OLD_NOTIFY_KEY='tdr_weekly_restaurant_notify',OLD_NOTIFY_MODE_KEY='tdr_weekly_restaurant_notify_mode';
 const MEALS=['朝食','昼食','夕食'];
@@ -80,6 +80,7 @@ function normalizeMeal(text){
 
 function getMealFromBox(box){
   const h=box.querySelector('.heading');
+
   return normalizeMeal([
     h?.textContent,
     h?.getAttribute('title'),
@@ -111,6 +112,8 @@ function getState(meal){
     manual:null,
     panel:null,
     error403:false,
+    consecutive403:0,
+    forcedStop403:false,
     pendingError:false
   };
 
@@ -134,7 +137,6 @@ function resolveMeal(commodity){
   if(commodityMeal.has(commodity))return commodityMeal.get(commodity);
 
   scanCommodityMap();
-
   return commodityMeal.get(commodity)||'';
 }
 
@@ -283,6 +285,12 @@ function toggleMeal(meal){
 
   s.enabled=!s.enabled;
 
+  if(s.enabled){
+    s.consecutive403=0;
+    s.forcedStop403=false;
+    s.error403=false;
+  }
+
   localStorage.setItem(
     AUTO_PREFIX+meal,
     s.enabled?'1':'0'
@@ -384,14 +392,23 @@ function renderPanels(){
       return;
     }
 
+    if(s.forcedStop403){
+      s.panel.style.background='#ff8c00';
+      s.panel.style.color='#000';
+      s.panel.textContent=`${meal} STOP`;
+      s.panel.title=`HTTP 403 ${MAX_403}回連続 / 自動読込強制停止 / クリックで再開`;
+      return;
+    }
+
+    s.panel.title=`${meal} 自動監視 ON / OFF`;
+
     if(s.error403){
       s.panel.style.background='#ff8c00';
       s.panel.style.color='#000';
 
-      s.panel.textContent=
-        s.deadline
-          ?`${meal} 403 ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`
-          :`${meal} 403`;
+      s.panel.textContent=s.deadline
+        ?`${meal} 403 ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`
+        :`${meal} 403`;
 
       return;
     }
@@ -437,8 +454,8 @@ function renderPanels(){
 
   if(notifyPanel){
     if(notifyState.mode==='all'){
-      notifyPanel.style.background='#007bff';
-      notifyPanel.style.color='#fff';
+      notifyPanel.style.background='#ffc107';
+      notifyPanel.style.color='#000';
       notifyPanel.textContent='📢 全通知';
 
     }else if(notifyState.mode==='vacancy'){
@@ -1015,16 +1032,51 @@ function(body){
   );
 };
 
+function forceStop403(meal){
+  const s=getState(meal);
+
+  if(s.forcedStop403)return;
+
+  s.forcedStop403=true;
+  s.enabled=false;
+
+  clearTimer(s);
+
+  localStorage.setItem(
+    AUTO_PREFIX+meal,
+    '0'
+  );
+
+  console.warn(
+    `[${NAME}] ${meal} HTTP 403 ${MAX_403}回連続 / 自動読込強制停止`
+  );
+
+  sendForceStopDiscord(
+    meal
+  );
+
+  renderPanels();
+}
+
 function finishRequest(meal,meta,status,text){
   const s=getState(meal);
 
   if(status===403){
     s.error403=true;
+    s.consecutive403++;
 
-    sendErrorDiscord(
-      meal,
-      'HTTP 403'
+    console.warn(
+      `[${NAME}] ${meal} HTTP 403 連続${s.consecutive403}回`
     );
+
+    if(s.consecutive403>=MAX_403){
+      forceStop403(meal);
+    }else{
+      sendErrorDiscord(
+        meal,
+        'HTTP 403'
+      );
+    }
 
   }else if(
     status<200||
@@ -1068,6 +1120,8 @@ function finishRequest(meal,meta,status,text){
         );
 
       s.error403=false;
+      s.consecutive403=0;
+      s.forcedStop403=false;
 
       if(changes.length){
         sendChangesDiscord(
@@ -1445,6 +1499,25 @@ async function sendErrorDiscord(meal,error){
   );
 }
 
+async function sendForceStopDiscord(meal){
+  const ip=
+    await getPublicIp();
+
+  postDiscord(
+    [
+      `🔶${nowText()}`,
+      restaurantName(),
+      `【${meal}】`
+    ].join('\n'),
+    [
+      `HTTP 403が${MAX_403}回連続しました。`,
+      '安全のため自動読込を停止しました。',
+      `公開IP：${ip}`
+    ].join('\n'),
+    ORANGE
+  );
+}
+
 function snapshotText(){
   if(!snapshots.size){
     return 'スナップショットなし';
@@ -1566,6 +1639,6 @@ setInterval(
 );
 
 console.log(
-  `[${NAME}] v1.92 起動`
+  `[${NAME}] v2.02 起動`
 );
 })();
