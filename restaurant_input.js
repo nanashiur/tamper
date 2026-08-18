@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ℹ️レストラン予約情報入力
-// @version      1.14
+// @version      1.15
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/input*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_input.js
@@ -27,7 +27,7 @@
 
   const COLOR_START = 0x00ff66;
   const COLOR_START_LOAD = 0x66ff99;
-  const COLOR_CONTINUE = 0x009933;
+  const COLOR_CONTINUE = 0x8b4513;
   const COLOR_ERROR = 0xff9900;
 
   const COUNTDOWN_MINUTES = 10;
@@ -45,7 +45,7 @@
   const SCRIPT_START_DATE = new Date();
   const SCRIPT_START_TIME_TEXT = formatTimeText(SCRIPT_START_DATE);
 
-  console.log(`[${SCRIPT_NAME}] v1.14 起動: ${getCountdownMinutes()}分`);
+  console.log(`[${SCRIPT_NAME}] v1.15 起動: ${getCountdownMinutes()}分`);
 
   function getCurrentPath() {
     return location.pathname.replace(/\/+$/, '');
@@ -236,17 +236,24 @@
     }
   }
 
-  function makeEmbedTitle(data) {
+  function getNotifyEmoji(color) {
+    if (color === COLOR_CONTINUE) return '🟤';
+    if (color === COLOR_ERROR) return '🟠';
+    return '🟢';
+  }
+
+  function makeEmbedTitle(data, color = COLOR_START) {
+    const emoji = getNotifyEmoji(color);
     const date = data.dateTime || '-';
     let restaurant = data.restaurant || '-';
     const maxLen = 250;
-    const fixedLen = date.length + 1;
+    const fixedLen = emoji.length + 1 + date.length + 1;
 
     if (fixedLen + restaurant.length > maxLen) {
       restaurant = restaurant.slice(0, Math.max(1, maxLen - fixedLen - 1)) + '…';
     }
 
-    return `${date}\n${restaurant}`;
+    return `${emoji} ${date}\n${restaurant}`;
   }
 
   function createTogglePanel() {
@@ -482,7 +489,7 @@
       username: SCRIPT_NAME,
       embeds: [
         {
-          title: makeEmbedTitle(data),
+          title: makeEmbedTitle(data, color),
           description: lines.join('\n'),
           color
         }
