@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      2.22
+// @version      2.23
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -60,13 +60,11 @@ let researchCompareTriggered=false;
 
 function ymd(){
   const d=new Date();
-
   return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
 }
 
 function nowText(){
   const d=new Date();
-
   return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
 
@@ -75,7 +73,6 @@ function fmtDateJa(v){
   const m=+v.slice(4,6);
   const d=+v.slice(6,8);
   const dt=new Date(y,m-1,d);
-
   return `${y}年${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;
 }
 
@@ -88,12 +85,13 @@ function isMaintenance(){
   return h>=3&&h<5;
 }
 
+function existingMeals(){
+  return [...blocks.keys()];
+}
+
 function loadNotifyState(){
   try{
-    const v=
-      JSON.parse(
-        localStorage.getItem(NOTIFY_KEY)||'null'
-      );
+    const v=JSON.parse(localStorage.getItem(NOTIFY_KEY)||'null');
 
     if(
       v?.date===ymd()&&
@@ -572,7 +570,7 @@ function savePreviousAuto(prev){
 }
 
 function enforceResearchAutoOff(){
-  MEALS.forEach(meal=>{
+  existingMeals().forEach(meal=>{
     const s=
       getState(meal);
 
@@ -588,10 +586,12 @@ function enforceResearchAutoOff(){
 }
 
 function toggleResearchMode(){
+  refreshBlocks();
+
   if(!researchMode){
     const prev={};
 
-    MEALS.forEach(meal=>{
+    existingMeals().forEach(meal=>{
       prev[meal]=
         getState(meal).enabled;
     });
@@ -632,7 +632,7 @@ function toggleResearchMode(){
     const prev=
       loadPreviousAuto();
 
-    MEALS.forEach(meal=>{
+    existingMeals().forEach(meal=>{
       const s=
         getState(meal);
 
@@ -640,7 +640,8 @@ function toggleResearchMode(){
         !!prev[meal]&&
         !s.forcedStopError;
 
-      s.enabled=enable;
+      s.enabled=
+        enable;
 
       localStorage.setItem(
         AUTO_PREFIX+meal,
@@ -675,7 +676,10 @@ function toggleResearchMode(){
 }
 
 function toggleMeal(meal){
-  if(researchMode){
+  if(
+    researchMode||
+    !blocks.has(meal)
+  ){
     return;
   }
 
@@ -711,6 +715,10 @@ function toggleMeal(meal){
 }
 
 function manualFire(meal){
+  if(!blocks.has(meal)){
+    return;
+  }
+
   const s=
     getState(meal);
 
@@ -764,6 +772,7 @@ function schedule(meal){
   clearTimer(s);
 
   if(
+    !blocks.has(meal)||
     !s.enabled||
     researchMode||
     isMaintenance()
@@ -779,6 +788,10 @@ function schedule(meal){
       ()=>{
         s.timer=null;
         s.deadline=0;
+
+        if(!blocks.has(meal)){
+          return;
+        }
 
         fireSameWeek(
           meal,
@@ -1041,7 +1054,7 @@ function maintenanceTick(){
     refreshBlocks();
 
     if(!researchMode){
-      MEALS.forEach(meal=>{
+      existingMeals().forEach(meal=>{
         const s=
           mealStates.get(meal);
 
@@ -1220,18 +1233,11 @@ function fireSameWeek(
     blocks.get(meal);
 
   if(!block){
-    reportError(
-      meal,
-      '食事区分DOMなし',
-      researchPhase
-    );
+    clearTimer(s);
 
-    if(
-      !manual&&
-      s.enabled
-    ){
-      schedule(meal);
-    }
+    console.log(
+      `[${NAME}] ${meal} 対象DOMなしのため読込スキップ`
+    );
 
     return false;
   }
@@ -1482,7 +1488,7 @@ function readCurrentSlots(meal){
 
   if(!block){
     throw new Error(
-      '食事区分DOMなし'
+      '対象食事区分なし'
     );
   }
 
@@ -2046,7 +2052,7 @@ function runResearchRound(
     );
   }
 
-  [...blocks.keys()]
+  existingMeals()
     .forEach(meal=>{
       const s=
         getState(meal);
@@ -2321,34 +2327,43 @@ function finishRequest(
     try{
       refreshBlocks();
 
-      const current=
-        readCurrentSlots(meal);
+      if(!blocks.has(meal)){
+        clearTimer(s);
 
-      if(meta.researchPhase){
-        handleResearchSuccess(
-          meal,
-          meta,
-          current
+        console.log(
+          `[${NAME}] ${meal} 対象DOMなしのため解析スキップ`
         );
 
       }else{
-        const changes=
-          compareAndSave(
-            meta,
+        const current=
+          readCurrentSlots(meal);
+
+        if(meta.researchPhase){
+          handleResearchSuccess(
             meal,
+            meta,
             current
           );
 
-        if(changes.length){
-          sendChangesDiscord(
-            changes
-          );
-        }
-      }
+        }else{
+          const changes=
+            compareAndSave(
+              meta,
+              meal,
+              current
+            );
 
-      resetErrors(
-        meal
-      );
+          if(changes.length){
+            sendChangesDiscord(
+              changes
+            );
+          }
+        }
+
+        resetErrors(
+          meal
+        );
+      }
 
     }catch(e){
       console.error(
@@ -2374,7 +2389,8 @@ function finishRequest(
 
     if(
       s.enabled&&
-      !researchMode
+      !researchMode&&
+      blocks.has(meal)
     ){
       schedule(meal);
     }
@@ -3108,6 +3124,6 @@ setInterval(
 );
 
 console.log(
-  `[${NAME}] v2.22 起動`
+  `[${NAME}] v2.23 起動`
 );
 })();
