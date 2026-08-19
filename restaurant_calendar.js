@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      2.12
+// @version      2.22
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -15,28 +15,72 @@ window.__tdr_weekly_restaurant_monitor=true;
 
 const NAME='🍴💻️レストラン週間モニター';
 const WAIT=60000,UI_TICK=1000,PENDING_ERROR_MS=300000,IP_TIMEOUT=5000,MAX_ERRORS=5;
-const RED=0xFF0000,BLACK=0x000001,BLUE=0x007BFF,GREEN=0x28A745,ORANGE=0xFFA500;
-const AUTO_PREFIX='tdr_weekly_restaurant_auto_',OLD_AUTO_KEY='tdr_weekly_restaurant_auto';
-const NOTIFY_KEY='tdr_weekly_restaurant_notify_v2',OLD_NOTIFY_KEY='tdr_weekly_restaurant_notify',OLD_NOTIFY_MODE_KEY='tdr_weekly_restaurant_notify_mode';
-const MEALS=['朝食','昼食','夕食'];
-const PATHS=['/restaurant/weekReservation/','/restaurant/ajaxNextWeekList/','/restaurant/ajaxPreWeekList/'];
-const blocks=new Map(),commodityMeal=new Map(),mealStates=new Map(),snapshots=new Map(),unresolved=[],errorNotifyHistory=new Map();
+const RED=0xFF0000,BLACK=0x000001,BLUE=0x007BFF,GREEN=0x28A745,ORANGE=0xFFA500,GRAY=0x808080;
 
-let panelRoot=null,notifyPanel=null,autoHint='',refreshTimer=null,wasMaintenance=isMaintenance(),notifyState=loadNotifyState();
+const AUTO_PREFIX='tdr_weekly_restaurant_auto_';
+const OLD_AUTO_KEY='tdr_weekly_restaurant_auto';
+const NOTIFY_KEY='tdr_weekly_restaurant_notify_v2';
+const OLD_NOTIFY_KEY='tdr_weekly_restaurant_notify';
+const OLD_NOTIFY_MODE_KEY='tdr_weekly_restaurant_notify_mode';
+
+const RESEARCH_KEY='tdr_weekly_restaurant_9am_mode';
+const RESEARCH_PREV_AUTO_KEY='tdr_weekly_restaurant_9am_prev_auto';
+const RESEARCH_BASELINE_KEY='tdr_weekly_restaurant_9am_baseline';
+
+const MEALS=['朝食','昼食','夕食'];
+
+const PATHS=[
+  '/restaurant/weekReservation/',
+  '/restaurant/ajaxNextWeekList/',
+  '/restaurant/ajaxPreWeekList/'
+];
+
+const blocks=new Map();
+const commodityMeal=new Map();
+const mealStates=new Map();
+const snapshots=new Map();
+const unresolved=[];
+const errorNotifyHistory=new Map();
+
+let panelRoot=null;
+let notifyPanel=null;
+let researchPanel=null;
+let autoHint='';
+let researchPhaseHint='';
+let refreshTimer=null;
+let wasMaintenance=isMaintenance();
+let notifyState=loadNotifyState();
+
+let researchMode=
+  localStorage.getItem(RESEARCH_KEY)==='1';
+
+let researchRunDate='';
+let researchBaselineTriggered=false;
+let researchCompareTriggered=false;
 
 function ymd(){
   const d=new Date();
+
   return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
 }
 
 function nowText(){
   const d=new Date();
+
   return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
 
 function fmtDateJa(v){
-  const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8),dt=new Date(y,m-1,d);
+  const y=+v.slice(0,4);
+  const m=+v.slice(4,6);
+  const d=+v.slice(6,8);
+  const dt=new Date(y,m-1,d);
+
   return `${y}年${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;
+}
+
+function fmtWeekJa(start,end){
+  return `${fmtDateJa(start)}～${fmtDateJa(end)}`;
 }
 
 function isMaintenance(){
@@ -46,62 +90,127 @@ function isMaintenance(){
 
 function loadNotifyState(){
   try{
-    const v=JSON.parse(localStorage.getItem(NOTIFY_KEY)||'null');
-    if(v?.date===ymd()&&['all','vacancy','off'].includes(v.mode))return v;
+    const v=
+      JSON.parse(
+        localStorage.getItem(NOTIFY_KEY)||'null'
+      );
+
+    if(
+      v?.date===ymd()&&
+      ['all','vacancy','off'].includes(v.mode)
+    ){
+      return v;
+    }
   }catch{}
 
   let mode='all';
 
   try{
-    const old=JSON.parse(localStorage.getItem(OLD_NOTIFY_KEY)||'null');
+    const old=
+      JSON.parse(
+        localStorage.getItem(OLD_NOTIFY_KEY)||'null'
+      );
+
     if(old?.date===ymd()){
-      if(old.enabled===false)mode='off';
-      else if(localStorage.getItem(OLD_NOTIFY_MODE_KEY)==='noFull')mode='vacancy';
+      if(old.enabled===false){
+        mode='off';
+      }else if(
+        localStorage.getItem(OLD_NOTIFY_MODE_KEY)==='noFull'
+      ){
+        mode='vacancy';
+      }
     }
   }catch{}
 
-  const v={date:ymd(),mode};
-  localStorage.setItem(NOTIFY_KEY,JSON.stringify(v));
+  const v={
+    date:ymd(),
+    mode
+  };
+
+  localStorage.setItem(
+    NOTIFY_KEY,
+    JSON.stringify(v)
+  );
+
   return v;
 }
 
 function syncNotifyDay(){
   if(notifyState.date!==ymd()){
-    notifyState={date:ymd(),mode:'all'};
-    localStorage.setItem(NOTIFY_KEY,JSON.stringify(notifyState));
+    notifyState={
+      date:ymd(),
+      mode:'all'
+    };
+
+    localStorage.setItem(
+      NOTIFY_KEY,
+      JSON.stringify(notifyState)
+    );
   }
 }
 
 function normalizeMeal(text){
-  const t=String(text||'').replace(/\s+/g,'');
-  return MEALS.find(x=>t.includes(x))||'';
+  const t=
+    String(text||'')
+      .replace(/\s+/g,'');
+
+  return MEALS.find(
+    x=>t.includes(x)
+  )||'';
 }
 
 function getMealFromBox(box){
-  const h=box.querySelector('.heading');
+  const h=
+    box.querySelector('.heading');
+
   return normalizeMeal([
     h?.textContent,
     h?.getAttribute('title'),
     h?.querySelector('img')?.alt,
-    box.querySelector('img[alt*="朝食"],img[alt*="昼食"],img[alt*="夕食"]')?.alt
+    box.querySelector(
+      'img[alt*="朝食"],img[alt*="昼食"],img[alt*="夕食"]'
+    )?.alt
   ].filter(Boolean).join(' '));
 }
 
 function restaurantName(){
-  return document.querySelector('.boxRestaurant02 .header h1.heading')
-    ?.textContent.replace(/\s+/g,' ').trim()
+  return document
+    .querySelector(
+      '.boxRestaurant02 .header h1.heading'
+    )
+    ?.textContent
+    .replace(/\s+/g,' ')
+    .trim()
     ||'レストラン名取得失敗';
 }
 
 function getState(meal){
-  if(mealStates.has(meal))return mealStates.get(meal);
+  if(mealStates.has(meal)){
+    return mealStates.get(meal);
+  }
 
-  const saved=localStorage.getItem(AUTO_PREFIX+meal);
-  const old=localStorage.getItem(OLD_AUTO_KEY);
+  const saved=
+    localStorage.getItem(
+      AUTO_PREFIX+meal
+    );
+
+  const old=
+    localStorage.getItem(
+      OLD_AUTO_KEY
+    );
+
+  let enabled=
+    saved!==null
+      ?saved!=='0'
+      :old!=='0';
+
+  if(researchMode){
+    enabled=false;
+  }
 
   const s={
     meal,
-    enabled:saved!==null?saved!=='0':old!=='0',
+    enabled,
     pending:0,
     startedAt:0,
     deadline:0,
@@ -115,115 +224,264 @@ function getState(meal){
     pendingError:false
   };
 
-  mealStates.set(meal,s);
+  mealStates.set(
+    meal,
+    s
+  );
+
   return s;
 }
 
 function scanCommodityMap(){
-  document.querySelectorAll('.boxRestaurant04').forEach(box=>{
-    const meal=getMealFromBox(box);
-    const commodity=box.querySelector('.commodityCd,.commodityCD')?.value?.trim()||'';
-    if(meal&&commodity)commodityMeal.set(commodity,meal);
-  });
+  document
+    .querySelectorAll(
+      '.boxRestaurant04'
+    )
+    .forEach(box=>{
+      const meal=
+        getMealFromBox(box);
+
+      const commodity=
+        box.querySelector(
+          '.commodityCd,.commodityCD'
+        )
+        ?.value
+        ?.trim()
+        ||'';
+
+      if(
+        meal&&
+        commodity
+      ){
+        commodityMeal.set(
+          commodity,
+          meal
+        );
+      }
+    });
 }
 
 function resolveMeal(commodity){
   if(!commodity)return '';
-  if(commodityMeal.has(commodity))return commodityMeal.get(commodity);
+
+  if(
+    commodityMeal.has(
+      commodity
+    )
+  ){
+    return commodityMeal.get(
+      commodity
+    );
+  }
+
   scanCommodityMap();
-  return commodityMeal.get(commodity)||'';
+
+  return commodityMeal.get(
+    commodity
+  )||'';
 }
 
 function refreshBlocks(){
   blocks.clear();
 
-  document.querySelectorAll('.boxRestaurant04').forEach(box=>{
-    const meal=getMealFromBox(box),next=box.querySelector('.nextWeekLink');
-    if(!meal||!next)return;
+  document
+    .querySelectorAll(
+      '.boxRestaurant04'
+    )
+    .forEach(box=>{
+      const meal=
+        getMealFromBox(box);
 
-    const commodity=box.querySelector('.commodityCd,.commodityCD')?.value?.trim()||'';
+      const next=
+        box.querySelector(
+          '.nextWeekLink'
+        );
 
-    blocks.set(meal,{box,next,commodity});
-    if(commodity)commodityMeal.set(commodity,meal);
-    getState(meal);
-  });
+      if(
+        !meal||
+        !next
+      ){
+        return;
+      }
+
+      const commodity=
+        box.querySelector(
+          '.commodityCd,.commodityCD'
+        )
+        ?.value
+        ?.trim()
+        ||'';
+
+      blocks.set(
+        meal,
+        {
+          box,
+          next,
+          commodity
+        }
+      );
+
+      if(commodity){
+        commodityMeal.set(
+          commodity,
+          meal
+        );
+      }
+
+      getState(meal);
+    });
+
+  if(researchMode){
+    enforceResearchAutoOff();
+  }
 
   createPanels();
   drainUnresolved();
 }
 
 function queueRefresh(){
-  clearTimeout(refreshTimer);
-  refreshTimer=setTimeout(refreshBlocks,100);
+  clearTimeout(
+    refreshTimer
+  );
+
+  refreshTimer=
+    setTimeout(
+      refreshBlocks,
+      100
+    );
 }
 
 function baseButtonStyle(el){
-  Object.assign(el.style,{
-    height:'32px',
-    padding:'6px 2px',
-    borderRadius:'7px',
-    boxSizing:'border-box',
-    fontSize:'13px',
-    fontWeight:'700',
-    textAlign:'center',
-    cursor:'pointer',
-    userSelect:'none',
-    boxShadow:'0 2px 8px rgba(0,0,0,.25)',
-    border:'1px solid rgba(0,0,0,.2)',
-    fontFamily:'Arial,"Yu Gothic",sans-serif'
-  });
+  Object.assign(
+    el.style,
+    {
+      height:'32px',
+      padding:'6px 2px',
+      borderRadius:'7px',
+      boxSizing:'border-box',
+      fontSize:'13px',
+      fontWeight:'700',
+      textAlign:'center',
+      cursor:'pointer',
+      userSelect:'none',
+      boxShadow:'0 2px 8px rgba(0,0,0,.25)',
+      border:'1px solid rgba(0,0,0,.2)',
+      fontFamily:'Arial,"Yu Gothic",sans-serif'
+    }
+  );
 }
 
 function createPanels(){
   if(!document.body)return;
 
   if(!panelRoot){
-    panelRoot=document.createElement('div');
-    Object.assign(panelRoot.style,{
-      position:'fixed',
-      top:'14px',
-      right:'14px',
-      zIndex:'2147483647',
-      display:'flex',
-      flexDirection:'column',
-      gap:'5px'
-    });
-    document.body.appendChild(panelRoot);
+    panelRoot=
+      document.createElement(
+        'div'
+      );
+
+    Object.assign(
+      panelRoot.style,
+      {
+        position:'fixed',
+        top:'14px',
+        right:'14px',
+        zIndex:'2147483647',
+        display:'flex',
+        flexDirection:'column',
+        gap:'5px'
+      }
+    );
+
+    document.body.appendChild(
+      panelRoot
+    );
   }
 
   MEALS.forEach((meal,i)=>{
-    const s=getState(meal);
+    const s=
+      getState(meal);
 
     if(!blocks.has(meal)){
-      if(s.row)s.row.style.display='none';
+      if(s.row){
+        s.row.style.display='none';
+      }
       return;
     }
 
     if(!s.row){
-      const row=document.createElement('div');
-      Object.assign(row.style,{order:String(i),display:'flex',gap:'5px'});
+      const row=
+        document.createElement(
+          'div'
+        );
 
-      const manual=document.createElement('div');
-      baseButtonStyle(manual);
-      Object.assign(manual.style,{
-        width:'32px',
-        background:'#444',
-        color:'#fff',
-        fontSize:'18px',
-        padding:'3px 0'
-      });
+      Object.assign(
+        row.style,
+        {
+          order:String(i),
+          display:'flex',
+          gap:'5px'
+        }
+      );
+
+      const manual=
+        document.createElement(
+          'div'
+        );
+
+      baseButtonStyle(
+        manual
+      );
+
+      Object.assign(
+        manual.style,
+        {
+          width:'32px',
+          background:'#444',
+          color:'#fff',
+          fontSize:'18px',
+          padding:'3px 0'
+        }
+      );
+
       manual.textContent='↻';
-      manual.title=`${meal} 手動発火`;
-      manual.onclick=()=>manualFire(meal);
+      manual.title=
+        `${meal} 手動発火`;
 
-      const panel=document.createElement('div');
-      baseButtonStyle(panel);
-      Object.assign(panel.style,{width:'90px',color:'#fff'});
-      panel.title=`${meal} 自動監視 ON / OFF`;
-      panel.onclick=()=>toggleMeal(meal);
+      manual.onclick=
+        ()=>manualFire(meal);
 
-      row.append(manual,panel);
-      panelRoot.appendChild(row);
+      const panel=
+        document.createElement(
+          'div'
+        );
+
+      baseButtonStyle(
+        panel
+      );
+
+      Object.assign(
+        panel.style,
+        {
+          width:'90px',
+          color:'#fff'
+        }
+      );
+
+      panel.title=
+        `${meal} 自動監視 ON / OFF`;
+
+      panel.onclick=
+        ()=>toggleMeal(meal);
+
+      row.append(
+        manual,
+        panel
+      );
+
+      panelRoot.appendChild(
+        row
+      );
 
       s.row=row;
       s.manual=manual;
@@ -234,20 +492,198 @@ function createPanels(){
   });
 
   if(!notifyPanel){
-    notifyPanel=document.createElement('div');
-    baseButtonStyle(notifyPanel);
-    Object.assign(notifyPanel.style,{order:'10',width:'127px'});
-    notifyPanel.title='通知モード：全通知 → 空席通知 → OFF';
-    notifyPanel.onclick=toggleNotify;
-    panelRoot.appendChild(notifyPanel);
+    notifyPanel=
+      document.createElement(
+        'div'
+      );
+
+    baseButtonStyle(
+      notifyPanel
+    );
+
+    Object.assign(
+      notifyPanel.style,
+      {
+        order:'10',
+        width:'127px'
+      }
+    );
+
+    notifyPanel.title=
+      '通知モード：全通知 → 空席通知 → OFF';
+
+    notifyPanel.onclick=
+      toggleNotify;
+
+    panelRoot.appendChild(
+      notifyPanel
+    );
+  }
+
+  if(!researchPanel){
+    researchPanel=
+      document.createElement(
+        'div'
+      );
+
+    baseButtonStyle(
+      researchPanel
+    );
+
+    Object.assign(
+      researchPanel.style,
+      {
+        order:'11',
+        width:'127px'
+      }
+    );
+
+    researchPanel.title=
+      'AM8:58とAM9:00を比較';
+
+    researchPanel.onclick=
+      toggleResearchMode;
+
+    panelRoot.appendChild(
+      researchPanel
+    );
+  }
+
+  renderPanels();
+}
+
+function loadPreviousAuto(){
+  try{
+    return JSON.parse(
+      localStorage.getItem(
+        RESEARCH_PREV_AUTO_KEY
+      )||'{}'
+    );
+  }catch{
+    return {};
+  }
+}
+
+function savePreviousAuto(prev){
+  localStorage.setItem(
+    RESEARCH_PREV_AUTO_KEY,
+    JSON.stringify(prev)
+  );
+}
+
+function enforceResearchAutoOff(){
+  MEALS.forEach(meal=>{
+    const s=
+      getState(meal);
+
+    s.enabled=false;
+
+    clearTimer(s);
+
+    localStorage.setItem(
+      AUTO_PREFIX+meal,
+      '0'
+    );
+  });
+}
+
+function toggleResearchMode(){
+  if(!researchMode){
+    const prev={};
+
+    MEALS.forEach(meal=>{
+      prev[meal]=
+        getState(meal).enabled;
+    });
+
+    savePreviousAuto(
+      prev
+    );
+
+    researchMode=true;
+
+    localStorage.setItem(
+      RESEARCH_KEY,
+      '1'
+    );
+
+    enforceResearchAutoOff();
+
+    localStorage.removeItem(
+      RESEARCH_BASELINE_KEY
+    );
+
+    researchRunDate='';
+    researchBaselineTriggered=false;
+    researchCompareTriggered=false;
+
+    console.log(
+      `[${NAME}] 9時調査モード ON`
+    );
+
+  }else{
+    researchMode=false;
+
+    localStorage.setItem(
+      RESEARCH_KEY,
+      '0'
+    );
+
+    const prev=
+      loadPreviousAuto();
+
+    MEALS.forEach(meal=>{
+      const s=
+        getState(meal);
+
+      const enable=
+        !!prev[meal]&&
+        !s.forcedStopError;
+
+      s.enabled=enable;
+
+      localStorage.setItem(
+        AUTO_PREFIX+meal,
+        enable?'1':'0'
+      );
+
+      clearTimer(s);
+
+      if(
+        enable&&
+        !s.pending&&
+        !isMaintenance()
+      ){
+        schedule(meal);
+      }
+    });
+
+    localStorage.removeItem(
+      RESEARCH_PREV_AUTO_KEY
+    );
+
+    localStorage.removeItem(
+      RESEARCH_BASELINE_KEY
+    );
+
+    console.log(
+      `[${NAME}] 9時調査モード OFF`
+    );
   }
 
   renderPanels();
 }
 
 function toggleMeal(meal){
-  const s=getState(meal);
-  s.enabled=!s.enabled;
+  if(researchMode){
+    return;
+  }
+
+  const s=
+    getState(meal);
+
+  s.enabled=
+    !s.enabled;
 
   if(s.enabled){
     s.consecutiveErrors=0;
@@ -256,18 +692,40 @@ function toggleMeal(meal){
     s.pendingError=false;
   }
 
-  localStorage.setItem(AUTO_PREFIX+meal,s.enabled?'1':'0');
+  localStorage.setItem(
+    AUTO_PREFIX+meal,
+    s.enabled?'1':'0'
+  );
 
-  if(!s.enabled)clearTimer(s);
-  else if(!s.pending&&!isMaintenance())schedule(meal);
+  if(!s.enabled){
+    clearTimer(s);
+
+  }else if(
+    !s.pending&&
+    !isMaintenance()
+  ){
+    schedule(meal);
+  }
 
   renderPanels();
 }
 
 function manualFire(meal){
-  const s=getState(meal);
-  if(s.pending||isMaintenance())return;
-  fireSameWeek(meal,true);
+  const s=
+    getState(meal);
+
+  if(
+    s.pending||
+    isMaintenance()
+  ){
+    return;
+  }
+
+  fireSameWeek(
+    meal,
+    true,
+    ''
+  );
 }
 
 function toggleNotify(){
@@ -280,172 +738,409 @@ function toggleNotify(){
         ?'off'
         :'all';
 
-  localStorage.setItem(NOTIFY_KEY,JSON.stringify(notifyState));
+  localStorage.setItem(
+    NOTIFY_KEY,
+    JSON.stringify(notifyState)
+  );
+
   renderPanels();
 }
 
 function clearTimer(s){
-  if(s.timer)clearTimeout(s.timer);
+  if(s.timer){
+    clearTimeout(
+      s.timer
+    );
+  }
+
   s.timer=null;
   s.deadline=0;
 }
 
 function schedule(meal){
-  const s=getState(meal);
+  const s=
+    getState(meal);
 
   clearTimer(s);
 
-  if(!s.enabled||isMaintenance())return;
+  if(
+    !s.enabled||
+    researchMode||
+    isMaintenance()
+  ){
+    return;
+  }
 
-  s.deadline=performance.now()+WAIT;
+  s.deadline=
+    performance.now()+WAIT;
 
-  s.timer=setTimeout(()=>{
-    s.timer=null;
-    s.deadline=0;
-    fireSameWeek(meal,false);
-  },WAIT);
+  s.timer=
+    setTimeout(
+      ()=>{
+        s.timer=null;
+        s.deadline=0;
+
+        fireSameWeek(
+          meal,
+          false,
+          ''
+        );
+      },
+      WAIT
+    );
 }
 
 function renderPanels(){
   syncNotifyDay();
 
-  const now=performance.now(),maintenance=isMaintenance();
+  const now=
+    performance.now();
+
+  const maintenance=
+    isMaintenance();
 
   MEALS.forEach(meal=>{
-    const s=mealStates.get(meal);
-    if(!s?.panel||!blocks.has(meal))return;
+    const s=
+      mealStates.get(meal);
+
+    if(
+      !s?.panel||
+      !blocks.has(meal)
+    ){
+      return;
+    }
 
     if(s.manual){
-      s.manual.style.background=maintenance||s.pending?'#777':'#444';
-      s.manual.style.color='#fff';
-      s.manual.style.cursor=maintenance||s.pending?'default':'pointer';
-      s.manual.style.opacity=maintenance||s.pending?'0.6':'1';
+      s.manual.style.background=
+        maintenance||s.pending
+          ?'#777'
+          :'#444';
+
+      s.manual.style.color=
+        '#fff';
+
+      s.manual.style.cursor=
+        maintenance||s.pending
+          ?'default'
+          :'pointer';
+
+      s.manual.style.opacity=
+        maintenance||s.pending
+          ?'0.6'
+          :'1';
     }
 
     if(maintenance){
-      s.panel.style.background='#777';
-      s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} メンテ`;
+      s.panel.style.background=
+        '#777';
+
+      s.panel.style.color=
+        '#fff';
+
+      s.panel.textContent=
+        `${meal} メンテ`;
+
       return;
     }
 
     if(s.forcedStopError){
-      s.panel.style.background='#ff8c00';
-      s.panel.style.color='#000';
-      s.panel.textContent=`${meal} STOP`;
-      s.panel.title=`エラー${MAX_ERRORS}回連続 / 自動読込強制停止 / クリックで再開`;
+      s.panel.style.background=
+        '#ff8c00';
+
+      s.panel.style.color=
+        '#000';
+
+      s.panel.textContent=
+        `${meal} STOP`;
+
+      s.panel.title=
+        `エラー${MAX_ERRORS}回連続 / 自動読込強制停止 / クリックで再開`;
+
       return;
     }
 
-    s.panel.title=`${meal} 自動監視 ON / OFF`;
-
     if(s.error403){
-      s.panel.style.background='#ff8c00';
-      s.panel.style.color='#000';
-      s.panel.textContent=s.deadline
-        ?`${meal} 403 ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`
-        :`${meal} 403`;
+      s.panel.style.background=
+        '#ff8c00';
+
+      s.panel.style.color=
+        '#000';
+
+      s.panel.textContent=
+        s.deadline
+          ?`${meal} 403 ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`
+          :`${meal} 403`;
+
       return;
     }
 
     if(s.pendingError){
-      s.panel.style.background='#ff8c00';
-      s.panel.style.color='#000';
-      s.panel.textContent=`${meal} 5分超`;
+      s.panel.style.background=
+        '#ff8c00';
+
+      s.panel.style.color=
+        '#000';
+
+      s.panel.textContent=
+        `${meal} 5分超`;
+
       return;
     }
 
     if(s.pending>0){
-      s.panel.style.background='#7b2cbf';
-      s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} 読込 ${Math.floor((now-s.startedAt)/1000)}`;
+      s.panel.style.background=
+        '#7b2cbf';
+
+      s.panel.style.color=
+        '#fff';
+
+      s.panel.textContent=
+        `${meal} 読込 ${Math.floor((now-s.startedAt)/1000)}`;
+
       return;
     }
 
+    if(researchMode){
+      s.panel.style.background=
+        '#555';
+
+      s.panel.style.color=
+        '#fff';
+
+      s.panel.textContent=
+        `${meal} 調査`;
+
+      s.panel.title=
+        '9時調査モード中 / 通常自動読込停止';
+
+      return;
+    }
+
+    s.panel.title=
+      `${meal} 自動監視 ON / OFF`;
+
     if(!s.enabled){
-      s.panel.style.background='#555';
-      s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} OFF`;
+      s.panel.style.background=
+        '#555';
+
+      s.panel.style.color=
+        '#fff';
+
+      s.panel.textContent=
+        `${meal} OFF`;
+
       return;
     }
 
     if(s.deadline){
-      s.panel.style.background='#1976d2';
-      s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`;
+      s.panel.style.background=
+        '#1976d2';
+
+      s.panel.style.color=
+        '#fff';
+
+      s.panel.textContent=
+        `${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`;
+
       return;
     }
 
-    s.panel.style.background='#1976d2';
-    s.panel.style.color='#fff';
-    s.panel.textContent=`${meal} ON`;
+    s.panel.style.background=
+      '#1976d2';
+
+    s.panel.style.color=
+      '#fff';
+
+    s.panel.textContent=
+      `${meal} ON`;
   });
 
   if(notifyPanel){
     if(notifyState.mode==='all'){
-      notifyPanel.style.background='#ffc107';
-      notifyPanel.style.color='#000';
-      notifyPanel.textContent='📢 全通知';
+      notifyPanel.style.background=
+        '#ffc107';
 
-    }else if(notifyState.mode==='vacancy'){
-      notifyPanel.style.background='#ff0000';
-      notifyPanel.style.color='#fff';
-      notifyPanel.textContent='🔴 空席通知';
+      notifyPanel.style.color=
+        '#000';
+
+      notifyPanel.textContent=
+        '📢 全通知';
+
+    }else if(
+      notifyState.mode==='vacancy'
+    ){
+      notifyPanel.style.background=
+        '#ff0000';
+
+      notifyPanel.style.color=
+        '#fff';
+
+      notifyPanel.textContent=
+        '🔴 空席通知';
 
     }else{
-      notifyPanel.style.background='#333';
-      notifyPanel.style.color='#fff';
-      notifyPanel.textContent='🔕 OFF';
+      notifyPanel.style.background=
+        '#333';
+
+      notifyPanel.style.color=
+        '#fff';
+
+      notifyPanel.textContent=
+        '🔕 OFF';
+    }
+  }
+
+  if(researchPanel){
+    if(researchMode){
+      researchPanel.style.background=
+        '#6f42c1';
+
+      researchPanel.style.color=
+        '#fff';
+
+      researchPanel.textContent=
+        '9時調査 ON';
+
+    }else{
+      researchPanel.style.background=
+        '#333';
+
+      researchPanel.style.color=
+        '#fff';
+
+      researchPanel.textContent=
+        '9時調査 OFF';
     }
   }
 }
 
 function maintenanceTick(){
-  const maintenance=isMaintenance();
+  const maintenance=
+    isMaintenance();
 
-  if(maintenance===wasMaintenance)return;
-  wasMaintenance=maintenance;
+  if(
+    maintenance===
+    wasMaintenance
+  ){
+    return;
+  }
+
+  wasMaintenance=
+    maintenance;
 
   if(maintenance){
-    mealStates.forEach(clearTimer);
-    console.log(`[${NAME}] メンテナンス停止`);
+    mealStates.forEach(
+      clearTimer
+    );
+
+    console.log(
+      `[${NAME}] メンテナンス停止`
+    );
 
   }else{
     refreshBlocks();
 
-    MEALS.forEach(meal=>{
-      const s=mealStates.get(meal);
-      if(s?.enabled&&!s.pending)fireSameWeek(meal,false);
-    });
+    if(!researchMode){
+      MEALS.forEach(meal=>{
+        const s=
+          mealStates.get(meal);
 
-    console.log(`[${NAME}] メンテナンス終了・再開`);
+        if(
+          s?.enabled&&
+          !s.pending
+        ){
+          fireSameWeek(
+            meal,
+            false,
+            ''
+          );
+        }
+      });
+    }
+
+    console.log(
+      `[${NAME}] メンテナンス終了・再開`
+    );
   }
 
   renderPanels();
 }
 
-function recordError(meal,error,count=true){
-  const s=getState(meal);
+function recordError(
+  meal,
+  error,
+  count=true,
+  notify=true
+){
+  const s=
+    getState(meal);
 
-  if(count&&!s.forcedStopError){
+  if(
+    count&&
+    !s.forcedStopError
+  ){
     s.consecutiveErrors++;
 
     console.warn(
       `[${NAME}] ${meal} 連続エラー ${s.consecutiveErrors}/${MAX_ERRORS}：${error}`
     );
 
-    if(s.consecutiveErrors>=MAX_ERRORS){
-      forceStopError(meal,error);
-      return;
+    if(
+      s.consecutiveErrors>=
+      MAX_ERRORS
+    ){
+      forceStopError(
+        meal,
+        error
+      );
+
+      return true;
     }
   }
 
-  sendErrorDiscord(meal,error);
+  if(notify){
+    sendErrorDiscord(
+      meal,
+      error
+    );
+  }
+
   renderPanels();
+
+  return false;
+}
+
+function reportError(
+  meal,
+  error,
+  researchPhase='',
+  count=true
+){
+  const stopped=
+    recordError(
+      meal,
+      error,
+      count,
+      !researchPhase
+    );
+
+  if(
+    researchPhase&&
+    !stopped
+  ){
+    sendResearchErrorDiscord(
+      meal,
+      researchPhase,
+      error
+    );
+  }
+
+  return stopped;
 }
 
 function resetErrors(meal){
-  const s=getState(meal);
+  const s=
+    getState(meal);
 
   if(s.consecutiveErrors){
     console.log(
@@ -459,10 +1154,16 @@ function resetErrors(meal){
   s.pendingError=false;
 }
 
-function forceStopError(meal,lastError){
-  const s=getState(meal);
+function forceStopError(
+  meal,
+  lastError
+){
+  const s=
+    getState(meal);
 
-  if(s.forcedStopError)return;
+  if(s.forcedStopError){
+    return;
+  }
 
   s.forcedStopError=true;
   s.enabled=false;
@@ -473,6 +1174,17 @@ function forceStopError(meal,lastError){
     AUTO_PREFIX+meal,
     '0'
   );
+
+  if(researchMode){
+    const prev=
+      loadPreviousAuto();
+
+    prev[meal]=false;
+
+    savePreviousAuto(
+      prev
+    );
+  }
 
   console.warn(
     `[${NAME}] ${meal} エラー${MAX_ERRORS}回連続 / 自動読込強制停止`
@@ -486,58 +1198,153 @@ function forceStopError(meal,lastError){
   renderPanels();
 }
 
-function fireSameWeek(meal,manual=false){
-  const s=getState(meal);
+function fireSameWeek(
+  meal,
+  manual=false,
+  researchPhase=''
+){
+  const s=
+    getState(meal);
 
-  if((!manual&&!s.enabled)||s.pending||isMaintenance())return;
+  if(
+    (!manual&&!s.enabled)||
+    s.pending||
+    isMaintenance()
+  ){
+    return false;
+  }
 
   refreshBlocks();
 
-  const block=blocks.get(meal);
+  const block=
+    blocks.get(meal);
 
   if(!block){
-    if(!manual)schedule(meal);
-    return;
+    reportError(
+      meal,
+      '食事区分DOMなし',
+      researchPhase
+    );
+
+    if(
+      !manual&&
+      s.enabled
+    ){
+      schedule(meal);
+    }
+
+    return false;
   }
 
-  const link=block.next;
+  const link=
+    block.next;
 
   const display=
-    link.closest('.header')
+    link
+      .closest('.header')
       ?.nextElementSibling
-      ?.querySelector('.date li:first-child .display');
+      ?.querySelector(
+        '.date li:first-child .display'
+      );
 
-  const jq=window.jQuery||window.$;
-  const format=window.webapiFormat;
+  const jq=
+    window.jQuery||
+    window.$;
 
-  if(!display||!jq?.datepicker||!format){
-    console.warn(`[${NAME}] ${meal} 日付DOM未検出`);
-    recordError(meal,'日付DOM未検出');
-    if(!manual&&s.enabled)schedule(meal);
-    return;
+  const format=
+    window.webapiFormat;
+
+  if(
+    !display||
+    !jq?.datepicker||
+    !format
+  ){
+    console.warn(
+      `[${NAME}] ${meal} 日付DOM未検出`
+    );
+
+    reportError(
+      meal,
+      '日付DOM未検出',
+      researchPhase
+    );
+
+    if(
+      !manual&&
+      s.enabled
+    ){
+      schedule(meal);
+    }
+
+    return false;
   }
 
-  const current=display.textContent.trim();
+  const current=
+    display.textContent.trim();
+
   let prev;
 
   try{
-    const d=jq.datepicker.parseDate(format,current,{});
-    d.setDate(d.getDate()-7);
-    prev=jq.datepicker.formatDate(format,d,{});
+    const d=
+      jq.datepicker.parseDate(
+        format,
+        current,
+        {}
+      );
+
+    d.setDate(
+      d.getDate()-7
+    );
+
+    prev=
+      jq.datepicker.formatDate(
+        format,
+        d,
+        {}
+      );
 
   }catch(e){
-    console.warn(`[${NAME}] ${meal} 日付変換失敗`,e);
-    recordError(meal,'日付変換失敗');
-    if(!manual&&s.enabled)schedule(meal);
-    return;
+    console.warn(
+      `[${NAME}] ${meal} 日付変換失敗`,
+      e
+    );
+
+    reportError(
+      meal,
+      '日付変換失敗',
+      researchPhase
+    );
+
+    if(
+      !manual&&
+      s.enabled
+    ){
+      schedule(meal);
+    }
+
+    return false;
   }
 
-  const hadNoData=link.classList.contains('hasNoData');
-  const before=s.pending;
+  const hadNoData=
+    link.classList.contains(
+      'hasNoData'
+    );
 
-  display.textContent=prev;
-  link.classList.remove('hasNoData');
-  autoHint=meal;
+  const before=
+    s.pending;
+
+  display.textContent=
+    prev;
+
+  link.classList.remove(
+    'hasNoData'
+  );
+
+  autoHint=
+    meal;
+
+  researchPhaseHint=
+    researchPhase;
 
   let fireError='';
 
@@ -545,104 +1352,222 @@ function fireSameWeek(meal,manual=false){
     link.click();
 
   }catch(e){
-    console.error(`[${NAME}] ${meal} 発火失敗`,e);
-    fireError='発火エラー';
+    console.error(
+      `[${NAME}] ${meal} 発火失敗`,
+      e
+    );
+
+    fireError=
+      '発火エラー';
 
   }finally{
     autoHint='';
+    researchPhaseHint='';
   }
 
-  if(s.pending===before){
-    const d2=block.box.querySelector('.timeList .date li:first-child .display');
+  if(
+    s.pending===
+    before
+  ){
+    const d2=
+      block.box.querySelector(
+        '.timeList .date li:first-child .display'
+      );
 
-    if(d2)d2.textContent=current;
-    if(hadNoData)link.classList.add('hasNoData');
+    if(d2){
+      d2.textContent=
+        current;
+    }
 
-    recordError(
+    if(hadNoData){
+      link.classList.add(
+        'hasNoData'
+      );
+    }
+
+    reportError(
       meal,
-      fireError||'ajaxNextWeekList未発火'
+      fireError||
+      'ajaxNextWeekList未発火',
+      researchPhase
     );
 
-    if(!manual&&s.enabled)schedule(meal);
+    if(
+      !manual&&
+      s.enabled
+    ){
+      schedule(meal);
+    }
+
+    return false;
   }
+
+  return true;
 }
 
 function bodyString(body){
-  if(typeof body==='string')return body;
-  if(body instanceof URLSearchParams)return body.toString();
+  if(
+    typeof body===
+    'string'
+  ){
+    return body;
+  }
+
+  if(
+    body instanceof
+    URLSearchParams
+  ){
+    return body.toString();
+  }
+
   return '';
 }
 
 function watched(url){
   try{
-    return PATHS.includes(new URL(url,location.href).pathname);
+    return PATHS.includes(
+      new URL(
+        url,
+        location.href
+      ).pathname
+    );
+
   }catch{
     return false;
   }
 }
 
 function has(obj,key){
-  return Object.prototype.hasOwnProperty.call(obj,key);
+  return Object
+    .prototype
+    .hasOwnProperty
+    .call(
+      obj,
+      key
+    );
 }
 
 function slotStatus(li){
   if(
-    li.classList.contains('reservationAble')||
-    li.querySelector('a[onclick*="toOrderForWeek"]')||
-    li.querySelector('img[alt="予約する"]')
-  )return '空席';
+    li.classList.contains(
+      'reservationAble'
+    )||
+    li.querySelector(
+      'a[onclick*="toOrderForWeek"]'
+    )||
+    li.querySelector(
+      'img[alt="予約する"]'
+    )
+  ){
+    return '空席';
+  }
 
   if(
-    li.classList.contains('full')||
-    li.querySelector('.text')?.textContent.includes('満席')
-  )return '満席';
+    li.classList.contains(
+      'full'
+    )||
+    li.querySelector('.text')
+      ?.textContent
+      .includes('満席')
+  ){
+    return '満席';
+  }
 
   return '不明';
 }
 
 function readCurrentSlots(meal){
-  const block=blocks.get(meal);
+  const block=
+    blocks.get(meal);
 
-  if(!block)throw new Error('食事区分DOMなし');
+  if(!block){
+    throw new Error(
+      '食事区分DOMなし'
+    );
+  }
 
   const dates=[
-    ...block.box.querySelectorAll('.timeList .date li .display')
-  ].map(e=>e.textContent.trim()).filter(Boolean);
+    ...block.box.querySelectorAll(
+      '.timeList .date li .display'
+    )
+  ]
+    .map(
+      e=>e.textContent.trim()
+    )
+    .filter(Boolean);
 
   const lists=[
-    ...block.box.querySelectorAll('.timeTable .slider .view > ul.cf')
+    ...block.box.querySelectorAll(
+      '.timeTable .slider .view > ul.cf'
+    )
   ];
 
-  if(!dates.length)throw new Error('日付DOMなし');
-  if(!lists.length)throw new Error('週間在庫DOMなし');
+  if(!dates.length){
+    throw new Error(
+      '日付DOMなし'
+    );
+  }
 
-  if(dates.length!==lists.length){
-    throw new Error(`週間DOM不整合 ${dates.length}/${lists.length}`);
+  if(!lists.length){
+    throw new Error(
+      '週間在庫DOMなし'
+    );
+  }
+
+  if(
+    dates.length!==
+    lists.length
+  ){
+    throw new Error(
+      `週間DOM不整合 ${dates.length}/${lists.length}`
+    );
   }
 
   const slots={};
 
   lists.forEach((ul,i)=>{
-    const date=dates[i];
+    const date=
+      dates[i];
 
-    [...ul.children].forEach(li=>{
-      const time=li.querySelector('.time')?.textContent?.trim();
+    [...ul.children]
+      .forEach(li=>{
+        const time=
+          li
+            .querySelector(
+              '.time'
+            )
+            ?.textContent
+            ?.trim();
 
-      if(!time)return;
+        if(!time){
+          return;
+        }
 
-      slots[`${date}|${time}`]=slotStatus(li);
-    });
+        slots[
+          `${date}|${time}`
+        ]=
+          slotStatus(li);
+      });
   });
 
   return {
     weekStart:dates[0],
-    weekEnd:dates[dates.length-1],
+    weekEnd:dates[
+      dates.length-1
+    ],
     slots
   };
 }
 
-function snapshotKey(meta,meal,current){
-  const p=new URLSearchParams(meta.body);
+function snapshotKey(
+  meta,
+  meal,
+  current
+){
+  const p=
+    new URLSearchParams(
+      meta.body
+    );
 
   return [
     meal,
@@ -657,194 +1582,697 @@ function snapshotKey(meta,meal,current){
   ].join('|');
 }
 
-function compareAndSave(meta,meal,current){
-  const key=snapshotKey(meta,meal,current);
-  const previous=snapshots.get(key);
+function compareAndSave(
+  meta,
+  meal,
+  current
+){
+  const key=
+    snapshotKey(
+      meta,
+      meal,
+      current
+    );
+
+  const previous=
+    snapshots.get(key);
 
   if(!previous){
-    snapshots.set(key,current.slots);
+    snapshots.set(
+      key,
+      current.slots
+    );
+
     return [];
   }
 
-  const prev=previous;
-  const curr=current.slots;
+  const prev=
+    previous;
+
+  const curr=
+    current.slots;
+
   const changes=[];
 
-  Object.keys(curr).forEach(slot=>{
-    if(has(prev,slot))return;
+  Object.keys(curr)
+    .forEach(slot=>{
+      if(
+        has(prev,slot)
+      ){
+        return;
+      }
 
-    const [date,time]=slot.split('|');
+      const [date,time]=
+        slot.split('|');
 
-    changes.push({
-      type:'added',
-      meal,
-      date,
-      time,
-      to:curr[slot]
+      changes.push({
+        type:'added',
+        meal,
+        date,
+        time,
+        to:curr[slot]
+      });
     });
-  });
 
-  Object.keys(prev).forEach(slot=>{
-    if(has(curr,slot))return;
+  Object.keys(prev)
+    .forEach(slot=>{
+      if(
+        has(curr,slot)
+      ){
+        return;
+      }
 
-    const [date,time]=slot.split('|');
+      const [date,time]=
+        slot.split('|');
 
-    changes.push({
-      type:'deleted',
-      meal,
-      date,
-      time
+      changes.push({
+        type:'deleted',
+        meal,
+        date,
+        time
+      });
     });
-  });
 
-  Object.keys(curr).forEach(slot=>{
-    if(!has(prev,slot))return;
+  Object.keys(curr)
+    .forEach(slot=>{
+      if(
+        !has(prev,slot)
+      ){
+        return;
+      }
 
-    const from=prev[slot];
-    const to=curr[slot];
+      const from=
+        prev[slot];
 
-    if(from==='不明'||to==='不明'||from===to)return;
+      const to=
+        curr[slot];
 
-    const [date,time]=slot.split('|');
+      if(
+        from==='不明'||
+        to==='不明'||
+        from===to
+      ){
+        return;
+      }
 
-    changes.push({
-      type:'changed',
-      meal,
-      date,
-      time,
-      from,
-      to
+      const [date,time]=
+        slot.split('|');
+
+      changes.push({
+        type:'changed',
+        meal,
+        date,
+        time,
+        from,
+        to
+      });
     });
-  });
 
   const next={};
 
-  Object.keys(curr).forEach(slot=>{
-    next[slot]=
-      curr[slot]==='不明'&&
-      has(prev,slot)&&
-      prev[slot]!=='不明'
-        ?prev[slot]
-        :curr[slot];
-  });
+  Object.keys(curr)
+    .forEach(slot=>{
+      next[slot]=
+        curr[slot]==='不明'&&
+        has(prev,slot)&&
+        prev[slot]!=='不明'
+          ?prev[slot]
+          :curr[slot];
+    });
 
-  snapshots.set(key,next);
+  snapshots.set(
+    key,
+    next
+  );
 
   return changes;
 }
 
-const nativeOpen=XMLHttpRequest.prototype.open;
-const nativeSend=XMLHttpRequest.prototype.send;
+function compareResearchSlots(
+  prev,
+  curr,
+  meal
+){
+  const changes=[];
 
-XMLHttpRequest.prototype.open=function(method,url,...args){
+  Object.keys(curr)
+    .forEach(slot=>{
+      if(
+        has(prev,slot)
+      ){
+        return;
+      }
+
+      const [date,time]=
+        slot.split('|');
+
+      changes.push({
+        type:'added',
+        meal,
+        date,
+        time,
+        to:curr[slot]
+      });
+    });
+
+  Object.keys(prev)
+    .forEach(slot=>{
+      if(
+        has(curr,slot)
+      ){
+        return;
+      }
+
+      const [date,time]=
+        slot.split('|');
+
+      changes.push({
+        type:'deleted',
+        meal,
+        date,
+        time
+      });
+    });
+
+  Object.keys(curr)
+    .forEach(slot=>{
+      if(
+        !has(prev,slot)
+      ){
+        return;
+      }
+
+      const from=
+        prev[slot];
+
+      const to=
+        curr[slot];
+
+      if(
+        from==='不明'||
+        to==='不明'||
+        from===to
+      ){
+        return;
+      }
+
+      const [date,time]=
+        slot.split('|');
+
+      changes.push({
+        type:'changed',
+        meal,
+        date,
+        time,
+        from,
+        to
+      });
+    });
+
+  return changes;
+}
+
+function loadResearchBaseline(){
+  try{
+    const data=
+      JSON.parse(
+        localStorage.getItem(
+          RESEARCH_BASELINE_KEY
+        )||'null'
+      );
+
+    if(
+      data?.date===
+      ymd()
+    ){
+      return data;
+    }
+  }catch{}
+
+  return {
+    date:ymd(),
+    entries:{}
+  };
+}
+
+function clearResearchBaseline(){
+  const data={
+    date:ymd(),
+    entries:{}
+  };
+
+  localStorage.setItem(
+    RESEARCH_BASELINE_KEY,
+    JSON.stringify(data)
+  );
+}
+
+function saveResearchBaseline(
+  meal,
+  meta,
+  current
+){
+  const data=
+    loadResearchBaseline();
+
+  const key=
+    snapshotKey(
+      meta,
+      meal,
+      current
+    );
+
+  data.entries[meal]={
+    key,
+    weekStart:current.weekStart,
+    weekEnd:current.weekEnd,
+    slots:current.slots
+  };
+
+  localStorage.setItem(
+    RESEARCH_BASELINE_KEY,
+    JSON.stringify(data)
+  );
+
+  snapshots.set(
+    key,
+    current.slots
+  );
+
+  console.log(
+    `[${NAME}] ${meal} AM8:58 基準保存`
+  );
+}
+
+function handleResearchCompare(
+  meal,
+  meta,
+  current
+){
+  const data=
+    loadResearchBaseline();
+
+  const baseline=
+    data.entries?.[meal];
+
+  const key=
+    snapshotKey(
+      meta,
+      meal,
+      current
+    );
+
+  if(!baseline){
+    snapshots.set(
+      key,
+      current.slots
+    );
+
+    sendResearchErrorDiscord(
+      meal,
+      'compare',
+      '8:58基準スナップショットなし'
+    );
+
+    return;
+  }
+
+  if(
+    baseline.key!==
+    key
+  ){
+    snapshots.set(
+      key,
+      current.slots
+    );
+
+    sendResearchErrorDiscord(
+      meal,
+      'compare',
+      '8:58と9:00の検索条件が一致しません'
+    );
+
+    return;
+  }
+
+  const changes=
+    compareResearchSlots(
+      baseline.slots,
+      current.slots,
+      meal
+    );
+
+  snapshots.set(
+    key,
+    current.slots
+  );
+
+  sendResearchResult(
+    meal,
+    current,
+    changes
+  );
+
+  console.log(
+    `[${NAME}] ${meal} AM9:00 比較完了 差分${changes.length}件`
+  );
+}
+
+function handleResearchSuccess(
+  meal,
+  meta,
+  current
+){
+  if(
+    meta.researchPhase===
+    'baseline'
+  ){
+    saveResearchBaseline(
+      meal,
+      meta,
+      current
+    );
+
+    return;
+  }
+
+  if(
+    meta.researchPhase===
+    'compare'
+  ){
+    handleResearchCompare(
+      meal,
+      meta,
+      current
+    );
+  }
+}
+
+function researchTick(){
+  if(!researchMode){
+    return;
+  }
+
+  const d=
+    new Date();
+
+  const date=
+    ymd();
+
+  if(
+    researchRunDate!==
+    date
+  ){
+    researchRunDate=
+      date;
+
+    researchBaselineTriggered=
+      false;
+
+    researchCompareTriggered=
+      false;
+  }
+
+  const h=
+    d.getHours();
+
+  const m=
+    d.getMinutes();
+
+  if(
+    h===8&&
+    m===58&&
+    !researchBaselineTriggered
+  ){
+    researchBaselineTriggered=
+      true;
+
+    runResearchRound(
+      'baseline'
+    );
+  }
+
+  if(
+    h===9&&
+    m===0&&
+    !researchCompareTriggered
+  ){
+    researchCompareTriggered=
+      true;
+
+    runResearchRound(
+      'compare'
+    );
+  }
+}
+
+function runResearchRound(
+  phase
+){
+  refreshBlocks();
+
+  if(
+    phase===
+    'baseline'
+  ){
+    clearResearchBaseline();
+
+    console.log(
+      `[${NAME}] AM8:58 9時調査 基準読込開始`
+    );
+  }else{
+    console.log(
+      `[${NAME}] AM9:00 9時調査 比較読込開始`
+    );
+  }
+
+  [...blocks.keys()]
+    .forEach(meal=>{
+      const s=
+        getState(meal);
+
+      if(s.pending){
+        sendResearchErrorDiscord(
+          meal,
+          phase,
+          phase==='baseline'
+            ?'8:58時点で既存通信がPending中'
+            :'9:00時点で既存通信がPending中'
+        );
+
+        return;
+      }
+
+      fireSameWeek(
+        meal,
+        true,
+        phase
+      );
+    });
+}
+
+const nativeOpen=
+  XMLHttpRequest
+    .prototype
+    .open;
+
+const nativeSend=
+  XMLHttpRequest
+    .prototype
+    .send;
+
+XMLHttpRequest.prototype.open=
+function(method,url,...args){
   this.__tdrWeek={
-    method:String(method||'GET').toUpperCase(),
+    method:String(
+      method||'GET'
+    ).toUpperCase(),
     url
   };
 
-  return nativeOpen.call(this,method,url,...args);
+  return nativeOpen.call(
+    this,
+    method,
+    url,
+    ...args
+  );
 };
 
-XMLHttpRequest.prototype.send=function(body){
-  const x=this.__tdrWeek;
+XMLHttpRequest.prototype.send=
+function(body){
+  const x=
+    this.__tdrWeek;
 
-  if(x?.method==='POST'&&watched(x.url)){
-    const str=bodyString(body);
-    const params=new URLSearchParams(str);
-    const commodity=params.get('commodityCD')||'';
-    const meal=autoHint||resolveMeal(commodity);
+  if(
+    x?.method==='POST'&&
+    watched(x.url)
+  ){
+    const str=
+      bodyString(body);
+
+    const params=
+      new URLSearchParams(
+        str
+      );
+
+    const commodity=
+      params.get(
+        'commodityCD'
+      )||'';
+
+    const meal=
+      autoHint||
+      resolveMeal(
+        commodity
+      );
 
     const meta={
       body:str,
       commodity,
       pendingTimer:null,
-      errorCounted:false
+      errorCounted:false,
+      researchPhase:
+        researchPhaseHint||''
     };
 
     if(meal){
-      const s=getState(meal);
+      const s=
+        getState(meal);
 
       clearTimer(s);
 
-      if(s.pending++===0){
-        s.startedAt=performance.now();
+      if(
+        s.pending++===
+        0
+      ){
+        s.startedAt=
+          performance.now();
+
         s.pendingError=false;
       }
 
       renderPanels();
     }
 
-    meta.pendingTimer=setTimeout(()=>{
-      const pendingMeal=meal||resolveMeal(commodity);
+    meta.pendingTimer=
+      setTimeout(
+        ()=>{
+          const pendingMeal=
+            meal||
+            resolveMeal(
+              commodity
+            );
 
-      if(pendingMeal){
-        const s=getState(pendingMeal);
-        s.pendingError=true;
+          if(pendingMeal){
+            const s=
+              getState(
+                pendingMeal
+              );
 
-        if(!meta.errorCounted){
-          meta.errorCounted=true;
-          recordError(
-            pendingMeal,
-            'Pending 5分超過'
+            s.pendingError=
+              true;
+
+            requestError(
+              pendingMeal,
+              meta,
+              'Pending 5分超過'
+            );
+
+          }else{
+            sendErrorDiscord(
+              '食事区分不明',
+              'Pending 5分超過'
+            );
+          }
+
+          renderPanels();
+        },
+        PENDING_ERROR_MS
+      );
+
+    this.addEventListener(
+      'loadend',
+      ()=>{
+        clearTimeout(
+          meta.pendingTimer
+        );
+
+        let text='';
+
+        try{
+          text=
+            this.responseText||'';
+        }catch{}
+
+        const resolved=
+          meal||
+          resolveMeal(
+            commodity
           );
+
+        if(!resolved){
+          unresolved.push({
+            meta,
+            status:this.status,
+            text
+          });
+
+          queueRefresh();
+
+          return;
         }
 
-      }else{
-        sendErrorDiscord(
-          '食事区分不明',
-          'Pending 5分超過'
+        setTimeout(
+          ()=>{
+            finishRequest(
+              resolved,
+              meta,
+              this.status,
+              text
+            );
+          },
+          30
         );
+      },
+      {
+        once:true
       }
-
-      renderPanels();
-
-    },PENDING_ERROR_MS);
-
-    this.addEventListener('loadend',()=>{
-      clearTimeout(meta.pendingTimer);
-
-      let text='';
-
-      try{
-        text=this.responseText||'';
-      }catch{}
-
-      const resolved=meal||resolveMeal(commodity);
-
-      if(!resolved){
-        unresolved.push({
-          meta,
-          status:this.status,
-          text
-        });
-
-        queueRefresh();
-        return;
-      }
-
-      setTimeout(()=>{
-        finishRequest(
-          resolved,
-          meta,
-          this.status,
-          text
-        );
-      },30);
-
-    },{once:true});
+    );
   }
 
-  return nativeSend.call(this,body);
+  return nativeSend.call(
+    this,
+    body
+  );
 };
 
-function requestError(meal,meta,error){
-  const count=!meta.errorCounted;
-  meta.errorCounted=true;
-  recordError(meal,error,count);
+function requestError(
+  meal,
+  meta,
+  error
+){
+  const count=
+    !meta.errorCounted;
+
+  meta.errorCounted=
+    true;
+
+  reportError(
+    meal,
+    error,
+    meta.researchPhase,
+    count
+  );
 }
 
-function finishRequest(meal,meta,status,text){
-  const s=getState(meal);
+function finishRequest(
+  meal,
+  meta,
+  status,
+  text
+){
+  const s=
+    getState(meal);
 
   if(status!==403){
     s.error403=false;
@@ -859,7 +2287,10 @@ function finishRequest(meal,meta,status,text){
       'HTTP 403'
     );
 
-  }else if(status<200||status>=300){
+  }else if(
+    status<200||
+    status>=300
+  ){
     requestError(
       meal,
       meta,
@@ -875,7 +2306,11 @@ function finishRequest(meal,meta,status,text){
       '空レスポンス'
     );
 
-  }else if(text.includes('paramErrorDiv')){
+  }else if(
+    text.includes(
+      'paramErrorDiv'
+    )
+  ){
     requestError(
       meal,
       meta,
@@ -886,19 +2321,34 @@ function finishRequest(meal,meta,status,text){
     try{
       refreshBlocks();
 
-      const current=readCurrentSlots(meal);
+      const current=
+        readCurrentSlots(meal);
 
-      const changes=compareAndSave(
-        meta,
-        meal,
-        current
-      );
+      if(meta.researchPhase){
+        handleResearchSuccess(
+          meal,
+          meta,
+          current
+        );
 
-      resetErrors(meal);
+      }else{
+        const changes=
+          compareAndSave(
+            meta,
+            meal,
+            current
+          );
 
-      if(changes.length){
-        sendChangesDiscord(changes);
+        if(changes.length){
+          sendChangesDiscord(
+            changes
+          );
+        }
       }
+
+      resetErrors(
+        meal
+      );
 
     }catch(e){
       console.error(
@@ -914,13 +2364,18 @@ function finishRequest(meal,meta,status,text){
     }
   }
 
-  if(s.pending>0)s.pending--;
+  if(s.pending>0){
+    s.pending--;
+  }
 
   if(!s.pending){
     s.startedAt=0;
     s.pendingError=false;
 
-    if(s.enabled){
+    if(
+      s.enabled&&
+      !researchMode
+    ){
       schedule(meal);
     }
   }
@@ -930,55 +2385,95 @@ function finishRequest(meal,meta,status,text){
 }
 
 function drainUnresolved(){
-  for(let i=unresolved.length-1;i>=0;i--){
-    const x=unresolved[i];
-    const meal=resolveMeal(x.meta.commodity);
+  for(
+    let i=
+      unresolved.length-1;
+    i>=0;
+    i--
+  ){
+    const x=
+      unresolved[i];
 
-    if(!meal)continue;
-
-    unresolved.splice(i,1);
-
-    setTimeout(()=>{
-      finishRequest(
-        meal,
-        x.meta,
-        x.status,
-        x.text
+    const meal=
+      resolveMeal(
+        x.meta.commodity
       );
-    },30);
+
+    if(!meal){
+      continue;
+    }
+
+    unresolved.splice(
+      i,
+      1
+    );
+
+    setTimeout(
+      ()=>{
+        finishRequest(
+          meal,
+          x.meta,
+          x.status,
+          x.text
+        );
+      },
+      30
+    );
   }
 }
 
 function sortChanges(changes){
-  return [...changes].sort(
-    (a,b)=>
-      a.date.localeCompare(b.date)||
-      MEALS.indexOf(a.meal)-MEALS.indexOf(b.meal)||
-      a.time.localeCompare(b.time)
-  );
+  return [...changes]
+    .sort(
+      (a,b)=>
+        a.date.localeCompare(
+          b.date
+        )||
+        MEALS.indexOf(a.meal)-
+        MEALS.indexOf(b.meal)||
+        a.time.localeCompare(
+          b.time
+        )
+    );
 }
 
 function groupDateMeal(changes){
-  const map=new Map();
+  const map=
+    new Map();
 
-  sortChanges(changes).forEach(c=>{
-    const key=`${c.date}|${c.meal}`;
+  sortChanges(changes)
+    .forEach(c=>{
+      const key=
+        `${c.date}|${c.meal}`;
 
-    if(!map.has(key)){
-      map.set(key,{
-        date:c.date,
-        meal:c.meal,
-        changes:[]
-      });
-    }
+      if(
+        !map.has(key)
+      ){
+        map.set(
+          key,
+          {
+            date:c.date,
+            meal:c.meal,
+            changes:[]
+          }
+        );
+      }
 
-    map.get(key).changes.push(c);
-  });
+      map.get(key)
+        .changes
+        .push(c);
+    });
 
-  return [...map.values()];
+  return [
+    ...map.values()
+  ];
 }
 
-function buildTitle(icon,date,meal){
+function buildTitle(
+  icon,
+  date,
+  meal
+){
   return [
     `${icon}${nowText()}`,
     restaurantName(),
@@ -986,20 +2481,48 @@ function buildTitle(icon,date,meal){
   ].join('\n');
 }
 
-function buildTimeOnlyDescription(changes){
-  const times=sortChanges(changes).map(c=>c.time);
+function buildWeekTitle(
+  icon,
+  start,
+  end,
+  meal
+){
+  return [
+    `${icon}${nowText()}`,
+    restaurantName(),
+    `${fmtWeekJa(start,end)} 【${meal}】`
+  ].join('\n');
+}
+
+function buildTimeOnlyDescription(
+  changes
+){
+  const times=
+    sortChanges(changes)
+      .map(
+        c=>c.time
+      );
+
   const lines=[];
 
-  for(let i=0;i<times.length;i+=2){
+  for(
+    let i=0;
+    i<times.length;
+    i+=2
+  ){
     lines.push(
-      times.slice(i,i+2).join(' ')
+      times
+        .slice(i,i+2)
+        .join(' ')
     );
   }
 
   return lines.join('\n');
 }
 
-function buildAddedDescription(changes){
+function buildAddedDescription(
+  changes
+){
   return sortChanges(changes)
     .map(c=>{
       const state=
@@ -1014,32 +2537,57 @@ function buildAddedDescription(changes){
     .join('\n');
 }
 
-function buildDeletedDescription(changes){
+function buildDeletedDescription(
+  changes
+){
   return sortChanges(changes)
-    .map(c=>`${c.time}　🟢削除`)
+    .map(
+      c=>`${c.time}　🟢削除`
+    )
     .join('\n');
 }
 
-function postDiscord(title,description,color){
-  const webhook=window.TDR_WEBHOOKS?.restaurant;
+function postDiscord(
+  title,
+  description,
+  color
+){
+  const webhook=
+    window.TDR_WEBHOOKS
+      ?.restaurant;
 
-  if(!webhook)return;
+  if(!webhook){
+    return;
+  }
 
-  fetch(webhook,{
-    method:'POST',
-    headers:{
-      'Content-Type':'application/json'
-    },
-    keepalive:true,
-    body:JSON.stringify({
-      username:NAME,
-      embeds:[{
-        title:title.slice(0,256),
-        description:description.slice(0,4000),
-        color
-      }]
-    })
-  }).catch(e=>{
+  fetch(
+    webhook,
+    {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json'
+      },
+      keepalive:true,
+      body:JSON.stringify({
+        username:NAME,
+        embeds:[
+          {
+            title:
+              title.slice(
+                0,
+                256
+              ),
+            description:
+              description.slice(
+                0,
+                4000
+              ),
+            color
+          }
+        ]
+      })
+    }
+  ).catch(e=>{
     console.error(
       `[${NAME}] Discord通知失敗`,
       e
@@ -1047,21 +2595,45 @@ function postDiscord(title,description,color){
   });
 }
 
-function sendChangesDiscord(changes){
+function sendChangesDiscord(
+  changes
+){
   syncNotifyDay();
 
-  const added=changes.filter(c=>c.type==='added');
-  const deleted=changes.filter(c=>c.type==='deleted');
-  let normal=changes.filter(c=>c.type==='changed');
+  const added=
+    changes.filter(
+      c=>c.type==='added'
+    );
 
-  if(notifyState.mode==='off'){
+  const deleted=
+    changes.filter(
+      c=>c.type==='deleted'
+    );
+
+  let normal=
+    changes.filter(
+      c=>c.type==='changed'
+    );
+
+  if(
+    notifyState.mode===
+    'off'
+  ){
     normal=[];
 
-  }else if(notifyState.mode==='vacancy'){
-    normal=normal.filter(c=>c.to==='空席');
+  }else if(
+    notifyState.mode===
+    'vacancy'
+  ){
+    normal=
+      normal.filter(
+        c=>c.to==='空席'
+      );
   }
 
-  groupDateMeal(added).forEach(group=>{
+  groupDateMeal(
+    added
+  ).forEach(group=>{
     postDiscord(
       buildTitle(
         '🔵',
@@ -1075,7 +2647,9 @@ function sendChangesDiscord(changes){
     );
   });
 
-  groupDateMeal(deleted).forEach(group=>{
+  groupDateMeal(
+    deleted
+  ).forEach(group=>{
     postDiscord(
       buildTitle(
         '🟢',
@@ -1089,10 +2663,19 @@ function sendChangesDiscord(changes){
     );
   });
 
-  const vacancy=normal.filter(c=>c.to==='空席');
-  const full=normal.filter(c=>c.to==='満席');
+  const vacancy=
+    normal.filter(
+      c=>c.to==='空席'
+    );
 
-  groupDateMeal(vacancy).forEach(group=>{
+  const full=
+    normal.filter(
+      c=>c.to==='満席'
+    );
+
+  groupDateMeal(
+    vacancy
+  ).forEach(group=>{
     postDiscord(
       buildTitle(
         '🔴',
@@ -1106,7 +2689,9 @@ function sendChangesDiscord(changes){
     );
   });
 
-  groupDateMeal(full).forEach(group=>{
+  groupDateMeal(
+    full
+  ).forEach(group=>{
     postDiscord(
       buildTitle(
         '⚫️',
@@ -1121,22 +2706,150 @@ function sendChangesDiscord(changes){
   });
 }
 
-async function getPublicIp(){
-  const controller=new AbortController();
+function sendResearchResult(
+  meal,
+  current,
+  changes
+){
+  if(!changes.length){
+    postDiscord(
+      buildWeekTitle(
+        '⚪️',
+        current.weekStart,
+        current.weekEnd,
+        meal
+      ),
+      [
+        'AM9時調査',
+        '差分なし'
+      ].join('\n'),
+      GRAY
+    );
 
-  const timer=setTimeout(
-    ()=>controller.abort(),
-    IP_TIMEOUT
-  );
+    return;
+  }
+
+  const added=
+    changes.filter(
+      c=>c.type==='added'
+    );
+
+  const deleted=
+    changes.filter(
+      c=>c.type==='deleted'
+    );
+
+  const vacancy=
+    changes.filter(
+      c=>
+        c.type==='changed'&&
+        c.to==='空席'
+    );
+
+  const full=
+    changes.filter(
+      c=>
+        c.type==='changed'&&
+        c.to==='満席'
+    );
+
+  groupDateMeal(
+    added
+  ).forEach(group=>{
+    postDiscord(
+      buildTitle(
+        '🔵',
+        group.date,
+        group.meal
+      ),
+      [
+        'AM9時調査',
+        buildAddedDescription(
+          group.changes
+        )
+      ].join('\n'),
+      BLUE
+    );
+  });
+
+  groupDateMeal(
+    deleted
+  ).forEach(group=>{
+    postDiscord(
+      buildTitle(
+        '🟢',
+        group.date,
+        group.meal
+      ),
+      [
+        'AM9時調査',
+        buildDeletedDescription(
+          group.changes
+        )
+      ].join('\n'),
+      GREEN
+    );
+  });
+
+  groupDateMeal(
+    vacancy
+  ).forEach(group=>{
+    postDiscord(
+      buildTitle(
+        '🔴',
+        group.date,
+        group.meal
+      ),
+      [
+        'AM9時調査',
+        buildTimeOnlyDescription(
+          group.changes
+        )
+      ].join('\n'),
+      RED
+    );
+  });
+
+  groupDateMeal(
+    full
+  ).forEach(group=>{
+    postDiscord(
+      buildTitle(
+        '⚫️',
+        group.date,
+        group.meal
+      ),
+      [
+        'AM9時調査',
+        buildTimeOnlyDescription(
+          group.changes
+        )
+      ].join('\n'),
+      BLACK
+    );
+  });
+}
+
+async function getPublicIp(){
+  const controller=
+    new AbortController();
+
+  const timer=
+    setTimeout(
+      ()=>controller.abort(),
+      IP_TIMEOUT
+    );
 
   try{
-    const r=await fetch(
-      'https://api.ipify.org?format=json',
-      {
-        cache:'no-store',
-        signal:controller.signal
-      }
-    );
+    const r=
+      await fetch(
+        'https://api.ipify.org?format=json',
+        {
+          cache:'no-store',
+          signal:
+            controller.signal
+        }
+      );
 
     if(!r.ok){
       throw new Error(
@@ -1144,9 +2857,11 @@ async function getPublicIp(){
       );
     }
 
-    const data=await r.json();
+    const data=
+      await r.json();
 
-    return data.ip||'取得失敗';
+    return data.ip||
+      '取得失敗';
 
   }catch(e){
     console.warn(
@@ -1157,19 +2872,28 @@ async function getPublicIp(){
     return '取得失敗';
 
   }finally{
-    clearTimeout(timer);
+    clearTimeout(
+      timer
+    );
   }
 }
 
-async function sendErrorDiscord(meal,error){
-  const key=`${meal}|${error}`;
-  const now=Date.now();
+async function sendErrorDiscord(
+  meal,
+  error
+){
+  const key=
+    `${meal}|${error}`;
+
+  const now=
+    Date.now();
 
   if(
     now-
     (
-      errorNotifyHistory.get(key)||
-      0
+      errorNotifyHistory.get(
+        key
+      )||0
     )<
     60000
   ){
@@ -1181,7 +2905,8 @@ async function sendErrorDiscord(meal,error){
     now
   );
 
-  const ip=await getPublicIp();
+  const ip=
+    await getPublicIp();
 
   postDiscord(
     [
@@ -1197,8 +2922,40 @@ async function sendErrorDiscord(meal,error){
   );
 }
 
-async function sendForceStopDiscord(meal,lastError){
-  const ip=await getPublicIp();
+async function sendResearchErrorDiscord(
+  meal,
+  phase,
+  error
+){
+  const ip=
+    await getPublicIp();
+
+  const phaseText=
+    phase==='baseline'
+      ?'8:58基準読込'
+      :'9:00比較読込';
+
+  postDiscord(
+    [
+      `🟠${nowText()}`,
+      restaurantName(),
+      `【${meal}】`
+    ].join('\n'),
+    [
+      'AM9時調査',
+      `${phaseText}エラー：${error}`,
+      `公開IP：${ip}`
+    ].join('\n'),
+    ORANGE
+  );
+}
+
+async function sendForceStopDiscord(
+  meal,
+  lastError
+){
+  const ip=
+    await getPublicIp();
 
   postDiscord(
     [
@@ -1223,36 +2980,53 @@ function snapshotText(){
 
   const out=[];
 
-  snapshots.forEach((slots,key)=>{
-    const p=key.split('|');
-    const meal=p[0];
-    const start=p[2];
-    const end=p[3];
+  snapshots.forEach(
+    (slots,key)=>{
+      const p=
+        key.split('|');
 
-    out.push(
-      `=== ${meal}｜${start}～${end} ===`
-    );
+      const meal=
+        p[0];
 
-    Object.keys(slots)
-      .sort()
-      .forEach(k=>{
-        out.push(
-          `${k} = ${slots[k]}`
-        );
-      });
+      const start=
+        p[2];
 
-    out.push('');
-  });
+      const end=
+        p[3];
 
-  return out.join('\n').trim();
+      out.push(
+        `=== ${meal}｜${start}～${end} ===`
+      );
+
+      Object.keys(slots)
+        .sort()
+        .forEach(k=>{
+          out.push(
+            `${k} = ${slots[k]}`
+          );
+        });
+
+      out.push('');
+    }
+  );
+
+  return out
+    .join('\n')
+    .trim();
 }
 
 window.SNAPSHOT=()=>{
-  const text=snapshotText();
+  const text=
+    snapshotText();
 
-  console.log(text);
+  console.log(
+    text
+  );
 
-  if(navigator.clipboard?.writeText){
+  if(
+    navigator.clipboard
+      ?.writeText
+  ){
     navigator.clipboard
       .writeText(text)
       .then(()=>{
@@ -1279,16 +3053,26 @@ function init(){
     1000
   );
 
+  if(researchMode){
+    enforceResearchAutoOff();
+  }
+
   if(document.body){
-    new MutationObserver(ms=>{
-      if(
-        ms.some(
-          m=>!panelRoot?.contains(m.target)
-        )
-      ){
-        queueRefresh();
+    new MutationObserver(
+      ms=>{
+        if(
+          ms.some(
+            m=>
+              !panelRoot
+                ?.contains(
+                  m.target
+                )
+          )
+        ){
+          queueRefresh();
+        }
       }
-    }).observe(
+    ).observe(
       document.body,
       {
         childList:true,
@@ -1298,22 +3082,32 @@ function init(){
   }
 }
 
-if(document.readyState==='loading'){
+if(
+  document.readyState===
+  'loading'
+){
   document.addEventListener(
     'DOMContentLoaded',
     init,
-    {once:true}
+    {
+      once:true
+    }
   );
+
 }else{
   init();
 }
 
-setInterval(()=>{
-  maintenanceTick();
-  renderPanels();
-},UI_TICK);
+setInterval(
+  ()=>{
+    maintenanceTick();
+    researchTick();
+    renderPanels();
+  },
+  UI_TICK
+);
 
 console.log(
-  `[${NAME}] v2.12 起動`
+  `[${NAME}] v2.22 起動`
 );
 })();
