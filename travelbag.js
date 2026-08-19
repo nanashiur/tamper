@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.23
+// @version      1.24
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.23', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.24', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -20,7 +20,7 @@ window[INSTALLED]=true;
 let autoEnabled=false, fireTimer=null, countdownTimer=null, nextFireAt=0, autoButton=null;
 let vacancySelectMode=0, vacancySelectButton=null, vacancySelectToken=0;
 let autoConfirmEnabled=false, autoConfirmButton=null, autoConfirmTimer=null, lastObservedCurrentSignature='';
-let reservationNoticeActive=false, pageObserver=null, purchasePending=0;
+let reservationNoticeActive=false, restaurantModalHandled=false, pageObserver=null, purchasePending=0;
 const HOURS=['11','12','13','14','15','16','17','18','19','20','21'];
 const MINUTES=['00','10','20','30','40','50'], priorityRows=[];
 
@@ -189,6 +189,23 @@ function visible(el){
   const s=getComputedStyle(el);
   return s.display!=='none'&&s.visibility!=='hidden';
 }
+function processRestaurantModal(){
+  const modal=[...document.querySelectorAll('.js-travelBagModal')].find(visible);
+  if(!modal||!modal.querySelector('select[name="adultNum"]')||!modal.querySelector('#timeSlider')){
+    restaurantModalHandled=false;
+    return;
+  }
+  if(restaurantModalHandled) return;
+  restaurantModalHandled=true;
+  const adult=modal.querySelector('select[name="adultNum"]');
+  if(adult.value==='1') return;
+  if(window.jQuery) window.jQuery(adult).val('1').trigger('change');
+  else{
+    adult.value='1';
+    adult.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+  console.log('[TDR TravelBag] モーダル人数設定: 大人1名');
+}
 function processNoticeModal(){
   const modal=document.getElementById('modalDialog');
   if(!modal||!visible(modal)||modal.querySelector('.hdgModal01')?.textContent?.trim()!=='ご予約の際のご注意'){
@@ -215,10 +232,12 @@ function installPageObserver(){
   if(pageObserver) return;
   if(!document.documentElement) return setTimeout(installPageObserver,0);
   pageObserver=new MutationObserver(()=>{
+    processRestaurantModal();
     processNoticeModal();
     checkAutoConfirmSelection();
   });
   pageObserver.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});
+  processRestaurantModal();
   processNoticeModal();
   checkAutoConfirmSelection();
   console.log('[TDR TravelBag] ページ状態監視 ON');
@@ -286,7 +305,7 @@ function statusLabel(row){
 }
 function statusStyle(s){
   return s==='空席'?'color:red;font-weight:bold;':
-         s==='満席'?'color:black;':
+         s==='満席'?'':
          s==='吸収'?'color:blue;font-weight:bold;':
          s==='締切'?'color:gray;font-weight:bold;':
          'color:purple;font-weight:bold;';
@@ -342,7 +361,6 @@ function printTimeGet(source,url,response,body){
     console.warn('[TB timeGet] 配列ではありません',{source,url:absUrl(url),data});
     return null;
   }
-
   const payload=payloadInfo(body), rows=[], grouped={};
   for(const row of data){
     const commodityCD=String(getValue(row,'commodityCD')||'').trim();
@@ -352,24 +370,20 @@ function printTimeGet(source,url,response,body){
     (grouped[commodityCD]??=[]).push(item);
     rows.push(item);
   }
-
   rows.sort((a,b)=>a.commodityCD.localeCompare(b.commodityCD)||a.time.localeCompare(b.time));
   Object.values(grouped).forEach(a=>a.sort((x,y)=>x.time.localeCompare(y.time)));
-
   const now=new Date().toLocaleTimeString();
   for(const code of Object.keys(grouped)){
     console.log(`%c${now}`,'background:#333;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px');
-    console.log(`%c${payload.displayDate||'日付不明'} ${splitCommodityCD(code).display}`,'color:#000;font-weight:bold');
+    console.log(`%c${payload.displayDate||'日付不明'} ${splitCommodityCD(code).display}`,'font-weight:bold');
     grouped[code].forEach(r=>console.log(`%c${r.time} ${r.status} ${r.openNumKey}`,statusStyle(r.status)));
   }
-
   window.tb_last_timeget={at:new Date().toISOString(),source,url:absUrl(url),payload,rows,grouped,raw:data};
   return data;
 }
 function getVacancyCandidates(data){
   if(!Array.isArray(data)) return [];
   const ps=getPriorities(), all=[];
-
   for(const row of data){
     if(statusLabel(row)!=='空席') continue;
     const commodityCD=String(getValue(row,'commodityCD')||'').trim();
@@ -377,7 +391,6 @@ function getVacancyCandidates(data){
     const openNumKey=String(getValue(row,'openNumKey')??'').trim();
     if(commodityCD&&time) all.push({commodityCD,time,openNumKey});
   }
-
   all.sort((a,b)=>priorityRank(a.time,ps)-priorityRank(b.time,ps)||a.time.localeCompare(b.time)||a.commodityCD.localeCompare(b.commodityCD));
   return vacancySelectMode===1?all.filter(x=>priorityRank(x.time,ps)<ps.length):all;
 }
@@ -404,11 +417,9 @@ function scheduleVacancySelect(data){
   if(!vacancySelectMode) return;
   const vacancies=Array.isArray(data)?data.filter(r=>statusLabel(r)==='空席'):[];
   if(!vacancies.length) return console.log('[TDR TravelBag] 時間選択: 空席なし');
-
   const candidates=getVacancyCandidates(data);
   if(vacancySelectMode===1&&!candidates.length) return console.log('[TDR TravelBag] 時間選択: 希望条件一致なし → 選択なし');
   if(!candidates.length) return;
-
   const token=++vacancySelectToken;
   let n=0;
   const run=()=>{
@@ -427,17 +438,14 @@ window.fetch=function(input,init){
   const body=init?.body||'';
   const timeGet=isTimeGet(url), purchase=isPurchase(url);
   let id=null,p;
-
   if(timeGet) id=startPending();
   if(purchase) purchasePending++;
-
   try{ p=originalFetch.apply(this,arguments); }
   catch(e){
     if(id!==null) endPending(id);
     if(purchase) purchasePending=Math.max(0,purchasePending-1);
     throw e;
   }
-
   if(timeGet){
     p.then(res=>res.clone().text()
       .then(text=>{
@@ -451,7 +459,6 @@ window.fetch=function(input,init){
       endPending(id);
     });
   }
-
   if(purchase) p.finally(()=>purchasePending=Math.max(0,purchasePending-1)).catch(()=>{});
   return p;
 };
@@ -466,26 +473,22 @@ XMLHttpRequest.prototype.open=function(method,url){
 XMLHttpRequest.prototype.send=function(body){
   const info=this.__tb, timeGet=info&&isTimeGet(info.url), purchase=info&&isPurchase(info.url);
   let id=null;
-
   if(timeGet){
     id=startPending();
     this.addEventListener('loadend',()=>{
       let response='';
       try{ response=(this.responseType===''||this.responseType==='text')?this.responseText||'':this.response; }
       catch{ try{ response=this.response||''; }catch{} }
-
       try{
         const data=printTimeGet(`xhr/${info.method}`,info.url,response,body);
         if(data) scheduleVacancySelect(data);
       }finally{ endPending(id); }
     });
   }
-
   if(purchase){
     purchasePending++;
     this.addEventListener('loadend',()=>purchasePending=Math.max(0,purchasePending-1),{once:true});
   }
-
   try{ return originalSend.apply(this,arguments); }
   catch(e){
     if(id!==null) endPending(id);
@@ -524,12 +527,10 @@ function manualReload(){
 function scheduleNextFire(){
   clearTimeout(fireTimer);
   if(!autoEnabled) return;
-
   const now=new Date(), next=new Date(now);
-  next.setSeconds(59,500);
+  next.setSeconds(59,600);
   if(now>=next) next.setMinutes(next.getMinutes()+1);
   nextFireAt=next.getTime();
-
   fireTimer=setTimeout(()=>{
     if(!autoEnabled) return;
     if(autoButton&&!pending.size) autoButton.textContent='00';
@@ -559,38 +560,30 @@ function stopCountdown(){
 function makePriorityControls(){
   const host=document.createElement('div');
   host.style.cssText='width:120px;pointer-events:auto';
-
   const shadow=host.attachShadow({mode:'open'}), box=document.createElement('div');
   box.style.cssText='display:flex;flex-direction:column;width:120px;gap:3px;font-family:sans-serif';
-
   const saved=loadPriorityTimes(), labels=['①','②','③','④','⑤'];
   const css='width:48px;height:30px;box-sizing:border-box;padding:0 1px;margin:0;border:1px solid #777;border-radius:4px;background:#fff;color:#000;font-size:13px;font-weight:bold;cursor:pointer';
-
   for(let i=0;i<5;i++){
     const row=document.createElement('div'), label=document.createElement('span');
     const hour=document.createElement('select'), minute=document.createElement('select');
-
     row.style.cssText='display:flex;align-items:center;width:120px;height:30px;gap:2px';
     label.textContent=labels[i];
     label.style.cssText='display:inline-flex;align-items:center;justify-content:center;width:20px;height:30px;font-size:15px;font-weight:bold;color:#000';
-
     hour.innerHTML='<option value="">--</option>'+HOURS.map(v=>`<option value="${v}">${v}</option>`).join('');
     minute.innerHTML='<option value="">--</option>'+MINUTES.map(v=>`<option value="${v}">${v}</option>`).join('');
     hour.style.cssText=minute.style.cssText=css;
-
     if(saved[i]){
       const [h,m]=saved[i].split(':');
       hour.value=h;
       minute.value=m==='--'?'':m;
     }
-
     hour.addEventListener('change',()=>priorityHourChanged(i));
     minute.addEventListener('change',savePriorityTimes);
     row.append(label,hour,minute);
     box.appendChild(row);
     priorityRows.push({row,label,hour,minute});
   }
-
   shadow.appendChild(box);
   updatePriorityRows();
   return host;
@@ -605,7 +598,6 @@ function makeButton(text,bg,handler){
 }
 function createPanel(){
   if(!isEditPage()||document.getElementById(PANEL_ID)||!document.body) return;
-
   const panel=document.createElement('div');
   panel.id=PANEL_ID;
   panel.style.cssText='position:fixed;top:10px;right:10px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;width:120px;z-index:2147483647;pointer-events:none';
@@ -645,7 +637,6 @@ function createPanel(){
   });
 
   const manualButton=makeButton('1名','#198754',manualReload);
-
   panel.append(autoButton,vacancySelectButton,priorityControls,autoConfirmButton,manualButton);
   document.body.appendChild(panel);
 
@@ -656,7 +647,6 @@ function createPanel(){
 
   const c=getSelectedTimeInfo();
   lastObservedCurrentSignature=c?c.signature:'';
-
   console.log(`[TDR TravelBag] v${VERSION} パネル起動`);
 }
 
