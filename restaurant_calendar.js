@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      2.02
+// @version      2.12
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -14,7 +14,7 @@ if(window.__tdr_weekly_restaurant_monitor)return;
 window.__tdr_weekly_restaurant_monitor=true;
 
 const NAME='🍴💻️レストラン週間モニター';
-const WAIT=60000,UI_TICK=1000,PENDING_ERROR_MS=300000,IP_TIMEOUT=5000,MAX_403=5;
+const WAIT=60000,UI_TICK=1000,PENDING_ERROR_MS=300000,IP_TIMEOUT=5000,MAX_ERRORS=5;
 const RED=0xFF0000,BLACK=0x000001,BLUE=0x007BFF,GREEN=0x28A745,ORANGE=0xFFA500;
 const AUTO_PREFIX='tdr_weekly_restaurant_auto_',OLD_AUTO_KEY='tdr_weekly_restaurant_auto';
 const NOTIFY_KEY='tdr_weekly_restaurant_notify_v2',OLD_NOTIFY_KEY='tdr_weekly_restaurant_notify',OLD_NOTIFY_MODE_KEY='tdr_weekly_restaurant_notify_mode';
@@ -35,8 +35,7 @@ function nowText(){
 }
 
 function fmtDateJa(v){
-  const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8);
-  const dt=new Date(y,m-1,d);
+  const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8),dt=new Date(y,m-1,d);
   return `${y}年${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;
 }
 
@@ -80,7 +79,6 @@ function normalizeMeal(text){
 
 function getMealFromBox(box){
   const h=box.querySelector('.heading');
-
   return normalizeMeal([
     h?.textContent,
     h?.getAttribute('title'),
@@ -112,8 +110,8 @@ function getState(meal){
     manual:null,
     panel:null,
     error403:false,
-    consecutive403:0,
-    forcedStop403:false,
+    consecutiveErrors:0,
+    forcedStopError:false,
     pendingError:false
   };
 
@@ -125,17 +123,13 @@ function scanCommodityMap(){
   document.querySelectorAll('.boxRestaurant04').forEach(box=>{
     const meal=getMealFromBox(box);
     const commodity=box.querySelector('.commodityCd,.commodityCD')?.value?.trim()||'';
-
-    if(meal&&commodity){
-      commodityMeal.set(commodity,meal);
-    }
+    if(meal&&commodity)commodityMeal.set(commodity,meal);
   });
 }
 
 function resolveMeal(commodity){
   if(!commodity)return '';
   if(commodityMeal.has(commodity))return commodityMeal.get(commodity);
-
   scanCommodityMap();
   return commodityMeal.get(commodity)||'';
 }
@@ -144,19 +138,13 @@ function refreshBlocks(){
   blocks.clear();
 
   document.querySelectorAll('.boxRestaurant04').forEach(box=>{
-    const meal=getMealFromBox(box);
-    const next=box.querySelector('.nextWeekLink');
-
+    const meal=getMealFromBox(box),next=box.querySelector('.nextWeekLink');
     if(!meal||!next)return;
 
     const commodity=box.querySelector('.commodityCd,.commodityCD')?.value?.trim()||'';
 
     blocks.set(meal,{box,next,commodity});
-
-    if(commodity){
-      commodityMeal.set(commodity,meal);
-    }
-
+    if(commodity)commodityMeal.set(commodity,meal);
     getState(meal);
   });
 
@@ -191,7 +179,6 @@ function createPanels(){
 
   if(!panelRoot){
     panelRoot=document.createElement('div');
-
     Object.assign(panelRoot.style,{
       position:'fixed',
       top:'14px',
@@ -201,7 +188,6 @@ function createPanels(){
       flexDirection:'column',
       gap:'5px'
     });
-
     document.body.appendChild(panelRoot);
   }
 
@@ -215,17 +201,10 @@ function createPanels(){
 
     if(!s.row){
       const row=document.createElement('div');
-
-      Object.assign(row.style,{
-        order:String(i),
-        display:'flex',
-        gap:'5px'
-      });
+      Object.assign(row.style,{order:String(i),display:'flex',gap:'5px'});
 
       const manual=document.createElement('div');
-
       baseButtonStyle(manual);
-
       Object.assign(manual.style,{
         width:'32px',
         background:'#444',
@@ -233,20 +212,13 @@ function createPanels(){
         fontSize:'18px',
         padding:'3px 0'
       });
-
       manual.textContent='↻';
       manual.title=`${meal} 手動発火`;
       manual.onclick=()=>manualFire(meal);
 
       const panel=document.createElement('div');
-
       baseButtonStyle(panel);
-
-      Object.assign(panel.style,{
-        width:'90px',
-        color:'#fff'
-      });
-
+      Object.assign(panel.style,{width:'90px',color:'#fff'});
       panel.title=`${meal} 自動監視 ON / OFF`;
       panel.onclick=()=>toggleMeal(meal);
 
@@ -263,17 +235,10 @@ function createPanels(){
 
   if(!notifyPanel){
     notifyPanel=document.createElement('div');
-
     baseButtonStyle(notifyPanel);
-
-    Object.assign(notifyPanel.style,{
-      order:'10',
-      width:'127px'
-    });
-
+    Object.assign(notifyPanel.style,{order:'10',width:'127px'});
     notifyPanel.title='通知モード：全通知 → 空席通知 → OFF';
     notifyPanel.onclick=toggleNotify;
-
     panelRoot.appendChild(notifyPanel);
   }
 
@@ -282,34 +247,26 @@ function createPanels(){
 
 function toggleMeal(meal){
   const s=getState(meal);
-
   s.enabled=!s.enabled;
 
   if(s.enabled){
-    s.consecutive403=0;
-    s.forcedStop403=false;
+    s.consecutiveErrors=0;
+    s.forcedStopError=false;
     s.error403=false;
+    s.pendingError=false;
   }
 
-  localStorage.setItem(
-    AUTO_PREFIX+meal,
-    s.enabled?'1':'0'
-  );
+  localStorage.setItem(AUTO_PREFIX+meal,s.enabled?'1':'0');
 
-  if(!s.enabled){
-    clearTimer(s);
-  }else if(!s.pending&&!isMaintenance()){
-    schedule(meal);
-  }
+  if(!s.enabled)clearTimer(s);
+  else if(!s.pending&&!isMaintenance())schedule(meal);
 
   renderPanels();
 }
 
 function manualFire(meal){
   const s=getState(meal);
-
   if(s.pending||isMaintenance())return;
-
   fireSameWeek(meal,true);
 }
 
@@ -323,17 +280,12 @@ function toggleNotify(){
         ?'off'
         :'all';
 
-  localStorage.setItem(
-    NOTIFY_KEY,
-    JSON.stringify(notifyState)
-  );
-
+  localStorage.setItem(NOTIFY_KEY,JSON.stringify(notifyState));
   renderPanels();
 }
 
 function clearTimer(s){
   if(s.timer)clearTimeout(s.timer);
-
   s.timer=null;
   s.deadline=0;
 }
@@ -350,7 +302,6 @@ function schedule(meal){
   s.timer=setTimeout(()=>{
     s.timer=null;
     s.deadline=0;
-
     fireSameWeek(meal,false);
   },WAIT);
 }
@@ -358,31 +309,17 @@ function schedule(meal){
 function renderPanels(){
   syncNotifyDay();
 
-  const now=performance.now();
-  const maintenance=isMaintenance();
+  const now=performance.now(),maintenance=isMaintenance();
 
   MEALS.forEach(meal=>{
     const s=mealStates.get(meal);
-
     if(!s?.panel||!blocks.has(meal))return;
 
     if(s.manual){
-      s.manual.style.background=
-        maintenance||s.pending
-          ?'#777'
-          :'#444';
-
+      s.manual.style.background=maintenance||s.pending?'#777':'#444';
       s.manual.style.color='#fff';
-
-      s.manual.style.cursor=
-        maintenance||s.pending
-          ?'default'
-          :'pointer';
-
-      s.manual.style.opacity=
-        maintenance||s.pending
-          ?'0.6'
-          :'1';
+      s.manual.style.cursor=maintenance||s.pending?'default':'pointer';
+      s.manual.style.opacity=maintenance||s.pending?'0.6':'1';
     }
 
     if(maintenance){
@@ -392,11 +329,11 @@ function renderPanels(){
       return;
     }
 
-    if(s.forcedStop403){
+    if(s.forcedStopError){
       s.panel.style.background='#ff8c00';
       s.panel.style.color='#000';
       s.panel.textContent=`${meal} STOP`;
-      s.panel.title=`HTTP 403 ${MAX_403}回連続 / 自動読込強制停止 / クリックで再開`;
+      s.panel.title=`エラー${MAX_ERRORS}回連続 / 自動読込強制停止 / クリックで再開`;
       return;
     }
 
@@ -405,11 +342,9 @@ function renderPanels(){
     if(s.error403){
       s.panel.style.background='#ff8c00';
       s.panel.style.color='#000';
-
       s.panel.textContent=s.deadline
         ?`${meal} 403 ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`
         :`${meal} 403`;
-
       return;
     }
 
@@ -423,10 +358,7 @@ function renderPanels(){
     if(s.pending>0){
       s.panel.style.background='#7b2cbf';
       s.panel.style.color='#fff';
-
-      s.panel.textContent=
-        `${meal} 読込 ${Math.floor((now-s.startedAt)/1000)}`;
-
+      s.panel.textContent=`${meal} 読込 ${Math.floor((now-s.startedAt)/1000)}`;
       return;
     }
 
@@ -440,10 +372,7 @@ function renderPanels(){
     if(s.deadline){
       s.panel.style.background='#1976d2';
       s.panel.style.color='#fff';
-
-      s.panel.textContent=
-        `${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`;
-
+      s.panel.textContent=`${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`;
       return;
     }
 
@@ -475,31 +404,84 @@ function maintenanceTick(){
   const maintenance=isMaintenance();
 
   if(maintenance===wasMaintenance)return;
-
   wasMaintenance=maintenance;
 
   if(maintenance){
     mealStates.forEach(clearTimer);
-
-    console.log(
-      `[${NAME}] メンテナンス停止`
-    );
+    console.log(`[${NAME}] メンテナンス停止`);
 
   }else{
     refreshBlocks();
 
     MEALS.forEach(meal=>{
       const s=mealStates.get(meal);
-
-      if(s?.enabled&&!s.pending){
-        fireSameWeek(meal,false);
-      }
+      if(s?.enabled&&!s.pending)fireSameWeek(meal,false);
     });
 
+    console.log(`[${NAME}] メンテナンス終了・再開`);
+  }
+
+  renderPanels();
+}
+
+function recordError(meal,error,count=true){
+  const s=getState(meal);
+
+  if(count&&!s.forcedStopError){
+    s.consecutiveErrors++;
+
+    console.warn(
+      `[${NAME}] ${meal} 連続エラー ${s.consecutiveErrors}/${MAX_ERRORS}：${error}`
+    );
+
+    if(s.consecutiveErrors>=MAX_ERRORS){
+      forceStopError(meal,error);
+      return;
+    }
+  }
+
+  sendErrorDiscord(meal,error);
+  renderPanels();
+}
+
+function resetErrors(meal){
+  const s=getState(meal);
+
+  if(s.consecutiveErrors){
     console.log(
-      `[${NAME}] メンテナンス終了・再開`
+      `[${NAME}] ${meal} 正常読込 / 連続エラー ${s.consecutiveErrors} → 0`
     );
   }
+
+  s.consecutiveErrors=0;
+  s.forcedStopError=false;
+  s.error403=false;
+  s.pendingError=false;
+}
+
+function forceStopError(meal,lastError){
+  const s=getState(meal);
+
+  if(s.forcedStopError)return;
+
+  s.forcedStopError=true;
+  s.enabled=false;
+
+  clearTimer(s);
+
+  localStorage.setItem(
+    AUTO_PREFIX+meal,
+    '0'
+  );
+
+  console.warn(
+    `[${NAME}] ${meal} エラー${MAX_ERRORS}回連続 / 自動読込強制停止`
+  );
+
+  sendForceStopDiscord(
+    meal,
+    lastError
+  );
 
   renderPanels();
 }
@@ -507,13 +489,7 @@ function maintenanceTick(){
 function fireSameWeek(meal,manual=false){
   const s=getState(meal);
 
-  if(
-    (!manual&&!s.enabled)||
-    s.pending||
-    isMaintenance()
-  ){
-    return;
-  }
+  if((!manual&&!s.enabled)||s.pending||isMaintenance())return;
 
   refreshBlocks();
 
@@ -527,179 +503,99 @@ function fireSameWeek(meal,manual=false){
   const link=block.next;
 
   const display=
-    link
-      .closest('.header')
+    link.closest('.header')
       ?.nextElementSibling
-      ?.querySelector(
-        '.date li:first-child .display'
-      );
+      ?.querySelector('.date li:first-child .display');
 
   const jq=window.jQuery||window.$;
   const format=window.webapiFormat;
 
-  if(
-    !display||
-    !jq?.datepicker||
-    !format
-  ){
-    console.warn(
-      `[${NAME}] ${meal} 日付DOM未検出`
-    );
-
-    if(!manual)schedule(meal);
-
+  if(!display||!jq?.datepicker||!format){
+    console.warn(`[${NAME}] ${meal} 日付DOM未検出`);
+    recordError(meal,'日付DOM未検出');
+    if(!manual&&s.enabled)schedule(meal);
     return;
   }
 
-  const current=
-    display.textContent.trim();
-
+  const current=display.textContent.trim();
   let prev;
 
   try{
-    const d=
-      jq.datepicker.parseDate(
-        format,
-        current,
-        {}
-      );
-
-    d.setDate(
-      d.getDate()-7
-    );
-
-    prev=
-      jq.datepicker.formatDate(
-        format,
-        d,
-        {}
-      );
+    const d=jq.datepicker.parseDate(format,current,{});
+    d.setDate(d.getDate()-7);
+    prev=jq.datepicker.formatDate(format,d,{});
 
   }catch(e){
-    console.warn(
-      `[${NAME}] ${meal} 日付変換失敗`,
-      e
-    );
-
-    if(!manual)schedule(meal);
-
+    console.warn(`[${NAME}] ${meal} 日付変換失敗`,e);
+    recordError(meal,'日付変換失敗');
+    if(!manual&&s.enabled)schedule(meal);
     return;
   }
 
-  const hadNoData=
-    link.classList.contains(
-      'hasNoData'
-    );
-
+  const hadNoData=link.classList.contains('hasNoData');
   const before=s.pending;
 
   display.textContent=prev;
-
-  link.classList.remove(
-    'hasNoData'
-  );
-
+  link.classList.remove('hasNoData');
   autoHint=meal;
+
+  let fireError='';
 
   try{
     link.click();
 
   }catch(e){
-    console.error(
-      `[${NAME}] ${meal} 発火失敗`,
-      e
-    );
-
-    sendErrorDiscord(
-      meal,
-      '発火エラー'
-    );
+    console.error(`[${NAME}] ${meal} 発火失敗`,e);
+    fireError='発火エラー';
 
   }finally{
     autoHint='';
   }
 
   if(s.pending===before){
-    const d2=
-      block.box.querySelector(
-        '.timeList .date li:first-child .display'
-      );
+    const d2=block.box.querySelector('.timeList .date li:first-child .display');
 
-    if(d2){
-      d2.textContent=current;
-    }
+    if(d2)d2.textContent=current;
+    if(hadNoData)link.classList.add('hasNoData');
 
-    if(hadNoData){
-      link.classList.add(
-        'hasNoData'
-      );
-    }
-
-    sendErrorDiscord(
+    recordError(
       meal,
-      'ajaxNextWeekList未発火'
+      fireError||'ajaxNextWeekList未発火'
     );
 
-    if(!manual){
-      schedule(meal);
-    }
+    if(!manual&&s.enabled)schedule(meal);
   }
 }
 
 function bodyString(body){
-  if(typeof body==='string'){
-    return body;
-  }
-
-  if(body instanceof URLSearchParams){
-    return body.toString();
-  }
-
+  if(typeof body==='string')return body;
+  if(body instanceof URLSearchParams)return body.toString();
   return '';
 }
 
 function watched(url){
   try{
-    return PATHS.includes(
-      new URL(
-        url,
-        location.href
-      ).pathname
-    );
-
+    return PATHS.includes(new URL(url,location.href).pathname);
   }catch{
     return false;
   }
 }
 
 function has(obj,key){
-  return Object.prototype.hasOwnProperty.call(
-    obj,
-    key
-  );
+  return Object.prototype.hasOwnProperty.call(obj,key);
 }
 
 function slotStatus(li){
   if(
     li.classList.contains('reservationAble')||
-    li.querySelector(
-      'a[onclick*="toOrderForWeek"]'
-    )||
-    li.querySelector(
-      'img[alt="予約する"]'
-    )
-  ){
-    return '空席';
-  }
+    li.querySelector('a[onclick*="toOrderForWeek"]')||
+    li.querySelector('img[alt="予約する"]')
+  )return '空席';
 
   if(
     li.classList.contains('full')||
-    li.querySelector('.text')
-      ?.textContent
-      .includes('満席')
-  ){
-    return '満席';
-  }
+    li.querySelector('.text')?.textContent.includes('満席')
+  )return '満席';
 
   return '不明';
 }
@@ -707,44 +603,21 @@ function slotStatus(li){
 function readCurrentSlots(meal){
   const block=blocks.get(meal);
 
-  if(!block){
-    throw new Error(
-      '食事区分DOMなし'
-    );
-  }
+  if(!block)throw new Error('食事区分DOMなし');
 
   const dates=[
-    ...block.box.querySelectorAll(
-      '.timeList .date li .display'
-    )
-  ]
-    .map(
-      e=>e.textContent.trim()
-    )
-    .filter(Boolean);
+    ...block.box.querySelectorAll('.timeList .date li .display')
+  ].map(e=>e.textContent.trim()).filter(Boolean);
 
   const lists=[
-    ...block.box.querySelectorAll(
-      '.timeTable .slider .view > ul.cf'
-    )
+    ...block.box.querySelectorAll('.timeTable .slider .view > ul.cf')
   ];
 
-  if(!dates.length){
-    throw new Error(
-      '日付DOMなし'
-    );
-  }
-
-  if(!lists.length){
-    throw new Error(
-      '週間在庫DOMなし'
-    );
-  }
+  if(!dates.length)throw new Error('日付DOMなし');
+  if(!lists.length)throw new Error('週間在庫DOMなし');
 
   if(dates.length!==lists.length){
-    throw new Error(
-      `週間DOM不整合 ${dates.length}/${lists.length}`
-    );
+    throw new Error(`週間DOM不整合 ${dates.length}/${lists.length}`);
   }
 
   const slots={};
@@ -753,17 +626,11 @@ function readCurrentSlots(meal){
     const date=dates[i];
 
     [...ul.children].forEach(li=>{
-      const time=
-        li
-          .querySelector('.time')
-          ?.textContent
-          ?.trim();
+      const time=li.querySelector('.time')?.textContent?.trim();
 
       if(!time)return;
 
-      slots[
-        `${date}|${time}`
-      ]=slotStatus(li);
+      slots[`${date}|${time}`]=slotStatus(li);
     });
   });
 
@@ -775,10 +642,7 @@ function readCurrentSlots(meal){
 }
 
 function snapshotKey(meta,meal,current){
-  const p=
-    new URLSearchParams(
-      meta.body
-    );
+  const p=new URLSearchParams(meta.body);
 
   return [
     meal,
@@ -794,22 +658,11 @@ function snapshotKey(meta,meal,current){
 }
 
 function compareAndSave(meta,meal,current){
-  const key=
-    snapshotKey(
-      meta,
-      meal,
-      current
-    );
-
-  const previous=
-    snapshots.get(key);
+  const key=snapshotKey(meta,meal,current);
+  const previous=snapshots.get(key);
 
   if(!previous){
-    snapshots.set(
-      key,
-      current.slots
-    );
-
+    snapshots.set(key,current.slots);
     return [];
   }
 
@@ -820,8 +673,7 @@ function compareAndSave(meta,meal,current){
   Object.keys(curr).forEach(slot=>{
     if(has(prev,slot))return;
 
-    const [date,time]=
-      slot.split('|');
+    const [date,time]=slot.split('|');
 
     changes.push({
       type:'added',
@@ -835,8 +687,7 @@ function compareAndSave(meta,meal,current){
   Object.keys(prev).forEach(slot=>{
     if(has(curr,slot))return;
 
-    const [date,time]=
-      slot.split('|');
+    const [date,time]=slot.split('|');
 
     changes.push({
       type:'deleted',
@@ -852,16 +703,9 @@ function compareAndSave(meta,meal,current){
     const from=prev[slot];
     const to=curr[slot];
 
-    if(
-      from==='不明'||
-      to==='不明'||
-      from===to
-    ){
-      return;
-    }
+    if(from==='不明'||to==='不明'||from===to)return;
 
-    const [date,time]=
-      slot.split('|');
+    const [date,time]=slot.split('|');
 
     changes.push({
       type:'changed',
@@ -884,224 +728,157 @@ function compareAndSave(meta,meal,current){
         :curr[slot];
   });
 
-  snapshots.set(
-    key,
-    next
-  );
+  snapshots.set(key,next);
 
   return changes;
 }
 
-const nativeOpen=
-  XMLHttpRequest.prototype.open;
+const nativeOpen=XMLHttpRequest.prototype.open;
+const nativeSend=XMLHttpRequest.prototype.send;
 
-const nativeSend=
-  XMLHttpRequest.prototype.send;
-
-XMLHttpRequest.prototype.open=
-function(method,url,...args){
+XMLHttpRequest.prototype.open=function(method,url,...args){
   this.__tdrWeek={
-    method:String(
-      method||'GET'
-    ).toUpperCase(),
+    method:String(method||'GET').toUpperCase(),
     url
   };
 
-  return nativeOpen.call(
-    this,
-    method,
-    url,
-    ...args
-  );
+  return nativeOpen.call(this,method,url,...args);
 };
 
-XMLHttpRequest.prototype.send=
-function(body){
+XMLHttpRequest.prototype.send=function(body){
   const x=this.__tdrWeek;
 
-  if(
-    x?.method==='POST'&&
-    watched(x.url)
-  ){
-    const str=
-      bodyString(body);
-
-    const params=
-      new URLSearchParams(str);
-
-    const commodity=
-      params.get('commodityCD')||'';
-
-    const meal=
-      autoHint||
-      resolveMeal(commodity);
+  if(x?.method==='POST'&&watched(x.url)){
+    const str=bodyString(body);
+    const params=new URLSearchParams(str);
+    const commodity=params.get('commodityCD')||'';
+    const meal=autoHint||resolveMeal(commodity);
 
     const meta={
       body:str,
       commodity,
-      pendingTimer:null
+      pendingTimer:null,
+      errorCounted:false
     };
 
     if(meal){
-      const s=
-        getState(meal);
+      const s=getState(meal);
 
       clearTimer(s);
 
       if(s.pending++===0){
-        s.startedAt=
-          performance.now();
-
+        s.startedAt=performance.now();
         s.pendingError=false;
       }
 
       renderPanels();
     }
 
-    meta.pendingTimer=
-      setTimeout(()=>{
-        const pendingMeal=
-          meal||
-          resolveMeal(commodity)||
-          '食事区分不明';
+    meta.pendingTimer=setTimeout(()=>{
+      const pendingMeal=meal||resolveMeal(commodity);
 
-        const s=
-          mealStates.get(
-            pendingMeal
+      if(pendingMeal){
+        const s=getState(pendingMeal);
+        s.pendingError=true;
+
+        if(!meta.errorCounted){
+          meta.errorCounted=true;
+          recordError(
+            pendingMeal,
+            'Pending 5分超過'
           );
-
-        if(s){
-          s.pendingError=true;
         }
 
-        renderPanels();
-
+      }else{
         sendErrorDiscord(
-          pendingMeal,
+          '食事区分不明',
           'Pending 5分超過'
         );
+      }
 
-      },PENDING_ERROR_MS);
+      renderPanels();
 
-    this.addEventListener(
-      'loadend',
-      ()=>{
-        clearTimeout(
-          meta.pendingTimer
+    },PENDING_ERROR_MS);
+
+    this.addEventListener('loadend',()=>{
+      clearTimeout(meta.pendingTimer);
+
+      let text='';
+
+      try{
+        text=this.responseText||'';
+      }catch{}
+
+      const resolved=meal||resolveMeal(commodity);
+
+      if(!resolved){
+        unresolved.push({
+          meta,
+          status:this.status,
+          text
+        });
+
+        queueRefresh();
+        return;
+      }
+
+      setTimeout(()=>{
+        finishRequest(
+          resolved,
+          meta,
+          this.status,
+          text
         );
+      },30);
 
-        let text='';
-
-        try{
-          text=
-            this.responseText||'';
-        }catch{}
-
-        const resolved=
-          meal||
-          resolveMeal(commodity);
-
-        if(!resolved){
-          unresolved.push({
-            meta,
-            status:this.status,
-            text
-          });
-
-          queueRefresh();
-          return;
-        }
-
-        setTimeout(()=>{
-          finishRequest(
-            resolved,
-            meta,
-            this.status,
-            text
-          );
-        },30);
-
-      },
-      {once:true}
-    );
+    },{once:true});
   }
 
-  return nativeSend.call(
-    this,
-    body
-  );
+  return nativeSend.call(this,body);
 };
 
-function forceStop403(meal){
-  const s=getState(meal);
-
-  if(s.forcedStop403)return;
-
-  s.forcedStop403=true;
-  s.enabled=false;
-
-  clearTimer(s);
-
-  localStorage.setItem(
-    AUTO_PREFIX+meal,
-    '0'
-  );
-
-  console.warn(
-    `[${NAME}] ${meal} HTTP 403 ${MAX_403}回連続 / 自動読込強制停止`
-  );
-
-  sendForceStopDiscord(
-    meal
-  );
-
-  renderPanels();
+function requestError(meal,meta,error){
+  const count=!meta.errorCounted;
+  meta.errorCounted=true;
+  recordError(meal,error,count);
 }
 
 function finishRequest(meal,meta,status,text){
   const s=getState(meal);
 
+  if(status!==403){
+    s.error403=false;
+  }
+
   if(status===403){
     s.error403=true;
-    s.consecutive403++;
 
-    console.warn(
-      `[${NAME}] ${meal} HTTP 403 連続${s.consecutive403}回`
+    requestError(
+      meal,
+      meta,
+      'HTTP 403'
     );
 
-    if(s.consecutive403>=MAX_403){
-      forceStop403(meal);
-    }else{
-      sendErrorDiscord(
-        meal,
-        'HTTP 403'
-      );
-    }
-
-  }else if(
-    status<200||
-    status>=300
-  ){
-    sendErrorDiscord(
+  }else if(status<200||status>=300){
+    requestError(
       meal,
+      meta,
       status===0
         ?'通信失敗（status 0）'
         :`HTTP ${status}`
     );
 
   }else if(!text){
-    sendErrorDiscord(
+    requestError(
       meal,
+      meta,
       '空レスポンス'
     );
 
-  }else if(
-    text.includes(
-      'paramErrorDiv'
-    )
-  ){
-    sendErrorDiscord(
+  }else if(text.includes('paramErrorDiv')){
+    requestError(
       meal,
+      meta,
       'サイト内部エラー（paramErrorDiv）'
     );
 
@@ -1109,24 +886,18 @@ function finishRequest(meal,meta,status,text){
     try{
       refreshBlocks();
 
-      const current=
-        readCurrentSlots(meal);
+      const current=readCurrentSlots(meal);
 
-      const changes=
-        compareAndSave(
-          meta,
-          meal,
-          current
-        );
+      const changes=compareAndSave(
+        meta,
+        meal,
+        current
+      );
 
-      s.error403=false;
-      s.consecutive403=0;
-      s.forcedStop403=false;
+      resetErrors(meal);
 
       if(changes.length){
-        sendChangesDiscord(
-          changes
-        );
+        sendChangesDiscord(changes);
       }
 
     }catch(e){
@@ -1135,16 +906,15 @@ function finishRequest(meal,meta,status,text){
         e
       );
 
-      sendErrorDiscord(
+      requestError(
         meal,
+        meta,
         `Response解析エラー：${e.message||e}`
       );
     }
   }
 
-  if(s.pending>0){
-    s.pending--;
-  }
+  if(s.pending>0)s.pending--;
 
   if(!s.pending){
     s.startedAt=0;
@@ -1160,24 +930,13 @@ function finishRequest(meal,meta,status,text){
 }
 
 function drainUnresolved(){
-  for(
-    let i=unresolved.length-1;
-    i>=0;
-    i--
-  ){
+  for(let i=unresolved.length-1;i>=0;i--){
     const x=unresolved[i];
-
-    const meal=
-      resolveMeal(
-        x.meta.commodity
-      );
+    const meal=resolveMeal(x.meta.commodity);
 
     if(!meal)continue;
 
-    unresolved.splice(
-      i,
-      1
-    );
+    unresolved.splice(i,1);
 
     setTimeout(()=>{
       finishRequest(
@@ -1194,8 +953,7 @@ function sortChanges(changes){
   return [...changes].sort(
     (a,b)=>
       a.date.localeCompare(b.date)||
-      MEALS.indexOf(a.meal)-
-      MEALS.indexOf(b.meal)||
+      MEALS.indexOf(a.meal)-MEALS.indexOf(b.meal)||
       a.time.localeCompare(b.time)
   );
 }
@@ -1204,23 +962,17 @@ function groupDateMeal(changes){
   const map=new Map();
 
   sortChanges(changes).forEach(c=>{
-    const key=
-      `${c.date}|${c.meal}`;
+    const key=`${c.date}|${c.meal}`;
 
     if(!map.has(key)){
-      map.set(
-        key,
-        {
-          date:c.date,
-          meal:c.meal,
-          changes:[]
-        }
-      );
+      map.set(key,{
+        date:c.date,
+        meal:c.meal,
+        changes:[]
+      });
     }
 
-    map.get(key)
-      .changes
-      .push(c);
+    map.get(key).changes.push(c);
   });
 
   return [...map.values()];
@@ -1235,21 +987,12 @@ function buildTitle(icon,date,meal){
 }
 
 function buildTimeOnlyDescription(changes){
-  const times=
-    sortChanges(changes)
-      .map(c=>c.time);
-
+  const times=sortChanges(changes).map(c=>c.time);
   const lines=[];
 
-  for(
-    let i=0;
-    i<times.length;
-    i+=2
-  ){
+  for(let i=0;i<times.length;i+=2){
     lines.push(
-      times
-        .slice(i,i+2)
-        .join(' ')
+      times.slice(i,i+2).join(' ')
     );
   }
 
@@ -1273,37 +1016,30 @@ function buildAddedDescription(changes){
 
 function buildDeletedDescription(changes){
   return sortChanges(changes)
-    .map(
-      c=>`${c.time}　🟢削除`
-    )
+    .map(c=>`${c.time}　🟢削除`)
     .join('\n');
 }
 
 function postDiscord(title,description,color){
-  const webhook=
-    window.TDR_WEBHOOKS
-      ?.restaurant;
+  const webhook=window.TDR_WEBHOOKS?.restaurant;
 
   if(!webhook)return;
 
-  fetch(
-    webhook,
-    {
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json'
-      },
-      keepalive:true,
-      body:JSON.stringify({
-        username:NAME,
-        embeds:[{
-          title:title.slice(0,256),
-          description:description.slice(0,4000),
-          color
-        }]
-      })
-    }
-  ).catch(e=>{
+  fetch(webhook,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json'
+    },
+    keepalive:true,
+    body:JSON.stringify({
+      username:NAME,
+      embeds:[{
+        title:title.slice(0,256),
+        description:description.slice(0,4000),
+        color
+      }]
+    })
+  }).catch(e=>{
     console.error(
       `[${NAME}] Discord通知失敗`,
       e
@@ -1314,36 +1050,18 @@ function postDiscord(title,description,color){
 function sendChangesDiscord(changes){
   syncNotifyDay();
 
-  const added=
-    changes.filter(
-      c=>c.type==='added'
-    );
-
-  const deleted=
-    changes.filter(
-      c=>c.type==='deleted'
-    );
-
-  let normal=
-    changes.filter(
-      c=>c.type==='changed'
-    );
+  const added=changes.filter(c=>c.type==='added');
+  const deleted=changes.filter(c=>c.type==='deleted');
+  let normal=changes.filter(c=>c.type==='changed');
 
   if(notifyState.mode==='off'){
     normal=[];
 
-  }else if(
-    notifyState.mode==='vacancy'
-  ){
-    normal=
-      normal.filter(
-        c=>c.to==='空席'
-      );
+  }else if(notifyState.mode==='vacancy'){
+    normal=normal.filter(c=>c.to==='空席');
   }
 
-  groupDateMeal(
-    added
-  ).forEach(group=>{
+  groupDateMeal(added).forEach(group=>{
     postDiscord(
       buildTitle(
         '🔵',
@@ -1357,9 +1075,7 @@ function sendChangesDiscord(changes){
     );
   });
 
-  groupDateMeal(
-    deleted
-  ).forEach(group=>{
+  groupDateMeal(deleted).forEach(group=>{
     postDiscord(
       buildTitle(
         '🟢',
@@ -1373,19 +1089,10 @@ function sendChangesDiscord(changes){
     );
   });
 
-  const vacancy=
-    normal.filter(
-      c=>c.to==='空席'
-    );
+  const vacancy=normal.filter(c=>c.to==='空席');
+  const full=normal.filter(c=>c.to==='満席');
 
-  const full=
-    normal.filter(
-      c=>c.to==='満席'
-    );
-
-  groupDateMeal(
-    vacancy
-  ).forEach(group=>{
+  groupDateMeal(vacancy).forEach(group=>{
     postDiscord(
       buildTitle(
         '🔴',
@@ -1399,9 +1106,7 @@ function sendChangesDiscord(changes){
     );
   });
 
-  groupDateMeal(
-    full
-  ).forEach(group=>{
+  groupDateMeal(full).forEach(group=>{
     postDiscord(
       buildTitle(
         '⚫️',
@@ -1417,24 +1122,21 @@ function sendChangesDiscord(changes){
 }
 
 async function getPublicIp(){
-  const controller=
-    new AbortController();
+  const controller=new AbortController();
 
-  const timer=
-    setTimeout(
-      ()=>controller.abort(),
-      IP_TIMEOUT
-    );
+  const timer=setTimeout(
+    ()=>controller.abort(),
+    IP_TIMEOUT
+  );
 
   try{
-    const r=
-      await fetch(
-        'https://api.ipify.org?format=json',
-        {
-          cache:'no-store',
-          signal:controller.signal
-        }
-      );
+    const r=await fetch(
+      'https://api.ipify.org?format=json',
+      {
+        cache:'no-store',
+        signal:controller.signal
+      }
+    );
 
     if(!r.ok){
       throw new Error(
@@ -1442,8 +1144,7 @@ async function getPublicIp(){
       );
     }
 
-    const data=
-      await r.json();
+    const data=await r.json();
 
     return data.ip||'取得失敗';
 
@@ -1461,9 +1162,7 @@ async function getPublicIp(){
 }
 
 async function sendErrorDiscord(meal,error){
-  const key=
-    `${meal}|${error}`;
-
+  const key=`${meal}|${error}`;
   const now=Date.now();
 
   if(
@@ -1482,8 +1181,7 @@ async function sendErrorDiscord(meal,error){
     now
   );
 
-  const ip=
-    await getPublicIp();
+  const ip=await getPublicIp();
 
   postDiscord(
     [
@@ -1499,9 +1197,8 @@ async function sendErrorDiscord(meal,error){
   );
 }
 
-async function sendForceStopDiscord(meal){
-  const ip=
-    await getPublicIp();
+async function sendForceStopDiscord(meal,lastError){
+  const ip=await getPublicIp();
 
   postDiscord(
     [
@@ -1510,8 +1207,9 @@ async function sendForceStopDiscord(meal){
       `【${meal}】`
     ].join('\n'),
     [
-      `HTTP 403が${MAX_403}回連続しました。`,
+      `エラーが${MAX_ERRORS}回連続しました。`,
       '安全のため自動読込を停止しました。',
+      `最後のエラー：${lastError}`,
       `公開IP：${ip}`
     ].join('\n'),
     ORANGE
@@ -1525,46 +1223,36 @@ function snapshotText(){
 
   const out=[];
 
-  snapshots.forEach(
-    (slots,key)=>{
-      const p=
-        key.split('|');
+  snapshots.forEach((slots,key)=>{
+    const p=key.split('|');
+    const meal=p[0];
+    const start=p[2];
+    const end=p[3];
 
-      const meal=p[0];
-      const start=p[2];
-      const end=p[3];
+    out.push(
+      `=== ${meal}｜${start}～${end} ===`
+    );
 
-      out.push(
-        `=== ${meal}｜${start}～${end} ===`
-      );
+    Object.keys(slots)
+      .sort()
+      .forEach(k=>{
+        out.push(
+          `${k} = ${slots[k]}`
+        );
+      });
 
-      Object.keys(slots)
-        .sort()
-        .forEach(k=>{
-          out.push(
-            `${k} = ${slots[k]}`
-          );
-        });
+    out.push('');
+  });
 
-      out.push('');
-    }
-  );
-
-  return out
-    .join('\n')
-    .trim();
+  return out.join('\n').trim();
 }
 
 window.SNAPSHOT=()=>{
-  const text=
-    snapshotText();
+  const text=snapshotText();
 
   console.log(text);
 
-  if(
-    navigator.clipboard
-      ?.writeText
-  ){
+  if(navigator.clipboard?.writeText){
     navigator.clipboard
       .writeText(text)
       .then(()=>{
@@ -1592,21 +1280,15 @@ function init(){
   );
 
   if(document.body){
-    new MutationObserver(
-      ms=>{
-        if(
-          ms.some(
-            m=>
-              !panelRoot
-                ?.contains(
-                  m.target
-                )
-          )
-        ){
-          queueRefresh();
-        }
+    new MutationObserver(ms=>{
+      if(
+        ms.some(
+          m=>!panelRoot?.contains(m.target)
+        )
+      ){
+        queueRefresh();
       }
-    ).observe(
+    }).observe(
       document.body,
       {
         childList:true,
@@ -1616,29 +1298,22 @@ function init(){
   }
 }
 
-if(
-  document.readyState===
-  'loading'
-){
+if(document.readyState==='loading'){
   document.addEventListener(
     'DOMContentLoaded',
     init,
     {once:true}
   );
-
 }else{
   init();
 }
 
-setInterval(
-  ()=>{
-    maintenanceTick();
-    renderPanels();
-  },
-  UI_TICK
-);
+setInterval(()=>{
+  maintenanceTick();
+  renderPanels();
+},UI_TICK);
 
 console.log(
-  `[${NAME}] v2.02 起動`
+  `[${NAME}] v2.12 起動`
 );
 })();
