@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.24
+// @version      1.25
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.24', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.25', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -184,10 +184,110 @@ function checkAutoConfirmSelection(){
   lastObservedCurrentSignature=cur.signature;
   if(autoConfirmEnabled) scheduleAutoConfirm(cur);
 }
+
+function normalizeModalText(s){
+  return String(s||'').replace(/\s+/g,'').trim();
+}
 function visible(el){
   if(!el) return false;
   const s=getComputedStyle(el);
-  return s.display!=='none'&&s.visibility!=='hidden';
+  return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)!==0;
+}
+function getVisibleModals(){
+  return Array.from(document.querySelectorAll('#modalDialog,.modalDialog')).filter(visible);
+}
+function modalTitle(modal){
+  return normalizeModalText(modal?.querySelector('h2,.hdgModal01')?.textContent||'');
+}
+function findModalByTitle(title,preferHighLayer=false){
+  const target=normalizeModalText(title);
+  const modals=getVisibleModals().filter(m=>modalTitle(m)===target);
+
+  if(preferHighLayer){
+    const high=modals.find(m=>m.classList.contains('highLayer'));
+    if(high) return high;
+  }
+
+  return modals[0]||null;
+}
+function findOverlapReservationModal(){
+  const modal=findModalByTitle('選択されたご予約時間が、下記のご予約時間と重なっています。',false);
+  if(!modal) return null;
+
+  const h3Texts=Array.from(modal.querySelectorAll('h3')).map(el=>normalizeModalText(el.textContent));
+
+  if(!h3Texts.includes('選択予約')) return null;
+  if(!h3Texts.includes('時間が重複している予約')) return null;
+  if(!modal.querySelector('img[alt="確認しました"]')) return null;
+
+  return modal;
+}
+function closeOverlapReservationModal(){
+  const modal=findOverlapReservationModal();
+  if(!modal) return false;
+
+  const okImg=modal.querySelector('img[alt="確認しました"]');
+  const clickTarget=okImg.closest('a,button')||okImg;
+
+  console.log('[TDR TravelBag] 重複警告を自動クローズ');
+  clickTarget.click();
+  return true;
+}
+function setupNoticeModal(modal){
+  const accept=modal.querySelector('#accept');
+  const next=modal.querySelector('#btnNext');
+
+  if(!accept||!next){
+    reservationNoticeActive=false;
+    return false;
+  }
+
+  if(reservationNoticeActive) return true;
+
+  reservationNoticeActive=true;
+
+  if(!accept.checked) accept.click();
+
+  setTimeout(()=>{
+    const m=findModalByTitle('ご予約の際のご注意',true);
+
+    if(!m){
+      reservationNoticeActive=false;
+      processTravelBagModals();
+      return;
+    }
+
+    const btn=m.querySelector('#btnNext');
+
+    if(!btn){
+      reservationNoticeActive=false;
+      return;
+    }
+
+    console.log('[TDR TravelBag] ポップアップ自動処理: 同意ON → 次へ');
+    btn.click();
+
+    setTimeout(()=>{
+      reservationNoticeActive=false;
+      processTravelBagModals();
+    },300);
+  },80);
+
+  return true;
+}
+function processTravelBagModals(){
+  const noticeModal=findModalByTitle('ご予約の際のご注意',true);
+
+  if(noticeModal){
+    setupNoticeModal(noticeModal);
+    return;
+  }
+
+  reservationNoticeActive=false;
+
+  if(closeOverlapReservationModal()){
+    setTimeout(processTravelBagModals,300);
+  }
 }
 function processRestaurantModal(){
   const modal=[...document.querySelectorAll('.js-travelBagModal')].find(visible);
@@ -204,41 +304,18 @@ function processRestaurantModal(){
     adult.value='1';
     adult.dispatchEvent(new Event('change',{bubbles:true}));
   }
-  console.log('[TDR TravelBag] モーダル人数設定: 大人1名');
-}
-function processNoticeModal(){
-  const modal=document.getElementById('modalDialog');
-  if(!modal||!visible(modal)||modal.querySelector('.hdgModal01')?.textContent?.trim()!=='ご予約の際のご注意'){
-    reservationNoticeActive=false;
-    return;
-  }
-  const accept=modal.querySelector('#accept'), next=modal.querySelector('#btnNext');
-  if(!accept||!next||reservationNoticeActive) return;
-  reservationNoticeActive=true;
-  if(!accept.checked) accept.click();
-  setTimeout(()=>{
-    const m=document.getElementById('modalDialog');
-    if(!m||!visible(m)||m.querySelector('.hdgModal01')?.textContent?.trim()!=='ご予約の際のご注意'){
-      reservationNoticeActive=false;
-      return;
-    }
-    const btn=m.querySelector('#btnNext');
-    if(!btn){ reservationNoticeActive=false; return; }
-    console.log('[TDR TravelBag] ポップアップ自動処理: 同意ON → 次へ');
-    btn.click();
-  },0);
 }
 function installPageObserver(){
   if(pageObserver) return;
   if(!document.documentElement) return setTimeout(installPageObserver,0);
   pageObserver=new MutationObserver(()=>{
     processRestaurantModal();
-    processNoticeModal();
+    processTravelBagModals();
     checkAutoConfirmSelection();
   });
   pageObserver.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});
   processRestaurantModal();
-  processNoticeModal();
+  processTravelBagModals();
   checkAutoConfirmSelection();
   console.log('[TDR TravelBag] ページ状態監視 ON');
 }
@@ -505,10 +582,7 @@ function adultNum(){
     return null;
   }
   const $a=window.jQuery('select[name="adultNum"]');
-  if(!$a.length){
-    console.warn('[TDR TravelBag] adultNum が見つかりません');
-    return null;
-  }
+  if(!$a.length) return null;
   return $a;
 }
 function fireStockReload(){
