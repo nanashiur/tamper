@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.62
+// @version      2.63
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -396,7 +396,7 @@
 
     function statusStyle(status) {
       return status === '空席' ? 'color:red;font-weight:bold;'
-        : status === '満席' ? 'color:black;'
+        : status === '満席' ? ''
         : status === '吸収' ? 'color:blue;font-weight:bold;'
         : status === '締切' ? 'color:gray;font-weight:bold;'
         : 'color:purple;font-weight:bold;';
@@ -421,7 +421,7 @@
         : s;
     }
 
-    function printTimeGet(source, url, responseText, body) {
+    function printTimeGet(source, url, responseText, body, mealName) {
       let data;
 
       try {
@@ -434,6 +434,7 @@
       const groups = Array.isArray(data) ? data : [data];
       const dataObj = parseAjaxData(body);
       const displayDate = formatConsoleDate(dataObj.useDate) || '日付不明';
+      const mealSuffix = mealName ? `【${mealName}】` : '';
       const rows = [];
       const grouped = {};
 
@@ -476,13 +477,13 @@
 
       Object.keys(grouped).forEach(code => {
         console.log(
-          `%c${now}`,
+          `%c${now}${mealSuffix}`,
           'background:#333;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px'
         );
 
         console.log(
           `%c${displayDate} ${splitCommodityCD(code).display}`,
-          'color:#000;font-weight:bold'
+          'font-weight:bold;'
         );
 
         grouped[code].forEach(r => {
@@ -497,6 +498,7 @@
         at: new Date().toISOString(),
         source,
         url: String(url || ''),
+        mealName,
         payload: dataObj,
         rows,
         grouped,
@@ -799,7 +801,9 @@
       if (!ajaxOptions || !ajaxOptions.url) return;
       if (!String(ajaxOptions.url).includes('timeGet')) return;
 
-      printTimeGet('ajaxComplete', ajaxOptions.url, jqXHR.responseText, ajaxOptions.data);
+      const mealName = ajaxOptions.__tdrMealName || jqXHR.__tdrMealName || '';
+
+      printTimeGet('ajaxComplete', ajaxOptions.url, jqXHR.responseText, ajaxOptions.data, mealName);
       notifyIfVacant(jqXHR.responseText, ajaxOptions, jqXHR);
     });
 
