@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      2.44
+// @version      2.45
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -412,7 +412,7 @@ function renderPanels(){
     if(s.deadline){
       s.panel.style.background='#1976d2';
       s.panel.style.color='#fff';
-      s.panel.textContent=`${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000)}`;
+      s.panel.textContent=`${meal} ON ${Math.max(0,Math.ceil((s.deadline-now)/1000))}`;
       return;
     }
 
@@ -1110,5 +1110,5 @@ setInterval(()=>{
   renderPanels();
 },UI_TICK);
 
-console.log(`[${NAME}] v2.44 起動`);
+console.log(`[${NAME}] v2.45 起動`);
 })();
