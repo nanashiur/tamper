@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.25
+// @version      1.26
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.25', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.26', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -20,7 +20,9 @@ window[INSTALLED]=true;
 let autoEnabled=false, fireTimer=null, countdownTimer=null, nextFireAt=0, autoButton=null;
 let vacancySelectMode=0, vacancySelectButton=null, vacancySelectToken=0;
 let autoConfirmEnabled=false, autoConfirmButton=null, autoConfirmTimer=null, lastObservedCurrentSignature='';
+let notifyEnabled=true, notifyButton=null, currentRestaurantName='', webhookWarned=false;
 let reservationNoticeActive=false, restaurantModalHandled=false, pageObserver=null, purchasePending=0;
+const stockSnapshots=new Map();
 const HOURS=['11','12','13','14','15','16','17','18','19','20','21'];
 const MINUTES=['00','10','20','30','40','50'], priorityRows=[];
 
@@ -132,6 +134,11 @@ function updateAutoConfirmButton(){
   autoConfirmButton.textContent=autoConfirmEnabled?'確定 ON':'確定 OFF';
   autoConfirmButton.style.background=autoConfirmEnabled?'#d32f2f':'#777';
 }
+function updateNotifyButton(){
+  if(!notifyButton) return;
+  notifyButton.textContent=notifyEnabled?'通知 ON':'通知 OFF';
+  notifyButton.style.background=notifyEnabled?'#f9a825':'#777';
+}
 function getPhoneNumber(){
   const phone=window.TDR_WEBHOOKS?.phone;
   if(typeof phone==='string'&&phone.trim()) return phone.trim();
@@ -185,14 +192,23 @@ function checkAutoConfirmSelection(){
   if(autoConfirmEnabled) scheduleAutoConfirm(cur);
 }
 
-function normalizeModalText(s){
-  return String(s||'').replace(/\s+/g,'').trim();
-}
+function normalizeModalText(s){ return String(s||'').replace(/\s+/g,'').trim(); }
 function visible(el){
   if(!el) return false;
   const s=getComputedStyle(el);
   return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)!==0;
 }
+function captureRestaurantName(e){
+  if(!(e.target instanceof Element)) return;
+  const a=e.target.closest('a[href="javascript:void(0);"]');
+  if(!a||!a.querySelector(':scope > p.photo')||!a.querySelector(':scope > p.caption > span')) return;
+  const modal=a.closest('.js-travelBagModal');
+  if(!modal||!visible(modal)) return;
+  const name=a.querySelector(':scope > p.caption > span')?.textContent?.trim();
+  if(name) currentRestaurantName=name;
+}
+document.addEventListener('click',captureRestaurantName,true);
+
 function getVisibleModals(){
   return Array.from(document.querySelectorAll('#modalDialog,.modalDialog')).filter(visible);
 }
@@ -202,33 +218,26 @@ function modalTitle(modal){
 function findModalByTitle(title,preferHighLayer=false){
   const target=normalizeModalText(title);
   const modals=getVisibleModals().filter(m=>modalTitle(m)===target);
-
   if(preferHighLayer){
     const high=modals.find(m=>m.classList.contains('highLayer'));
     if(high) return high;
   }
-
   return modals[0]||null;
 }
 function findOverlapReservationModal(){
   const modal=findModalByTitle('選択されたご予約時間が、下記のご予約時間と重なっています。',false);
   if(!modal) return null;
-
   const h3Texts=Array.from(modal.querySelectorAll('h3')).map(el=>normalizeModalText(el.textContent));
-
   if(!h3Texts.includes('選択予約')) return null;
   if(!h3Texts.includes('時間が重複している予約')) return null;
   if(!modal.querySelector('img[alt="確認しました"]')) return null;
-
   return modal;
 }
 function closeOverlapReservationModal(){
   const modal=findOverlapReservationModal();
   if(!modal) return false;
-
   const okImg=modal.querySelector('img[alt="確認しました"]');
   const clickTarget=okImg.closest('a,button')||okImg;
-
   console.log('[TDR TravelBag] 重複警告を自動クローズ');
   clickTarget.click();
   return true;
@@ -236,58 +245,42 @@ function closeOverlapReservationModal(){
 function setupNoticeModal(modal){
   const accept=modal.querySelector('#accept');
   const next=modal.querySelector('#btnNext');
-
   if(!accept||!next){
     reservationNoticeActive=false;
     return false;
   }
-
   if(reservationNoticeActive) return true;
-
   reservationNoticeActive=true;
-
   if(!accept.checked) accept.click();
-
   setTimeout(()=>{
     const m=findModalByTitle('ご予約の際のご注意',true);
-
     if(!m){
       reservationNoticeActive=false;
       processTravelBagModals();
       return;
     }
-
     const btn=m.querySelector('#btnNext');
-
     if(!btn){
       reservationNoticeActive=false;
       return;
     }
-
     console.log('[TDR TravelBag] ポップアップ自動処理: 同意ON → 次へ');
     btn.click();
-
     setTimeout(()=>{
       reservationNoticeActive=false;
       processTravelBagModals();
     },300);
   },80);
-
   return true;
 }
 function processTravelBagModals(){
   const noticeModal=findModalByTitle('ご予約の際のご注意',true);
-
   if(noticeModal){
     setupNoticeModal(noticeModal);
     return;
   }
-
   reservationNoticeActive=false;
-
-  if(closeOverlapReservationModal()){
-    setTimeout(processTravelBagModals,300);
-  }
+  if(closeOverlapReservationModal()) setTimeout(processTravelBagModals,300);
 }
 function processRestaurantModal(){
   const modal=[...document.querySelectorAll('.js-travelBagModal')].find(visible);
@@ -427,6 +420,79 @@ function parseResponse(r){
   }
   return r&&typeof r==='object'?r:[];
 }
+function snapshotRows(rows){
+  const map=new Map();
+  for(const r of rows) map.set(r.time,{status:r.status,openNumKey:String(r.openNumKey??'')});
+  return map;
+}
+function sendStockDiffNotification(payload,groups){
+  if(!notifyEnabled||!groups.length) return;
+  const webhook=window.TDR_WEBHOOKS?.restaurant;
+  if(typeof webhook!=='string'||!webhook.trim()){
+    if(!webhookWarned){
+      webhookWarned=true;
+      console.warn('[TDR TravelBag] restaurant Webhook が見つかりません');
+    }
+    return;
+  }
+  const restaurantName=currentRestaurantName||groups.find(g=>g.restaurantName)?.restaurantName||'レストラン在庫差分';
+  const lines=[payload.displayDate||'日付不明'];
+  for(const g of groups){
+    lines.push(`【${splitCommodityCD(g.code).display}】`);
+    lines.push(...g.changes);
+  }
+  let description=lines.join('\n');
+  if(description.length>4000) description=description.slice(0,3990)+'\n…';
+  originalFetch.call(window,webhook.trim(),{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      username:'🧳トラベルバッグ',
+      embeds:[{
+        title:`🔔 ${restaurantName}`,
+        description,
+        color:0xf9a825
+      }]
+    })
+  }).catch(e=>console.warn('[TDR TravelBag] 差分通知送信失敗',e));
+}
+function processStockDiff(payload,grouped){
+  const codes=new Set(Object.keys(grouped));
+  if(payload.targetCommodityCD) codes.add(payload.targetCommodityCD);
+  const noticeGroups=[];
+
+  for(const code of codes){
+    if(!code) continue;
+    const rows=grouped[code]||[];
+    const current=snapshotRows(rows);
+    const key=`${payload.useDate||''}|${code}`;
+    const previous=stockSnapshots.get(key);
+    const restaurantName=currentRestaurantName||previous?.restaurantName||'';
+
+    if(!previous){
+      stockSnapshots.set(key,{restaurantName,rows:current});
+      continue;
+    }
+
+    const changes=[];
+
+    for(const [time,cur] of current){
+      const old=previous.rows.get(time);
+      if(!old) changes.push(`${time} 枠追加 → ${cur.status}`);
+      else if(old.status!==cur.status) changes.push(`${time} ${old.status} → ${cur.status}`);
+    }
+
+    for(const [time,old] of previous.rows){
+      if(!current.has(time)) changes.push(`${time} 枠削除（${old.status}）`);
+    }
+
+    stockSnapshots.set(key,{restaurantName:restaurantName||previous.restaurantName,rows:current});
+
+    if(changes.length) noticeGroups.push({code,restaurantName:restaurantName||previous.restaurantName,changes});
+  }
+
+  sendStockDiffNotification(payload,noticeGroups);
+}
 function printTimeGet(source,url,response,body){
   let data;
   try{ data=parseResponse(response); }
@@ -456,6 +522,7 @@ function printTimeGet(source,url,response,body){
     grouped[code].forEach(r=>console.log(`%c${r.time} ${r.status} ${r.openNumKey}`,statusStyle(r.status)));
   }
   window.tb_last_timeget={at:new Date().toISOString(),source,url:absUrl(url),payload,rows,grouped,raw:data};
+  processStockDiff(payload,grouped);
   return data;
 }
 function getVacancyCandidates(data){
@@ -710,12 +777,19 @@ function createPanel(){
     updateAutoConfirmButton();
   });
 
+  notifyButton=makeButton('通知 ON','#f9a825',()=>{
+    notifyEnabled=!notifyEnabled;
+    updateNotifyButton();
+  });
+
   const manualButton=makeButton('1名','#198754',manualReload);
-  panel.append(autoButton,vacancySelectButton,priorityControls,autoConfirmButton,manualButton);
+
+  panel.append(autoButton,vacancySelectButton,priorityControls,autoConfirmButton,notifyButton,manualButton);
   document.body.appendChild(panel);
 
   updateVacancyButton();
   updateAutoConfirmButton();
+  updateNotifyButton();
   updateAutoButtonBg();
   pending.size?updatePending():updateCountdown();
 
