@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.75
+// @version      4.76
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -172,7 +172,8 @@
   function loadNotifyMode() {
     const saved = localStorage.getItem('notifyMode');
     if (saved === 'ALL' || saved === 'VACANCY' || saved === 'OFF') return saved;
-    return localStorage.getItem('notifyEnabled') === '0' ? 'OFF' : 'ALL';
+    if (localStorage.getItem('notifyEnabled') === '0') return 'OFF';
+    return 'VACANCY';
   }
 
   function loadSnapshotMap() {
@@ -327,7 +328,7 @@
     if (!text) return '';
     if (text.includes('空席あり')) return '空席';
     if (text.includes('満席')) return '満席';
-    if (text.includes('締切') || text.includes('受付終了')) return '締切';
+    if (text.includes('締切') || text.includes('受付終了')) return '受付終了';
     return '不明';
   }
 
@@ -407,13 +408,13 @@
   function statusText(status) {
     if (status === '空席') return '🔴空席';
     if (status === '満席') return '⚫満席';
-    if (status === '締切') return '締切';
+    if (status === '受付終了') return '受付終了';
     return '状態不明';
   }
 
   function sendSnapshotDiscord(icon, mealName, lines, color, notifyType = 'FORCE') {
     if (notifyType === 'VACANCY' && state.notifyMode === 'OFF') return;
-    if (notifyType === 'FULL' && state.notifyMode !== 'ALL') return;
+    if ((notifyType === 'FULL' || notifyType === 'STATUS') && state.notifyMode !== 'ALL') return;
     if (!DISCORD_WEBHOOK_URL || !lines.length) return;
 
     fetch(DISCORD_WEBHOOK_URL, {
@@ -444,6 +445,7 @@
     const deleted = [];
     const vacancy = [];
     const full = [];
+    const otherStatus = [];
 
     Object.keys(currentSlots).forEach(time => {
       if (!Object.prototype.hasOwnProperty.call(previous, time)) {
@@ -466,6 +468,7 @@
       if (from === to || from === '不明' || to === '不明') return;
       if (to === '空席') vacancy.push({ time, from, to });
       else if (to === '満席') full.push({ time, from, to });
+      else otherStatus.push({ time, from, to });
     });
 
     const next = {};
@@ -482,10 +485,12 @@
     state.snapshots.set(key, next);
     saveSnapshotMap();
 
-    const visibleAdded = added.filter(x => !state.excludedTimes.includes(x.time));
-    const visibleDeleted = deleted.filter(x => !state.excludedTimes.includes(x.time));
-    const visibleVacancy = vacancy.filter(x => !state.excludedTimes.includes(x.time));
-    const visibleFull = full.filter(x => !state.excludedTimes.includes(x.time));
+    const filterChecked = list => list.filter(x => !state.excludedTimes.includes(x.time));
+    const visibleAdded = filterChecked(added);
+    const visibleDeleted = filterChecked(deleted);
+    const visibleVacancy = state.notifyMode === 'ALL' ? vacancy : filterChecked(vacancy);
+    const visibleFull = full;
+    const visibleOtherStatus = otherStatus;
 
     if (visibleAdded.length) {
       sendSnapshotDiscord(
@@ -522,6 +527,16 @@
         visibleFull.sort((a, b) => a.time.localeCompare(b.time)).map(x => `${x.time}　⚫満席`),
         BLACK,
         'FULL'
+      );
+    }
+
+    if (visibleOtherStatus.length) {
+      sendSnapshotDiscord(
+        '📢',
+        mealName,
+        visibleOtherStatus.sort((a, b) => a.time.localeCompare(b.time)).map(x => `${x.time}　${x.from} → ${x.to}`),
+        BLUE,
+        'STATUS'
       );
     }
   }
@@ -942,18 +957,18 @@
     panels.reserve.style.background = state.autoReserve ? '#dc3545' : '#333';
     panels.reserve.textContent = '👆️';
 
-    if (state.notifyMode === 'ALL') {
-      panels.notify.style.background = '#ffc107';
-      panels.notify.style.color = '#000';
-      panels.notify.textContent = '全';
-    } else if (state.notifyMode === 'VACANCY') {
+    if (state.notifyMode === 'VACANCY') {
       panels.notify.style.background = 'pink';
       panels.notify.style.color = '#000';
-      panels.notify.textContent = '空';
+      panels.notify.textContent = '🔔';
+    } else if (state.notifyMode === 'ALL') {
+      panels.notify.style.background = '#ffc107';
+      panels.notify.style.color = '#000';
+      panels.notify.textContent = '📢';
     } else {
       panels.notify.style.background = '#333';
       panels.notify.style.color = '#fff';
-      panels.notify.textContent = 'OFF';
+      panels.notify.textContent = '🔕';
     }
 
     if (panels.reset) {
@@ -992,12 +1007,12 @@
 
   panels.notify = createPanel(50, '#333', () => {
     const nextNotifyMode = {
-      ALL: 'VACANCY',
-      VACANCY: 'OFF',
-      OFF: 'ALL'
+      VACANCY: 'ALL',
+      ALL: 'OFF',
+      OFF: 'VACANCY'
     };
 
-    state.notifyMode = nextNotifyMode[state.notifyMode] || 'ALL';
+    state.notifyMode = nextNotifyMode[state.notifyMode] || 'VACANCY';
     localStorage.setItem('notifyMode', state.notifyMode);
     updatePanels();
   });
