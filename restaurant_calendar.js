@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      2.85
+// @version      2.86
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -438,7 +438,7 @@ function postDiscord(title,description,color,target='auto'){
   if(!webhook){console.warn(`[${NAME}] Discord通知先未設定：${actual==='research'?'restaurantResearch':'restaurant'}`);return;}
   fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({username:NAME,embeds:[{title:title.slice(0,256),description:description.slice(0,4000),color}]})}).catch(e=>console.error(`[${NAME}] Discord通知失敗`,e));
 }
-function postErrorDiscord(title,description,color){
+function postCriticalDiscord(title,description,color){
   postDiscord(title,description,color,'normal');
   if(useResearchChannel()&&discordWebhook('research')!==discordWebhook('normal'))postDiscord(title,description,color,'research');
 }
@@ -473,15 +473,14 @@ async function getPublicIp(){
 }
 async function sendErrorDiscord(meal,error){
   const key=`${meal}|${error}`,now=Date.now();if(now-(errorNotifyHistory.get(key)||0)<60000)return;errorNotifyHistory.set(key,now);
-  const ip=await getPublicIp();postErrorDiscord([`🟠${nowText()}`,restaurantName(),`【${meal}】`].join('\n'),[`エラー：${error}`,`公開IP：${ip}`].join('\n'),ORANGE);
+  const ip=await getPublicIp();postDiscord([`🟠${nowText()}`,restaurantName(),`【${meal}】`].join('\n'),[`エラー：${error}`,`公開IP：${ip}`].join('\n'),ORANGE);
 }
 async function sendResearchErrorDiscord(meal,phase,error){
   const ip=await getPublicIp(),label=phase==='insurance'?'保険基準':phase==='baseline'?'8:57基準':phase==='pass1'?'1周目':phase==='pass2'?'2周目':'';
-  const title=[`🟠${nowText()}`,restaurantName(),`【${meal}】`].join('\n'),description=[`AM9時調査 ${label}`,`読込エラー：${error}`,`公開IP：${ip}`].join('\n');
-  postDiscord(title,description,ORANGE,'normal');if(discordWebhook('research')!==discordWebhook('normal'))postDiscord(title,description,ORANGE,'research');
+  postDiscord([`🟠${nowText()}`,restaurantName(),`【${meal}】`].join('\n'),[`AM9時調査 ${label}`,`読込エラー：${error}`,`公開IP：${ip}`].join('\n'),ORANGE,'research');
 }
 async function sendForceStopDiscord(meal,lastError){
-  const ip=await getPublicIp();postErrorDiscord([`🔶${nowText()}`,restaurantName(),`【${meal}】`].join('\n'),[`エラーが${MAX_ERRORS}回連続しました。`,'安全のため自動読込を停止しました。',`最後のエラー：${lastError}`,`公開IP：${ip}`].join('\n'),ORANGE);
+  const ip=await getPublicIp();postCriticalDiscord([`🔶${nowText()}`,restaurantName(),`【${meal}】`].join('\n'),[`エラーが${MAX_ERRORS}回連続しました。`,'安全のため自動読込を停止しました。',`最後のエラー：${lastError}`,`公開IP：${ip}`].join('\n'),ORANGE);
 }
 
 function snapshotText(){
@@ -497,5 +496,5 @@ function init(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 setInterval(()=>{maintenanceTick();researchTick();renderPanels();},UI_TICK);
-console.log(`[${NAME}] v2.85 起動`);
+console.log(`[${NAME}] v2.86 起動`);
 })();
