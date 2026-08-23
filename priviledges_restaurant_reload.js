@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.63
+// @version      2.64
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -15,8 +15,12 @@
 
   const VACANCY_ICON = '❤️';
   const VACANCY_COLOR = 0xff0000;
+  const DIFF_ICON = '💙';
+  const FRAME_ICON = '🔹';
+  const DIFF_COLOR = 0x007bff;
   const ERROR_ICON = '🟠';
   const ERROR_COLOR = 0xffa500;
+  const SNAPSHOT_KEY = 'tdr_priv_diff_snapshots_v1';
 
   const MEALS = [
     { key: 'breakfast', label: '朝', full: '朝食', storage: 'tdr_priv_searchStatus_breakfast' },
@@ -25,9 +29,9 @@
   ];
 
   const ranges = {
-    S: [5, 6],
-    M: [15, 11],
-    L: [30, 21]
+    S: [15, 6],
+    M: [60, 11],
+    L: [300, 21]
   };
 
   function getRandomWait(mode) {
@@ -49,11 +53,21 @@
     }
   }
 
+  function loadSnapshots() {
+    try {
+      const obj = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || '{}');
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
   const state = {
     notifyEnabled: localStorage.getItem('tdr_priv_notifyEnabled') !== '0',
     excludedTimes: loadExcludedTimes(),
     mealStates: {},
-    activeReloadMeal: ''
+    activeReloadMeal: '',
+    snapshots: loadSnapshots()
   };
 
   MEALS.forEach(meal => {
@@ -102,6 +116,8 @@
 
     let opened_headers = [];
     let reloadLock = false;
+    let reservationNoticePopupActive = false;
+    let duplicationTimePopupActive = false;
 
     const save_accordion_status = () => {
       opened_headers = [];
@@ -402,6 +418,11 @@
         : 'color:purple;font-weight:bold;';
     }
 
+    function formatStatusForNotice(status) {
+      if (status === '空席') return `${VACANCY_ICON}空席`;
+      return status || '不明';
+    }
+
     function splitCommodityCD(code) {
       const base = String(code || '').split('_')[0].trim();
 
@@ -421,6 +442,187 @@
         : s;
     }
 
+    function snapshotSave() {
+      try {
+        localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(state.snapshots));
+      } catch (e) {
+        console.warn('スナップショット保存失敗:', e);
+      }
+    }
+
+    function snapshotKey(useDate, mealName, commodityCD) {
+      return `${useDate || ''}|${mealName || ''}|${commodityCD || ''}`;
+    }
+
+    function buildRowsMap(rows) {
+      const map = {};
+
+      rows.forEach(r => {
+        if (!r.time) return;
+
+        map[r.time] = {
+          time: r.time,
+          status: r.status,
+          salesStatus: r.salesStatus,
+          openNumKey: String(r.openNumKey ?? ''),
+          commodityCD: r.commodityCD,
+          commodityDisplay: r.commodityDisplay
+        };
+      });
+
+      return map;
+    }
+
+    function makeDiffLine(type, time, oldRow, curRow) {
+      if (type === 'absorb') {
+        return `${time} ${DIFF_ICON}吸収（${formatStatusForNotice(oldRow?.status)}）`;
+      }
+
+      if (type === 'release') {
+        return `${time} ${DIFF_ICON}解除（${formatStatusForNotice(curRow?.status)}）`;
+      }
+
+      if (type === 'add') {
+        return `${time} ${FRAME_ICON}新規（${formatStatusForNotice(curRow?.status)}）`;
+      }
+
+      if (type === 'delete') {
+        return `${time} ${FRAME_ICON}削除`;
+      }
+
+      return `${time} ${formatStatusForNotice(oldRow?.status)} → ${formatStatusForNotice(curRow?.status)}`;
+    }
+
+    function buildDiffTitle(restaurantName, mealName, ajaxOptions) {
+      const displayDate = getDisplayDateLong(ajaxOptions);
+
+      return [
+        getDetectTime(DIFF_ICON),
+        `【宿泊特典】${restaurantName}`,
+        `${displayDate}${mealName ? ` 【${mealName}】` : ''}`
+      ].join('\n');
+    }
+
+    function sendDiffDiscord(restaurantName, mealName, ajaxOptions, noticeGroups) {
+      if (!noticeGroups.length) return;
+
+      const lines = [];
+
+      noticeGroups.forEach(group => {
+        if (noticeGroups.length > 1) {
+          lines.push(`【${group.commodityDisplay || splitCommodityCD(group.commodityCD).display}】`);
+        }
+
+        group.lines.forEach(line => lines.push(line));
+      });
+
+      let body = lines.join('\n');
+
+      if (!body) return;
+      if (body.length > 4000) body = `${body.slice(0, 3990)}\n…`;
+
+      const title = buildDiffTitle(restaurantName, mealName, ajaxOptions);
+
+      sendDiscord(title, body, DIFF_COLOR);
+    }
+
+    function notifyDiffIfChanged(info, ajaxOptions, jqXHR, mealName) {
+      if (!info) return;
+
+      const dataObj = info.dataObj || {};
+      const useDate = dataObj.useDate || '';
+      const restaurantName = getRawRestaurantName(ajaxOptions);
+      const commodityCodes = new Set(Object.keys(info.grouped || {}));
+
+      if (dataObj.commodityCD) {
+        commodityCodes.add(String(dataObj.commodityCD));
+      }
+
+      const noticeGroups = [];
+      let changedSnapshot = false;
+
+      commodityCodes.forEach(commodityCD => {
+        if (!commodityCD) return;
+
+        const rows = info.grouped[commodityCD] || [];
+        const currentRows = buildRowsMap(rows);
+        const key = snapshotKey(useDate, mealName, commodityCD);
+        const prev = state.snapshots[key];
+
+        if (!prev) {
+          state.snapshots[key] = {
+            useDate,
+            mealName,
+            restaurantName,
+            commodityCD,
+            commodityDisplay: splitCommodityCD(commodityCD).display,
+            rows: currentRows
+          };
+          changedSnapshot = true;
+          return;
+        }
+
+        const lines = [];
+        const prevRows = prev.rows || {};
+        const allTimes = new Set([
+          ...Object.keys(prevRows),
+          ...Object.keys(currentRows)
+        ]);
+
+        Array.from(allTimes).sort((a, b) => a.localeCompare(b)).forEach(time => {
+          if (state.excludedTimes.includes(time)) return;
+
+          const oldRow = prevRows[time];
+          const curRow = currentRows[time];
+
+          if (!oldRow && curRow) {
+            lines.push(makeDiffLine('add', time, oldRow, curRow));
+            return;
+          }
+
+          if (oldRow && !curRow) {
+            lines.push(makeDiffLine('delete', time, oldRow, curRow));
+            return;
+          }
+
+          if (!oldRow || !curRow) return;
+          if (oldRow.status === curRow.status) return;
+
+          if (oldRow.status !== '吸収' && curRow.status === '吸収') {
+            lines.push(makeDiffLine('absorb', time, oldRow, curRow));
+          } else if (oldRow.status === '吸収' && curRow.status !== '吸収') {
+            lines.push(makeDiffLine('release', time, oldRow, curRow));
+          } else {
+            lines.push(makeDiffLine('change', time, oldRow, curRow));
+          }
+        });
+
+        state.snapshots[key] = {
+          useDate,
+          mealName,
+          restaurantName,
+          commodityCD,
+          commodityDisplay: splitCommodityCD(commodityCD).display,
+          rows: currentRows
+        };
+        changedSnapshot = true;
+
+        if (lines.length) {
+          noticeGroups.push({
+            commodityCD,
+            commodityDisplay: splitCommodityCD(commodityCD).display,
+            lines
+          });
+        }
+      });
+
+      if (changedSnapshot) {
+        snapshotSave();
+      }
+
+      sendDiffDiscord(restaurantName, mealName, ajaxOptions, noticeGroups);
+    }
+
     function printTimeGet(source, url, responseText, body, mealName) {
       let data;
 
@@ -428,7 +630,7 @@
         data = JSON.parse(responseText);
       } catch (e) {
         console.warn('[宿泊特典 timeGet] JSON解析失敗', { source, url, responseText });
-        return;
+        return null;
       }
 
       const groups = Array.isArray(data) ? data : [data];
@@ -463,8 +665,6 @@
         });
       });
 
-      if (!rows.length) return;
-
       rows.sort((a, b) => {
         return a.commodityCD.localeCompare(b.commodityCD) || a.time.localeCompare(b.time);
       });
@@ -473,26 +673,38 @@
         arr.sort((a, b) => a.time.localeCompare(b.time));
       });
 
-      const now = new Date().toLocaleTimeString();
+      if (rows.length) {
+        const now = new Date().toLocaleTimeString();
 
-      Object.keys(grouped).forEach(code => {
-        console.log(
-          `%c${now}${mealSuffix}`,
-          'background:#333;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px'
-        );
-
-        console.log(
-          `%c${displayDate} ${splitCommodityCD(code).display}`,
-          'font-weight:bold;'
-        );
-
-        grouped[code].forEach(r => {
+        Object.keys(grouped).forEach(code => {
           console.log(
-            `%c${r.time} ${r.status} ${r.openNumKey}`,
-            statusStyle(r.status)
+            `%c${now}${mealSuffix}`,
+            'background:#333;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px'
           );
+
+          console.log(
+            `%c${displayDate} ${splitCommodityCD(code).display}`,
+            'font-weight:bold;'
+          );
+
+          grouped[code].forEach(r => {
+            console.log(
+              `%c${r.time} ${r.status} ${r.openNumKey}`,
+              statusStyle(r.status)
+            );
+          });
         });
-      });
+      }
+
+      const info = {
+        data,
+        groups,
+        dataObj,
+        displayDate,
+        mealName,
+        rows,
+        grouped
+      };
 
       window.tdr_priv_last_timeget = {
         at: new Date().toISOString(),
@@ -504,6 +716,8 @@
         grouped,
         raw: data
       };
+
+      return info;
     }
 
     function getRawRestaurantName(ajaxOptions) {
@@ -613,22 +827,6 @@
       }
 
       return '日付不明';
-    }
-
-    function buildVacancyTitle(restaurantName, mealName, ajaxOptions) {
-      const displayDate = getDisplayDateLong(ajaxOptions);
-
-      return [
-        getDetectTime(VACANCY_ICON),
-        `【宿泊特典】${restaurantName}`,
-        `${displayDate}${mealName ? ` 【${mealName}】` : ''}`
-      ].join('\n');
-    }
-
-    function buildVacancyBody(availableSlots) {
-      return availableSlots
-        .map(time => `${time}　${VACANCY_ICON}`)
-        .join('\n');
     }
 
     function sendDiscord(title, description, color) {
@@ -760,51 +958,14 @@
       updatePanels();
     });
 
-    function notifyIfVacant(responseText, ajaxOptions, jqXHR) {
-      try {
-        const parsed = JSON.parse(responseText);
-        const data = Array.isArray(parsed) ? parsed : [parsed];
-
-        const availableSlots = [];
-
-        data.forEach(group => {
-          if (!group.timeGetDtoList) return;
-
-          group.timeGetDtoList.forEach(slot => {
-            if (String(slot.saleStatus) === '0') {
-              const time = slot.exhibitionTime || slot.time || '';
-
-              if (time && !state.excludedTimes.includes(time) && !availableSlots.includes(time)) {
-                availableSlots.push(time);
-              }
-            }
-          });
-        });
-
-        if (!availableSlots.length) return;
-
-        availableSlots.sort((a, b) => a.localeCompare(b));
-
-        const detectedName = getRawRestaurantName(ajaxOptions);
-        const mealName = ajaxOptions.__tdrMealName || jqXHR.__tdrMealName || '';
-
-        const title = buildVacancyTitle(detectedName, mealName, ajaxOptions);
-        const body = buildVacancyBody(availableSlots);
-
-        sendDiscord(title, body, VACANCY_COLOR);
-      } catch (e) {
-        console.error('空席判定エラー:', e);
-      }
-    }
-
     $(document).ajaxComplete(function (event, jqXHR, ajaxOptions) {
       if (!ajaxOptions || !ajaxOptions.url) return;
       if (!String(ajaxOptions.url).includes('timeGet')) return;
 
       const mealName = ajaxOptions.__tdrMealName || jqXHR.__tdrMealName || '';
 
-      printTimeGet('ajaxComplete', ajaxOptions.url, jqXHR.responseText, ajaxOptions.data, mealName);
-      notifyIfVacant(jqXHR.responseText, ajaxOptions, jqXHR);
+      const info = printTimeGet('ajaxComplete', ajaxOptions.url, jqXHR.responseText, ajaxOptions.data, mealName);
+      notifyDiffIfChanged(info, ajaxOptions, jqXHR, mealName);
     });
 
     function attachMealBarClickEvents() {
@@ -899,10 +1060,207 @@
       });
     }
 
+    function isReservationInputPage() {
+      return location.href.includes('/online/sp/travelbag/reservation/search/');
+    }
+
+    function checkInputPageCheckboxes() {
+      if (!isReservationInputPage()) return false;
+
+      const targets = [
+        document.querySelector('#checker-sameReserv, input[name="sameReserv"]'),
+        document.querySelector('#checker-agreement, input[name="agreement"]')
+      ].filter(Boolean);
+
+      let changed = false;
+
+      targets.forEach(chk => {
+        if (!chk.checked) {
+          chk.click();
+          changed = true;
+        }
+      });
+
+      return changed;
+    }
+
+    function installInputPageNextAutoCheck() {
+      if (win.__tdr_priv_input_next_autocheck_installed) return;
+      win.__tdr_priv_input_next_autocheck_installed = true;
+
+      document.addEventListener('click', function (e) {
+        if (!(e.target instanceof Element)) return;
+
+        const btn = e.target.closest('a, button, input[type="button"], input[type="submit"]');
+        if (!btn) return;
+        if (!isReservationInputPage()) return;
+
+        const text = normalizePopupText(btn.innerText || btn.value || '');
+        const isNext = text === '次へ' || btn.id === 'btnNext' || btn.classList.contains('next');
+
+        if (!isNext) return;
+
+        checkInputPageCheckboxes();
+      }, true);
+    }
+
+    function normalizePopupText(s) {
+      return String(s || '').replace(/\s+/g, '').trim();
+    }
+
+    function isVisiblePopup(el) {
+      if (!el) return false;
+
+      const style = getComputedStyle(el);
+
+      return style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        Number(style.opacity || 1) !== 0;
+    }
+
+    function findVisiblePopupBySelectors(selectors) {
+      return selectors
+        .map(selector => document.querySelector(selector))
+        .find(el => el && isVisiblePopup(el)) || null;
+    }
+
+    function findNextButtonInNoticePopup(popup) {
+      if (!popup) return null;
+
+      return popup.querySelector('#btnNext') ||
+        popup.querySelector('button.js-conf.next') ||
+        popup.querySelector('a.next, button.next, .next') ||
+        Array.from(popup.querySelectorAll('a, button, input[type="button"], input[type="submit"]'))
+          .find(btn => normalizePopupText(btn.innerText || btn.value || '') === '次へ') ||
+        null;
+    }
+
+    function findReservationNoticePopup() {
+      const popup = findVisiblePopupBySelectors([
+        '#noticeMessage-popup',
+        '#noticeMessage'
+      ]);
+
+      if (!popup) return null;
+
+      const text = normalizePopupText(popup.innerText || popup.textContent || '');
+
+      if (!text.includes('ご予約の際のご注意')) return null;
+      if (!popup.querySelector('#accept, input[name="accept"]')) return null;
+      if (!findNextButtonInNoticePopup(popup)) return null;
+
+      return popup;
+    }
+
+    function processReservationNoticePopup() {
+      const popup = findReservationNoticePopup();
+
+      if (!popup) {
+        reservationNoticePopupActive = false;
+        return;
+      }
+
+      if (reservationNoticePopupActive) return;
+      reservationNoticePopupActive = true;
+
+      const accept = popup.querySelector('#accept, input[name="accept"]');
+
+      if (!accept) {
+        reservationNoticePopupActive = false;
+        return;
+      }
+
+      if (!accept.checked) {
+        accept.click();
+      }
+
+      setTimeout(() => {
+        const latestPopup = findReservationNoticePopup();
+
+        if (!latestPopup) {
+          reservationNoticePopupActive = false;
+          return;
+        }
+
+        const nextBtn = findNextButtonInNoticePopup(latestPopup);
+
+        if (!nextBtn) {
+          reservationNoticePopupActive = false;
+          return;
+        }
+
+        console.log('[宿泊特典] ご予約の際のご注意: 同意ON → 次へ');
+        nextBtn.click();
+
+        setTimeout(() => {
+          reservationNoticePopupActive = false;
+        }, 300);
+      }, 100);
+    }
+
+    function findDuplicationTimePopup() {
+      const popup = findVisiblePopupBySelectors([
+        '#duplicationTimeDialog-popup',
+        '#duplicationTimeDialog'
+      ]);
+
+      if (!popup) return null;
+
+      const text = normalizePopupText(popup.innerText || popup.textContent || '');
+
+      if (!text.includes('選択されたご予約時間が')) return null;
+      if (!text.includes('下記のご予約時間と重なっています')) return null;
+      if (!text.includes('時間が重複しているご予約')) return null;
+
+      const okBtn =
+        popup.querySelector('a.next, button.next, .next') ||
+        document.querySelector('#duplicationTimeDialog a.next, #duplicationTimeDialog button.next');
+
+      if (!okBtn) return null;
+
+      return popup;
+    }
+
+    function processDuplicationTimePopup() {
+      const popup = findDuplicationTimePopup();
+
+      if (!popup) {
+        duplicationTimePopupActive = false;
+        return;
+      }
+
+      if (duplicationTimePopupActive) return;
+      duplicationTimePopupActive = true;
+
+      const okBtn =
+        popup.querySelector('a.next, button.next, .next') ||
+        document.querySelector('#duplicationTimeDialog a.next, #duplicationTimeDialog button.next');
+
+      if (!okBtn) {
+        duplicationTimePopupActive = false;
+        return;
+      }
+
+      console.log('[宿泊特典] 時間干渉警告: 確認しました');
+      okBtn.click();
+
+      setTimeout(() => {
+        duplicationTimePopupActive = false;
+      }, 300);
+    }
+
     new MutationObserver(() => {
       attachMealBarClickEvents();
       drawExclusionSwitches();
-    }).observe(document.body, { childList: true, subtree: true });
+      checkInputPageCheckboxes();
+      processReservationNoticePopup();
+      processDuplicationTimePopup();
+    }).observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'class']
+    });
 
     setInterval(() => {
       MEALS.forEach(meal => {
@@ -925,6 +1283,10 @@
     updatePanels();
     attachMealBarClickEvents();
     drawExclusionSwitches();
+    checkInputPageCheckboxes();
+    installInputPageNextAutoCheck();
+    processReservationNoticePopup();
+    processDuplicationTimePopup();
   }
 
   boot();
