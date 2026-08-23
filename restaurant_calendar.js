@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      2.86
+// @version      2.96
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -23,8 +23,10 @@ const MEALS=['朝食','昼食','夕食'];
 const PATHS=['/restaurant/weekReservation/','/restaurant/ajaxNextWeekList/','/restaurant/ajaxPreWeekList/'];
 const blocks=new Map(),commodityMeal=new Map(),mealStates=new Map(),snapshots=new Map(),vacancyHistory=new Map(),unresolved=[],errorNotifyHistory=new Map(),insuranceInherited=new Set();
 
-let panelRoot=null,notifyPanel=null,researchPanel=null,researchNotifyPanel=null,datePanel=null,autoHint='',researchPhaseHint='',refreshTimer=null,wasMaintenance=isMaintenance(),notifyState=loadNotifyState();
-let researchMode=sessionStorage.getItem(RESEARCH_KEY)==='1',researchNotifyMode=localStorage.getItem(RESEARCH_NOTIFY_KEY)==='1',researchRound=null,research857Queued=false,researchPass1Queued=false;
+let panelRoot=null,notifyPanel=null,researchPanel=null,researchNotifyPanel=null,analysisSendPanel=null,datePanel=null,autoHint='',researchPhaseHint='',refreshTimer=null,wasMaintenance=isMaintenance(),notifyState=loadNotifyState();
+let researchMode=sessionStorage.getItem(RESEARCH_KEY)==='1',researchNotifyMode=localStorage.getItem(RESEARCH_NOTIFY_KEY)!=='0',researchRound=null,research857Queued=false,researchPass1Queued=false;
+if(localStorage.getItem(RESEARCH_NOTIFY_KEY)===null)localStorage.setItem(RESEARCH_NOTIFY_KEY,'1');
+let analysisState=createAnalysisState(Date.now());
 
 function ymd(){const d=new Date();return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;}
 function nowText(){const d=new Date();return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;}
@@ -35,6 +37,89 @@ function isMaintenance(){const h=new Date().getHours();return h>=3&&h<5;}
 function existingMeals(){return [...blocks.keys()];}
 function has(obj,key){return Object.prototype.hasOwnProperty.call(obj,key);}
 function randomWaitMs(){return (Math.floor(Math.random()*21)+50)*1000;}
+
+function analysisSource(phase){return phase==='insurance'?'保険':phase==='baseline'?'8:57':phase==='pass1'?'AM9-1周目':phase==='pass2'?'AM9-2周目':'通常';}
+function hourStartAt(ts){const d=new Date(ts);d.setMinutes(0,0,0);return d.getTime();}
+function createAnalysisState(ts){return {bucketStartAt:hourStartAt(ts),startAt:ts,restaurant:'',knownMeals:new Set(),meals:{},events:[],errors:[]};}
+function analysisMeal(meal){const key=meal||'食事区分不明';if(!analysisState.meals[key])analysisState.meals[key]={success:0,errors:0,ranges:new Set(),sources:{}};return analysisState.meals[key];}
+function analysisDate(v){const d=String(v||'').replace(/\D/g,'');return d.length>=8?`${d.slice(0,4)}/${d.slice(4,6)}/${d.slice(6,8)}`:String(v||'不明');}
+function analysisShortDate(v){const d=String(v||'').replace(/\D/g,'');return d.length>=8?`${d.slice(4,6)}/${d.slice(6,8)}`:String(v||'不明');}
+function analysisDateTime(ts){const d=new Date(ts);return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;}
+function analysisTime(ts){const d=new Date(ts);return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;}
+function rollAnalysisHour(now=Date.now()){
+  if(hourStartAt(now)===analysisState.bucketStartAt)return;
+  const old=analysisState,endAt=old.bucketStartAt+3600000-1;
+  if(!sendAnalysisSnapshot(old,'自動',endAt))return;
+  analysisState=createAnalysisState(now);
+  existingMeals().forEach(meal=>analysisState.knownMeals.add(meal));
+}
+function recordAnalysisSuccess(meal,current,phase=''){
+  rollAnalysisHour();const m=analysisMeal(meal),source=analysisSource(phase);
+  analysisState.restaurant=restaurantName();analysisState.knownMeals.add(meal);m.success++;m.sources[source]=(m.sources[source]||0)+1;
+  m.ranges.add(`${analysisDate(current.weekStart)}-${analysisDate(current.weekEnd)}`);
+}
+function recordAnalysisError(meal,error,phase=''){
+  rollAnalysisHour();const m=analysisMeal(meal),at=Date.now();
+  analysisState.restaurant=restaurantName();analysisState.knownMeals.add(meal||'食事区分不明');m.errors++;
+  analysisState.errors.push({at,meal:meal||'食事区分不明',error:String(error),source:analysisSource(phase)});
+}
+function recordAnalysisChanges(changes,phase=''){
+  if(!changes?.length)return;rollAnalysisHour();const at=Date.now(),source=analysisSource(phase);
+  analysisState.restaurant=restaurantName();
+  changes.forEach(c=>{analysisState.knownMeals.add(c.meal);analysisState.events.push({at,meal:c.meal,date:c.date,time:c.time,type:c.type,from:c.from||'',to:c.to||'',source});});
+}
+function buildAnalysisLog(state,mode,endAt){
+  const lines=['[TDR_RESTAURANT_HOURLY_LOG]',`出力=${mode}`,`期間=${analysisDateTime(state.startAt)}-${analysisDateTime(endAt)}`,`レストラン=${state.restaurant||restaurantName()}`];
+  const ranges=new Set();Object.values(state.meals).forEach(m=>m.ranges.forEach(r=>ranges.add(r)));
+  lines.push(`調査期間=${ranges.size===1?[...ranges][0]:ranges.size?'複数（食事区分別）':'未取得'}`,'');
+  const mealNames=[...new Set([...state.knownMeals,...Object.keys(state.meals)])].sort((a,b)=>{const ai=MEALS.indexOf(a),bi=MEALS.indexOf(b);return (ai<0?99:ai)-(bi<0?99:bi)||a.localeCompare(b);});
+  let totalSuccess=0,totalErrors=state.errors.length,vacancy=0,full=0,added=0,deleted=0;
+  mealNames.forEach(meal=>{
+    const m=state.meals[meal]||{success:0,errors:0,ranges:new Set(),sources:{}},events=state.events.filter(e=>e.meal===meal).sort((a,b)=>a.at-b.at);
+    totalSuccess+=m.success;
+    lines.push(`【${meal}】`,`監視期間=${m.ranges.size?[...m.ranges].join(','):'未取得'}`,`読込成功=${m.success}`);
+    const sourceText=Object.entries(m.sources).map(([k,v])=>`${k}:${v}`).join(',');
+    if(sourceText)lines.push(`読込内訳=${sourceText}`);
+    lines.push(`エラー=${m.errors}`,`変化=${events.length}`);
+    if(!events.length)lines.push('変化なし');
+    else events.forEach(e=>{
+      let action='';
+      if(e.type==='added'){action=`新規追加|${e.to||'不明'}`;added++;}
+      else if(e.type==='deleted'){action='削除';deleted++;}
+      else{action=`${e.from}→${e.to}`;if(e.to==='空席')vacancy++;if(e.to==='満席')full++;}
+      lines.push(`${analysisTime(e.at)}|${analysisShortDate(e.date)}|${e.time}|${action}|${e.source}`);
+    });
+    lines.push('');
+  });
+  if(state.errors.length){
+    lines.push('【エラー】');
+    state.errors.sort((a,b)=>a.at-b.at).forEach(e=>lines.push(`${analysisTime(e.at)}|${e.meal}|${e.error}|${e.source}`));
+    lines.push('');
+  }else lines.push('【エラー】','なし','');
+  lines.push('【合計】',`読込成功=${totalSuccess}`,`エラー=${totalErrors}`,`空席化=${vacancy}`,`満席化=${full}`,`新規追加=${added}`,`削除=${deleted}`);
+  return lines.join('\n');
+}
+function splitAnalysisText(text,max=3600){
+  const out=[],lines=text.split('\n');let cur='';
+  for(const line of lines){
+    if(line.length>max){if(cur){out.push(cur);cur='';}for(let i=0;i<line.length;i+=max)out.push(line.slice(i,i+max));continue;}
+    const next=cur?`${cur}\n${line}`:line;
+    if(next.length>max){out.push(cur);cur=line;}else cur=next;
+  }
+  if(cur)out.push(cur);return out;
+}
+function sendAnalysisSnapshot(state,mode,endAt){
+  const webhook=discordWebhook('research');if(!webhook){console.warn(`[${NAME}] 解析ログ送信先 restaurantResearch 未設定`);return false;}
+  const chunks=splitAnalysisText(buildAnalysisLog(state,mode,endAt));
+  (async()=>{for(let i=0;i<chunks.length;i++){const title=chunks.length>1?`📊 在庫解析ログ ${i+1}/${chunks.length}`:'📊 在庫解析ログ';try{await fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({username:NAME,embeds:[{title,description:`\`\`\`text\n${chunks[i]}\n\`\`\``,color:BLUE}]})});}catch(e){console.error(`[${NAME}] 解析ログ送信失敗`,e);}}})();
+  console.log(`[${NAME}] 解析ログ送信：${mode}`);return true;
+}
+function manualAnalysisFlush(){
+  rollAnalysisHour();const now=Date.now(),old=analysisState;
+  if(!sendAnalysisSnapshot(old,'手動',now))return;
+  analysisState=createAnalysisState(now);existingMeals().forEach(meal=>analysisState.knownMeals.add(meal));
+}
+function analysisTick(){rollAnalysisHour();}
 
 function loadNotifyState(){
   try{const v=JSON.parse(localStorage.getItem(NOTIFY_KEY)||'null');if(v?.date===ymd()&&['vacancy','all','off'].includes(v.mode))return v;}catch{}
@@ -67,6 +152,7 @@ function refreshBlocks(){
     if(commodity)commodityMeal.set(commodity,meal);
     getState(meal);
   });
+  if(analysisState)existingMeals().forEach(meal=>analysisState.knownMeals.add(meal));
   if(researchMode)enforceResearchAutoOff();
   createPanels();
   drainUnresolved();
@@ -111,9 +197,13 @@ function createPanels(){
     researchNotifyPanel=document.createElement('div');baseButtonStyle(researchNotifyPanel);Object.assign(researchNotifyPanel.style,{order:'12',width:'127px'});
     researchNotifyPanel.title='通常通知の送信先をレストラン調査チャンネルへ切替';researchNotifyPanel.onclick=toggleResearchNotify;panelRoot.appendChild(researchNotifyPanel);
   }
+  if(!analysisSendPanel){
+    analysisSendPanel=document.createElement('div');baseButtonStyle(analysisSendPanel);Object.assign(analysisSendPanel.style,{order:'13',width:'127px',background:'#0d6efd',color:'#fff'});
+    analysisSendPanel.textContent='📤 解析ログ';analysisSendPanel.title='現在までの解析ログをレストラン調査チャンネルへ強制送信';analysisSendPanel.onclick=manualAnalysisFlush;panelRoot.appendChild(analysisSendPanel);
+  }
   if(!datePanel){
     datePanel=document.createElement('div');
-    Object.assign(datePanel.style,{order:'13',width:'127px',display:'flex',flexDirection:'column',gap:'3px'});
+    Object.assign(datePanel.style,{order:'14',width:'127px',display:'flex',flexDirection:'column',gap:'3px'});
     const rows=[[['当',0],['翌',1],['3',3],['5',5]],[['7',7],['14',14],['21',21],['28',28]],[['35',35],['42',42],['49',49],['56',56]],[['63',63],['70',70],['77',77],['末','end']]];
     rows.forEach(items=>{
       const row=document.createElement('div');Object.assign(row.style,{display:'flex',gap:'3px'});
@@ -234,7 +324,7 @@ function recordError(meal,error,count=true,notify=true){
   if(count&&!s.forcedStopError){s.consecutiveErrors++;console.warn(`[${NAME}] ${meal} 連続エラー ${s.consecutiveErrors}/${MAX_ERRORS}：${error}`);if(s.consecutiveErrors>=MAX_ERRORS){forceStopError(meal,error);return true;}}
   if(notify)sendErrorDiscord(meal,error);renderPanels();return false;
 }
-function reportError(meal,error,researchPhase='',count=true){const stopped=recordError(meal,error,count,!researchPhase);if(researchPhase&&!stopped)sendResearchErrorDiscord(meal,researchPhase,error);return stopped;}
+function reportError(meal,error,researchPhase='',count=true){recordAnalysisError(meal,error,researchPhase);const stopped=recordError(meal,error,count,!researchPhase);if(researchPhase&&!stopped)sendResearchErrorDiscord(meal,researchPhase,error);return stopped;}
 function resetErrors(meal){const s=getState(meal);if(s.consecutiveErrors)console.log(`[${NAME}] ${meal} 正常読込 / 連続エラー ${s.consecutiveErrors} → 0`);s.consecutiveErrors=0;s.forcedStopError=false;s.error403=false;s.pendingError=false;}
 function forceStopError(meal,lastError){
   const s=getState(meal);if(s.forcedStopError)return;s.forcedStopError=true;s.enabled=false;clearTimer(s);localStorage.setItem(AUTO_PREFIX+meal,'0');
@@ -280,7 +370,7 @@ function runResearchRound(phase,pendingBefore=new Set()){
   meals.forEach(meal=>{
     const s=getState(meal);
     if(phase==='insurance'&&pendingBefore.has(meal)&&s.pending>0){insuranceInherited.add(meal);return;}
-    if(s.pending){sendResearchErrorDiscord(meal,phase,'既存通信がPending中');markResearchDone(meal,phase);return;}
+    if(s.pending){recordAnalysisError(meal,'既存通信がPending中',phase);sendResearchErrorDiscord(meal,phase,'既存通信がPending中');markResearchDone(meal,phase);return;}
     if(!fireSameWeek(meal,true,phase))markResearchDone(meal,phase);
   });
   finishResearchRoundIfReady();
@@ -310,12 +400,12 @@ function finishResearchRoundIfReady(){
 function researchCompare(meal,meta,current,phase){
   const data=loadResearchBaseline(),base=data.entries?.[meal],key=snapshotKey(meta,meal,current);
   if(!base||base.key!==key){
-    sendResearchErrorDiscord(meal,phase,!base?'比較基準スナップショットなし':'比較基準と検索条件が一致しません');
+    const error=!base?'比較基準スナップショットなし':'比較基準と検索条件が一致しません';recordAnalysisError(meal,error,phase);sendResearchErrorDiscord(meal,phase,error);
     data.entries[meal]={source:phase,key,weekStart:current.weekStart,weekEnd:current.weekEnd,slots:current.slots,savedAt:Date.now()};
     saveResearchBaselineData(data);snapshots.set(key,current.slots);seedVacancyHistory(meal,current);return;
   }
   const changes=trackVacancyTransitions(compareSlotMaps(base.slots,current.slots,meal));
-  sendResearchResult(meal,current,changes,phase==='pass1'?1:2);
+  recordAnalysisChanges(changes,phase);sendResearchResult(meal,current,changes,phase==='pass1'?1:2);
   data.entries[meal]={source:phase,key,weekStart:current.weekStart,weekEnd:current.weekEnd,slots:current.slots,savedAt:Date.now()};
   saveResearchBaselineData(data);snapshots.set(key,current.slots);
 }
@@ -377,7 +467,7 @@ XMLHttpRequest.prototype.send=function(body){
     meta.pendingTimer=setTimeout(()=>{
       const pendingMeal=meal||resolveMeal(commodity);
       if(pendingMeal){const s=getState(pendingMeal);s.pendingError=true;requestError(pendingMeal,meta,'Pending 5分超過');}
-      else sendErrorDiscord('食事区分不明','Pending 5分超過');
+      else{recordAnalysisError('食事区分不明','Pending 5分超過','');sendErrorDiscord('食事区分不明','Pending 5分超過');}
       renderPanels();
     },PENDING_ERROR_MS);
     this.addEventListener('loadend',()=>{
@@ -404,13 +494,13 @@ function finishRequest(meal,meta,status,text){
       refreshBlocks();
       if(!blocks.has(meal)){clearTimer(s);console.log(`[${NAME}] ${meal} 対象DOMなしのため解析スキップ`);}
       else{
-        const current=readCurrentSlots(meal);
+        const current=readCurrentSlots(meal);recordAnalysisSuccess(meal,current,meta.researchPhase);
         if(meta.researchPhase==='insurance')saveResearchBase(meal,meta,current,'保険');
         else if(meta.researchPhase==='baseline')saveResearchBase(meal,meta,current,'8:57');
         else if(meta.researchPhase==='pass1'||meta.researchPhase==='pass2')researchCompare(meal,meta,current,meta.researchPhase);
         else{
           const changes=trackVacancyTransitions(compareAndSave(meta,meal,current));
-          if(changes.length)sendChangesDiscord(changes);
+          recordAnalysisChanges(changes,'');if(changes.length)sendChangesDiscord(changes);
         }
         resetErrors(meal);
       }
@@ -495,6 +585,6 @@ function init(){
   if(document.body)new MutationObserver(ms=>{if(ms.some(m=>!panelRoot?.contains(m.target)))queueRefresh();}).observe(document.body,{childList:true,subtree:true});
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
-setInterval(()=>{maintenanceTick();researchTick();renderPanels();},UI_TICK);
-console.log(`[${NAME}] v2.86 起動`);
+setInterval(()=>{maintenanceTick();researchTick();analysisTick();renderPanels();},UI_TICK);
+console.log(`[${NAME}] v2.96 起動`);
 })();
