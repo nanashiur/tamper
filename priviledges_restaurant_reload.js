@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.66
+// @version      2.67
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -1159,22 +1159,97 @@
     }
 
     function isReservationInputPage() {
-      return location.href.includes('/online/sp/travelbag/reservation/search/');
+      if (!location.pathname.includes('/online/sp/travelbag/reservation/search/')) return false;
+      if (location.hash === '#page_input') return true;
+
+      const text = document.body.innerText || '';
+      return text.includes('当日の連絡先') &&
+        text.includes('予約者と同じ') &&
+        text.includes('同意する');
+    }
+
+    function isElementVisible(el) {
+      if (!el) return false;
+
+      const st = getComputedStyle(el);
+      return st.display !== 'none' &&
+        st.visibility !== 'hidden' &&
+        Number(st.opacity || 1) !== 0;
+    }
+
+    function isInPopup(el) {
+      return !!el.closest('#noticeMessage, #noticeMessage-popup, #duplicationTimeDialog, #duplicationTimeDialog-popup');
+    }
+
+    function findVisibleCheckboxByText(labelText) {
+      const target = normalizePopupText(labelText);
+
+      const candidates = Array.from(document.querySelectorAll('label, span, div, td, th, p'))
+        .filter(el => {
+          if (!el || isInPopup(el)) return false;
+          if (!isElementVisible(el)) return false;
+
+          const text = normalizePopupText(el.innerText || el.textContent || '');
+          if (!text.includes(target)) return false;
+
+          return true;
+        })
+        .sort((a, b) => {
+          const ta = normalizePopupText(a.innerText || a.textContent || '');
+          const tb = normalizePopupText(b.innerText || b.textContent || '');
+          return ta.length - tb.length;
+        });
+
+      for (const el of candidates) {
+        if (el.htmlFor) {
+          const byFor = document.getElementById(el.htmlFor);
+          if (byFor && byFor.matches('input[type="checkbox"]')) return byFor;
+        }
+
+        const inside = el.querySelector?.('input[type="checkbox"]');
+        if (inside) return inside;
+
+        const label = el.closest('label');
+        if (label) {
+          const labelInside = label.querySelector('input[type="checkbox"]');
+          if (labelInside) return labelInside;
+
+          if (label.htmlFor) {
+            const byFor = document.getElementById(label.htmlFor);
+            if (byFor && byFor.matches('input[type="checkbox"]')) return byFor;
+          }
+        }
+
+        const area = el.closest('tr, li, dl, div, section, fieldset, form');
+        const nearby = area?.querySelector('input[type="checkbox"]');
+
+        if (nearby && !isInPopup(nearby)) return nearby;
+      }
+
+      return null;
+    }
+
+    function findInputCheckboxes() {
+      const sameReserv =
+        document.querySelector('#checker-sameReserv, input[name="sameReserv"]') ||
+        findVisibleCheckboxByText('予約者と同じ');
+
+      const agreement =
+        document.querySelector('#checker-agreement, input[name="agreement"]') ||
+        findVisibleCheckboxByText('同意する');
+
+      return [sameReserv, agreement].filter(Boolean).filter(el => !isInPopup(el));
     }
 
     function checkInputPageCheckboxes() {
       if (!state.autoCheckEnabled) return false;
       if (!isReservationInputPage()) return false;
 
-      const targets = [
-        document.querySelector('#checker-sameReserv, input[name="sameReserv"]'),
-        document.querySelector('#checker-agreement, input[name="agreement"]')
-      ].filter(Boolean);
-
+      const targets = findInputCheckboxes();
       let changed = false;
 
       targets.forEach(chk => {
-        if (!chk.checked) {
+        if (!chk.checked && !chk.disabled) {
           chk.click();
           changed = true;
         }
@@ -1309,26 +1384,24 @@
     }
 
     function findDuplicationTimePopup() {
-      const popup = findVisiblePopupBySelectors([
-        '#duplicationTimeDialog-popup',
-        '#duplicationTimeDialog'
-      ]);
+      const popup = document.querySelector('#duplicationTimeDialog-popup.ui-popup-active');
+      const dialog = document.querySelector('#duplicationTimeDialog');
 
-      if (!popup) return null;
+      if (!popup || !dialog) return null;
+      if (!isVisiblePopup(popup)) return null;
+      if (!isVisiblePopup(dialog)) return null;
 
-      const text = normalizePopupText(popup.innerText || popup.textContent || '');
+      const text = normalizePopupText(dialog.innerText || dialog.textContent || '');
 
       if (!text.includes('選択されたご予約時間が')) return null;
       if (!text.includes('下記のご予約時間と重なっています')) return null;
       if (!text.includes('時間が重複しているご予約')) return null;
 
-      const okBtn =
-        popup.querySelector('a.next, button.next, .next') ||
-        document.querySelector('#duplicationTimeDialog a.next, #duplicationTimeDialog button.next');
+      const okBtn = dialog.querySelector('a.next, button.next, .next');
 
       if (!okBtn) return null;
 
-      return popup;
+      return dialog;
     }
 
     function processDuplicationTimePopup() {
@@ -1337,9 +1410,9 @@
         return;
       }
 
-      const popup = findDuplicationTimePopup();
+      const dialog = findDuplicationTimePopup();
 
-      if (!popup) {
+      if (!dialog) {
         duplicationTimePopupActive = false;
         return;
       }
@@ -1347,9 +1420,7 @@
       if (duplicationTimePopupActive) return;
       duplicationTimePopupActive = true;
 
-      const okBtn =
-        popup.querySelector('a.next, button.next, .next') ||
-        document.querySelector('#duplicationTimeDialog a.next, #duplicationTimeDialog button.next');
+      const okBtn = dialog.querySelector('a.next, button.next, .next');
 
       if (!okBtn) {
         duplicationTimePopupActive = false;
