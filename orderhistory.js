@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📋️🏨🍴予約履歴カウンター
-// @version      1.80
+// @version      2.00
 // @match        https://reserve.tokyodisneyresort.jp/order/list/*
 // @match        https://reserve.tokyodisneyresort.jp/orderhistory/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/orderhistory.js
@@ -370,8 +370,12 @@
 
     panel.style.cssText = [
       'position:fixed',
-      'top:125px',
-      'right:8px',
+      'top:0!important',
+      'right:0!important',
+      'bottom:auto!important',
+      'left:auto!important',
+      'margin:0!important',
+      'transform:none!important',
       'z-index:2147483647',
       'width:max-content',
       'min-width:0',
@@ -424,7 +428,7 @@
     `;
 
     document.head.appendChild(style);
-    document.body.appendChild(panel);
+    document.documentElement.appendChild(panel);
 
     outputProductLists();
 
