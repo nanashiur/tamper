@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📋️🏨🍴予約履歴カウンター
-// @version      1.40
+// @version      1.70
 // @match        https://reserve.tokyodisneyresort.jp/order/list/*
 // @match        https://reserve.tokyodisneyresort.jp/orderhistory/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/orderhistory.js
@@ -13,7 +13,7 @@
   'use strict';
 
   const PANEL_ID = '__tdr_order_count_panel';
-  const STORAGE_PREFIX = '__tdr_order_count_v1_';
+  const STORAGE_PREFIX = '__tdr_order_count_v2_';
 
   function cleanText(element) {
     return (element?.textContent || '')
@@ -213,7 +213,7 @@
   function readSaved(condition, page) {
     try {
       return JSON.parse(
-        localStorage.getItem(
+        sessionStorage.getItem(
           `${STORAGE_PREFIX}${condition}_${page}`
         )
       );
@@ -225,43 +225,83 @@
   function saveCurrent(condition, page, count) {
     if (page !== 1 && page !== 2) return;
 
+    if (page === 1) {
+      sessionStorage.removeItem(
+        `${STORAGE_PREFIX}${condition}_1`
+      );
+
+      sessionStorage.removeItem(
+        `${STORAGE_PREFIX}${condition}_2`
+      );
+
+      sessionStorage.setItem(
+        `${STORAGE_PREFIX}${condition}_1`,
+        JSON.stringify(count)
+      );
+
+      console.log(
+        '[予約履歴カウンター] 新しい集計を開始：' +
+        '1・2ページの旧データを消去しました'
+      );
+
+      return;
+    }
+
     const previous = readSaved(condition, page);
 
     if (
       previous &&
       previous.fingerprint !== count.fingerprint
     ) {
-      const otherPage = page === 1 ? 2 : 1;
-
-      localStorage.removeItem(
-        `${STORAGE_PREFIX}${condition}_${otherPage}`
+      sessionStorage.removeItem(
+        `${STORAGE_PREFIX}${condition}_1`
       );
 
       console.log(
-        `[予約履歴カウンター] ` +
-        `${page}ページの変更を検出：` +
-        `${otherPage}ページを未取得に戻しました`
+        '[予約履歴カウンター] 2ページの変更を検出：' +
+        '1ページを未取得に戻しました'
       );
     }
 
-    localStorage.setItem(
-      `${STORAGE_PREFIX}${condition}_${page}`,
+    sessionStorage.setItem(
+      `${STORAGE_PREFIX}${condition}_2`,
       JSON.stringify(count)
     );
   }
 
-  function formatPage(page, count, currentPage) {
-    const mark = page === currentPage ? '●' : '○';
-
+  function formatCountRow(label, count, rowClass = '') {
     if (!count) {
-      return `${mark} ${page}ページ：未取得`;
+      return `
+        <div class="tdr-count-row ${rowClass}">
+          <span class="tdr-count-label">
+            ${label}
+          </span>
+          <span class="tdr-count-missing">
+            未取得
+          </span>
+        </div>
+      `;
     }
 
-    return (
-      `${mark} ${page}ページ：` +
-      `🏨 ${count.hotel}件　` +
-      `🍴 ${count.restaurant}件`
-    );
+    return `
+      <div class="tdr-count-row ${rowClass}">
+        <span class="tdr-count-label">
+          ${label}
+        </span>
+        <span class="tdr-count-icon">
+          🏨
+        </span>
+        <span class="tdr-count-value">
+          ${count.hotel}件
+        </span>
+        <span class="tdr-count-icon">
+          🍴
+        </span>
+        <span class="tdr-count-value">
+          ${count.restaurant}件
+        </span>
+      </div>
+    `;
   }
 
   function render() {
@@ -299,14 +339,12 @@
 
     const total =
       page1 && page2
-        ? (
-          `合計：` +
-          `🏨 ${page1.hotel + page2.hotel}件　` +
-          `🍴 ${
+        ? {
+          hotel: page1.hotel + page2.hotel,
+          restaurant:
             page1.restaurant + page2.restaurant
-          }件`
-        )
-        : '合計：1・2ページを開くと表示';
+        }
+        : null;
 
     const panel = document.createElement('div');
 
@@ -316,29 +354,41 @@
       <div class="tdr-count-title">
         予約件数（ご利用済み除外）
       </div>
-      <div>
-        ${formatPage(1, page1, page)}
-      </div>
-      <div>
-        ${formatPage(2, page2, page)}
-      </div>
-      <div class="tdr-count-total">
-        ${total}
-      </div>
+
+      ${formatCountRow(
+        `${page === 1 ? '●' : '○'} 1ページ：`,
+        page1
+      )}
+
+      ${formatCountRow(
+        `${page === 2 ? '●' : '○'} 2ページ：`,
+        page2
+      )}
+
+      ${formatCountRow(
+        '合計：',
+        total,
+        'tdr-count-total'
+      )}
     `;
 
     panel.style.cssText = [
       'position:fixed',
-      'top:12px',
-      'right:12px',
+      'top:140px',
+      'right:8px',
       'z-index:2147483647',
-      'min-width:310px',
-      'padding:12px 14px',
+      'width:max-content',
+      'min-width:0',
+      'max-width:calc(100vw - 16px)',
+      'box-sizing:border-box',
+      'padding:8px 10px',
       'border:2px solid #23416d',
       'border-radius:8px',
-      'background:#fff',
+      'background:rgba(255,255,255,.84)',
+      'backdrop-filter:blur(2px)',
       'color:#17345d',
-      'font:700 14px/1.8 sans-serif',
+      'white-space:nowrap',
+      'font:700 13px/1.65 sans-serif',
       'box-shadow:0 3px 12px rgba(0,0,0,.25)'
     ].join(';');
 
@@ -349,6 +399,31 @@
         font-size:15px;
         border-bottom:1px solid #b9c8dc;
         margin-bottom:4px;
+      }
+
+      #${PANEL_ID} .tdr-count-row {
+        display:grid;
+        grid-template-columns:
+          6.4em 1.4em 3em 1.4em 3em;
+        column-gap:2px;
+        align-items:center;
+      }
+
+      #${PANEL_ID} .tdr-count-label {
+        text-align:left;
+      }
+
+      #${PANEL_ID} .tdr-count-icon {
+        text-align:center;
+      }
+
+      #${PANEL_ID} .tdr-count-value {
+        text-align:left;
+      }
+
+      #${PANEL_ID} .tdr-count-missing {
+        grid-column:2 / 6;
+        text-align:left;
       }
 
       #${PANEL_ID} .tdr-count-total {
