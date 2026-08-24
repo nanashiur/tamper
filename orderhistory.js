@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📋️🏨🍴予約履歴カウンター
-// @version      1.70
+// @version      1.80
 // @match        https://reserve.tokyodisneyresort.jp/order/list/*
 // @match        https://reserve.tokyodisneyresort.jp/orderhistory/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/orderhistory.js
@@ -204,7 +204,7 @@
     ].join('｜'));
 
     console.log([
-      `【${title}一覧：${items.length}件（ご利用済み除外）】`,
+      `【${title}一覧：${items.length}件】`,
       `No｜受付番号｜利用日｜${contentKey}`,
       ...lines
     ].join('\n'));
@@ -351,22 +351,18 @@
     panel.id = PANEL_ID;
 
     panel.innerHTML = `
-      <div class="tdr-count-title">
-        予約件数（ご利用済み除外）
-      </div>
-
       ${formatCountRow(
-        `${page === 1 ? '●' : '○'} 1ページ：`,
+        page === 1 ? '❶' : '①',
         page1
       )}
 
       ${formatCountRow(
-        `${page === 2 ? '●' : '○'} 2ページ：`,
+        page === 2 ? '❷' : '②',
         page2
       )}
 
       ${formatCountRow(
-        '合計：',
+        '計',
         total,
         'tdr-count-total'
       )}
@@ -374,37 +370,31 @@
 
     panel.style.cssText = [
       'position:fixed',
-      'top:140px',
+      'top:125px',
       'right:8px',
       'z-index:2147483647',
       'width:max-content',
       'min-width:0',
       'max-width:calc(100vw - 16px)',
       'box-sizing:border-box',
-      'padding:8px 10px',
+      'padding:5px 7px',
       'border:2px solid #23416d',
       'border-radius:8px',
       'background:rgba(255,255,255,.84)',
       'backdrop-filter:blur(2px)',
       'color:#17345d',
       'white-space:nowrap',
-      'font:700 13px/1.65 sans-serif',
+      'font:700 13px/1.45 sans-serif',
       'box-shadow:0 3px 12px rgba(0,0,0,.25)'
     ].join(';');
 
     const style = document.createElement('style');
 
     style.textContent = `
-      #${PANEL_ID} .tdr-count-title {
-        font-size:15px;
-        border-bottom:1px solid #b9c8dc;
-        margin-bottom:4px;
-      }
-
       #${PANEL_ID} .tdr-count-row {
         display:grid;
         grid-template-columns:
-          6.4em 1.4em 3em 1.4em 3em;
+          1.6em 1.4em 3em 1.4em 3em;
         column-gap:2px;
         align-items:center;
       }
@@ -428,8 +418,8 @@
 
       #${PANEL_ID} .tdr-count-total {
         border-top:1px solid #b9c8dc;
-        margin-top:4px;
-        padding-top:4px;
+        margin-top:2px;
+        padding-top:2px;
       }
     `;
 
@@ -441,8 +431,7 @@
     console.log(
       `[予約履歴カウンター] ${page}ページ：` +
       `ホテル${currentCount.hotel}件 / ` +
-      `レストラン${currentCount.restaurant}件` +
-      `（ご利用済み除外）`
+      `レストラン${currentCount.restaurant}件`
     );
 
     return true;
