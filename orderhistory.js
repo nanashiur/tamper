@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         📋️🏨🍴予約履歴カウンター
-// @version      1.31
+// @version      1.40
 // @match        https://reserve.tokyodisneyresort.jp/order/list/*
 // @match        https://reserve.tokyodisneyresort.jp/orderhistory/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/orderhistory.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/main/orderhistory.js
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        none
 // ==/UserScript==
 
@@ -16,11 +16,16 @@
   const STORAGE_PREFIX = '__tdr_order_count_v1_';
 
   function cleanText(element) {
-    return (element?.textContent || '').replace(/\s+/g, ' ').trim();
+    return (element?.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   function getCurrentPage() {
-    const urlPage = new URL(location.href).searchParams.get('pagingNo');
+    const urlPage = new URL(location.href)
+      .searchParams
+      .get('pagingNo');
+
     const formPage = document.querySelector(
       '#toDetailForm input[name="pagingNo"]'
     )?.value;
@@ -44,14 +49,38 @@
   function countCurrentPage() {
     let hotel = 0;
     let restaurant = 0;
+    const fingerprint = [];
 
     document
       .querySelectorAll(
-        '.area-page-transition table.module-table tr:not(.heading)'
+        '.area-page-transition ' +
+        'table.module-table tr:not(.heading)'
       )
       .forEach(row => {
         const isUsed = [...row.querySelectorAll('.status')]
-          .some(status => cleanText(status).includes('ご利用済み'));
+          .some(status =>
+            cleanText(status).includes('ご利用済み')
+          );
+
+        const section = row.closest('.section-module');
+
+        const receiptNo = cleanText(
+          section?.querySelector('.reserve-number')
+        ).match(/\d+/)?.[0] || '';
+
+        const type = row.querySelector('.ico-hotel-bl')
+          ? 'hotel'
+          : row.querySelector('.ico-restaurant-bl')
+            ? 'restaurant'
+            : 'other';
+
+        fingerprint.push([
+          receiptNo,
+          type,
+          cleanText(row.querySelector('td:last-child')),
+          getProductName(row),
+          isUsed ? 'used' : 'active'
+        ].join('|'));
 
         if (isUsed) return;
 
@@ -64,11 +93,16 @@
         }
       });
 
-    return { hotel, restaurant };
+    return {
+      hotel,
+      restaurant,
+      fingerprint: fingerprint.join('\n')
+    };
   }
 
   function getProductName(row) {
     const cell = row.querySelector('th');
+
     if (!cell) return '';
 
     const copy = cell.cloneNode(true);
@@ -134,23 +168,46 @@
           });
       });
 
-    console.log(
-      `【ホテル一覧：${hotels.length}件（ご利用済み除外）】`
-    );
-
-    console.table(
+    outputCompactList(
+      'ホテル',
       hotels,
-      ['№', '受付番号', '利用日', 'ホテル・内容']
+      'ホテル・内容'
     );
 
-    console.log(
-      `【レストラン一覧：${restaurants.length}件（ご利用済み除外）】`
-    );
-
-    console.table(
+    outputCompactList(
+      'レストラン',
       restaurants,
-      ['№', '受付番号', '利用日', 'レストラン・内容']
+      'レストラン・内容'
     );
+  }
+
+  function compactDate(dateText) {
+    const match = dateText.match(
+      /(\d{4})年(\d{1,2})月(\d{1,2})日/
+    );
+
+    if (!match) return dateText;
+
+    return (
+      `${match[1]}/` +
+      `${match[2].padStart(2, '0')}/` +
+      `${match[3].padStart(2, '0')}`
+    );
+  }
+
+  function outputCompactList(title, items, contentKey) {
+    const lines = items.map(item => [
+      String(item['№']).padStart(2, '0'),
+      item.受付番号,
+      compactDate(item.利用日),
+      item[contentKey]
+    ].join('｜'));
+
+    console.log([
+      `【${title}一覧：${items.length}件（ご利用済み除外）】`,
+      `No｜受付番号｜利用日｜${contentKey}`,
+      ...lines
+    ].join('\n'));
   }
 
   function readSaved(condition, page) {
@@ -167,6 +224,25 @@
 
   function saveCurrent(condition, page, count) {
     if (page !== 1 && page !== 2) return;
+
+    const previous = readSaved(condition, page);
+
+    if (
+      previous &&
+      previous.fingerprint !== count.fingerprint
+    ) {
+      const otherPage = page === 1 ? 2 : 1;
+
+      localStorage.removeItem(
+        `${STORAGE_PREFIX}${condition}_${otherPage}`
+      );
+
+      console.log(
+        `[予約履歴カウンター] ` +
+        `${page}ページの変更を検出：` +
+        `${otherPage}ページを未取得に戻しました`
+      );
+    }
 
     localStorage.setItem(
       `${STORAGE_PREFIX}${condition}_${page}`,
@@ -189,19 +265,27 @@
   }
 
   function render() {
-    if (document.getElementById(PANEL_ID)) return;
+    if (document.getElementById(PANEL_ID)) {
+      return true;
+    }
 
     const list = document.querySelector(
       '.area-page-transition'
     );
 
-    if (!list) return;
+    if (!list) {
+      return false;
+    }
 
     const page = getCurrentPage();
     const condition = getDisplayCondition();
     const currentCount = countCurrentPage();
 
-    saveCurrent(condition, page, currentCount);
+    saveCurrent(
+      condition,
+      page,
+      currentCount
+    );
 
     const page1 =
       page === 1
@@ -218,7 +302,9 @@
         ? (
           `合計：` +
           `🏨 ${page1.hotel + page2.hotel}件　` +
-          `🍴 ${page1.restaurant + page2.restaurant}件`
+          `🍴 ${
+            page1.restaurant + page2.restaurant
+          }件`
         )
         : '合計：1・2ページを開くと表示';
 
@@ -230,9 +316,15 @@
       <div class="tdr-count-title">
         予約件数（ご利用済み除外）
       </div>
-      <div>${formatPage(1, page1, page)}</div>
-      <div>${formatPage(2, page2, page)}</div>
-      <div class="tdr-count-total">${total}</div>
+      <div>
+        ${formatPage(1, page1, page)}
+      </div>
+      <div>
+        ${formatPage(2, page2, page)}
+      </div>
+      <div class="tdr-count-total">
+        ${total}
+      </div>
     `;
 
     panel.style.cssText = [
@@ -277,15 +369,43 @@
       `レストラン${currentCount.restaurant}件` +
       `（ご利用済み除外）`
     );
+
+    return true;
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener(
-      'DOMContentLoaded',
-      render,
-      { once: true }
+  function start() {
+    console.log(
+      '[予約履歴カウンター] 起動：' +
+      '予約一覧の表示を待っています'
     );
-  } else {
-    render();
+
+    if (render()) return;
+
+    const observer = new MutationObserver(() => {
+      if (!render()) return;
+
+      observer.disconnect();
+    });
+
+    observer.observe(
+      document.documentElement || document,
+      {
+        childList: true,
+        subtree: true
+      }
+    );
+
+    setTimeout(() => {
+      observer.disconnect();
+
+      if (!document.getElementById(PANEL_ID)) {
+        console.warn(
+          '[予約履歴カウンター] ' +
+          '予約一覧を検出できませんでした'
+        );
+      }
+    }, 120000);
   }
+
+  start();
 })();
