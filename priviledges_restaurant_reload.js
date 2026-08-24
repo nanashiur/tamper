@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.67
+// @version      2.68
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -14,13 +14,14 @@
   const win = window;
 
   const VACANCY_ICON = '❤️';
-  const VACANCY_COLOR = 0xff0000;
-  const DIFF_ICON = '💙';
-  const FRAME_ICON = '🔹';
+  const FULL_ICON = '🖤';
+  const ABSORB_ICON = '💙';
+  const FRAME_ICON = '🔷';
   const DIFF_COLOR = 0x007bff;
   const ERROR_ICON = '🟠';
   const ERROR_COLOR = 0xffa500;
   const SNAPSHOT_KEY = 'tdr_priv_diff_snapshots_v1';
+  const LAST_DIFF_EVENT_KEY = 'tdr_priv_last_diff_event';
   const AUTO_CHECK_KEY = 'tdr_priv_autoCheckEnabled';
   const AUTO_NOTICE_KEY = 'tdr_priv_autoNoticeEnabled';
   const AUTO_DUPLICATION_KEY = 'tdr_priv_autoDuplicationEnabled';
@@ -432,6 +433,8 @@
 
     function formatStatusForNotice(status) {
       if (status === '空席') return `${VACANCY_ICON}空席`;
+      if (status === '満席') return `${FULL_ICON}満席`;
+      if (status === '吸収') return `${ABSORB_ICON}吸収`;
       return status || '不明';
     }
 
@@ -485,38 +488,105 @@
       return map;
     }
 
-    function makeDiffLine(type, time, oldRow, curRow) {
-      if (type === 'absorb') {
-        return `${time} ${DIFF_ICON}吸収（${formatStatusForNotice(oldRow?.status)}）`;
-      }
+    function copyDiffRow(row) {
+      if (!row) return null;
 
-      if (type === 'release') {
-        return `${time} ${DIFF_ICON}解除（${formatStatusForNotice(curRow?.status)}）`;
-      }
-
-      if (type === 'add') {
-        return `${time} ${FRAME_ICON}新規（${formatStatusForNotice(curRow?.status)}）`;
-      }
-
-      if (type === 'delete') {
-        return `${time} ${FRAME_ICON}削除`;
-      }
-
-      return `${time} ${formatStatusForNotice(oldRow?.status)} → ${formatStatusForNotice(curRow?.status)}`;
+      return {
+        time: row.time,
+        status: row.status,
+        statusText: formatStatusForNotice(row.status),
+        salesStatus: row.salesStatus,
+        openNumKey: row.openNumKey,
+        commodityCD: row.commodityCD,
+        commodityDisplay: row.commodityDisplay
+      };
     }
 
-    function buildDiffTitle(restaurantName, mealName, ajaxOptions) {
+    function makeDiffChange(type, time, oldRow, curRow) {
+      let line = '';
+
+      if (type === 'add') {
+        line = `${time} ${FRAME_ICON}新規（${formatStatusForNotice(curRow?.status)}）`;
+      } else if (type === 'delete') {
+        line = `${time} ${FRAME_ICON}削除（前: ${formatStatusForNotice(oldRow?.status)}）`;
+      } else if (type === 'absorb') {
+        line = `${time} ${ABSORB_ICON}吸収（前: ${formatStatusForNotice(oldRow?.status)}）`;
+      } else if (type === 'release') {
+        line = `${time} ${ABSORB_ICON}解除（${formatStatusForNotice(curRow?.status)}）`;
+      } else {
+        line = `${time} ${formatStatusForNotice(oldRow?.status)} → ${formatStatusForNotice(curRow?.status)}`;
+      }
+
+      return {
+        time,
+        type,
+        line,
+        before: copyDiffRow(oldRow),
+        after: copyDiffRow(curRow)
+      };
+    }
+
+    function isStructuralDiff(type) {
+      return type === 'add' || type === 'delete' || type === 'absorb' || type === 'release';
+    }
+
+    function chooseDiffTitleIcon(noticeGroups) {
+      const changes = noticeGroups.flatMap(group => group.changes || []);
+      if (changes.some(c => c.type === 'add' || c.type === 'delete')) return FRAME_ICON;
+      if (changes.some(c => c.type === 'absorb' || c.type === 'release')) return ABSORB_ICON;
+      if (changes.some(c => c.after?.status === '空席')) return VACANCY_ICON;
+      if (changes.some(c => c.after?.status === '満席')) return FULL_ICON;
+      return FRAME_ICON;
+    }
+
+    function buildDiffTitle(icon, restaurantName, mealName, ajaxOptions) {
       const displayDate = getDisplayDateLong(ajaxOptions);
 
       return [
-        getDetectTime(DIFF_ICON),
+        getDetectTime(icon),
         `【宿泊特典】${restaurantName}`,
         `${displayDate}${mealName ? ` 【${mealName}】` : ''}`
       ].join('\n');
     }
 
+    function saveLastDiffEvent(restaurantName, mealName, ajaxOptions, noticeGroups, titleIcon) {
+      const dataObj = parseAjaxData(ajaxOptions?.data);
+      const event = {
+        at: new Date().toISOString(),
+        titleIcon,
+        restaurantName,
+        mealName,
+        useDate: dataObj.useDate || '',
+        displayDate: getDisplayDateLong(ajaxOptions),
+        groups: noticeGroups.map(group => ({
+          commodityCD: group.commodityCD,
+          commodityDisplay: group.commodityDisplay,
+          changes: group.changes
+        })),
+        changes: noticeGroups.flatMap(group => {
+          return (group.changes || []).map(change => ({
+            commodityCD: group.commodityCD,
+            commodityDisplay: group.commodityDisplay,
+            ...change
+          }));
+        })
+      };
+
+      try {
+        localStorage.setItem(LAST_DIFF_EVENT_KEY, JSON.stringify(event));
+      } catch (e) {
+        console.warn('差分イベント保存失敗:', e);
+      }
+
+      win.tdr_priv_last_diff_event = event;
+      return event;
+    }
+
     function sendDiffDiscord(restaurantName, mealName, ajaxOptions, noticeGroups) {
       if (!noticeGroups.length) return;
+
+      const titleIcon = chooseDiffTitleIcon(noticeGroups);
+      saveLastDiffEvent(restaurantName, mealName, ajaxOptions, noticeGroups, titleIcon);
 
       const lines = [];
 
@@ -525,7 +595,7 @@
           lines.push(`【${group.commodityDisplay || splitCommodityCD(group.commodityCD).display}】`);
         }
 
-        group.lines.forEach(line => lines.push(line));
+        group.changes.forEach(change => lines.push(change.line));
       });
 
       let body = lines.join('\n');
@@ -533,7 +603,7 @@
       if (!body) return;
       if (body.length > 4000) body = `${body.slice(0, 3990)}\n…`;
 
-      const title = buildDiffTitle(restaurantName, mealName, ajaxOptions);
+      const title = buildDiffTitle(titleIcon, restaurantName, mealName, ajaxOptions);
 
       sendDiscord(title, body, DIFF_COLOR);
     }
@@ -574,7 +644,7 @@
           return;
         }
 
-        const lines = [];
+        const changes = [];
         const prevRows = prev.rows || {};
         const allTimes = new Set([
           ...Object.keys(prevRows),
@@ -582,31 +652,29 @@
         ]);
 
         Array.from(allTimes).sort((a, b) => a.localeCompare(b)).forEach(time => {
-          if (state.excludedTimes.includes(time)) return;
-
           const oldRow = prevRows[time];
           const curRow = currentRows[time];
+          let change = null;
 
           if (!oldRow && curRow) {
-            lines.push(makeDiffLine('add', time, oldRow, curRow));
+            change = makeDiffChange('add', time, oldRow, curRow);
+          } else if (oldRow && !curRow) {
+            change = makeDiffChange('delete', time, oldRow, curRow);
+          } else if (oldRow && curRow && oldRow.status !== '吸収' && curRow.status === '吸収') {
+            change = makeDiffChange('absorb', time, oldRow, curRow);
+          } else if (oldRow && curRow && oldRow.status === '吸収' && curRow.status !== '吸収') {
+            change = makeDiffChange('release', time, oldRow, curRow);
+          } else if (oldRow && curRow && oldRow.status !== curRow.status) {
+            change = makeDiffChange('change', time, oldRow, curRow);
+          }
+
+          if (!change) return;
+
+          if (state.excludedTimes.includes(time) && !isStructuralDiff(change.type)) {
             return;
           }
 
-          if (oldRow && !curRow) {
-            lines.push(makeDiffLine('delete', time, oldRow, curRow));
-            return;
-          }
-
-          if (!oldRow || !curRow) return;
-          if (oldRow.status === curRow.status) return;
-
-          if (oldRow.status !== '吸収' && curRow.status === '吸収') {
-            lines.push(makeDiffLine('absorb', time, oldRow, curRow));
-          } else if (oldRow.status === '吸収' && curRow.status !== '吸収') {
-            lines.push(makeDiffLine('release', time, oldRow, curRow));
-          } else {
-            lines.push(makeDiffLine('change', time, oldRow, curRow));
-          }
+          changes.push(change);
         });
 
         state.snapshots[key] = {
@@ -619,11 +687,11 @@
         };
         changedSnapshot = true;
 
-        if (lines.length) {
+        if (changes.length) {
           noticeGroups.push({
             commodityCD,
             commodityDisplay: splitCommodityCD(commodityCD).display,
-            lines
+            changes
           });
         }
       });
