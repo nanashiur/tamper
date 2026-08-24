@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.64
+// @version      2.65
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -21,6 +21,7 @@
   const ERROR_ICON = '🟠';
   const ERROR_COLOR = 0xffa500;
   const SNAPSHOT_KEY = 'tdr_priv_diff_snapshots_v1';
+  const AUTO_ACTION_KEY = 'tdr_priv_autoActionEnabled';
 
   const MEALS = [
     { key: 'breakfast', label: '朝', full: '朝食', storage: 'tdr_priv_searchStatus_breakfast' },
@@ -64,6 +65,7 @@
 
   const state = {
     notifyEnabled: localStorage.getItem('tdr_priv_notifyEnabled') !== '0',
+    autoActionEnabled: localStorage.getItem(AUTO_ACTION_KEY) === '1',
     excludedTimes: loadExcludedTimes(),
     mealStates: {},
     activeReloadMeal: '',
@@ -118,6 +120,7 @@
     let reloadLock = false;
     let reservationNoticePopupActive = false;
     let duplicationTimePopupActive = false;
+    let autoActionButton = null;
 
     const save_accordion_status = () => {
       opened_headers = [];
@@ -889,6 +892,57 @@
       return p;
     }
 
+    function createAutoActionPanel() {
+      const p = document.createElement('div');
+
+      Object.assign(p.style, {
+        position: 'fixed',
+        right: '10px',
+        bottom: '10px',
+        zIndex: '2147483647',
+        width: '86px',
+        height: '36px',
+        padding: '0',
+        borderRadius: '8px',
+        fontSize: '14px',
+        fontWeight: 'bold',
+        cursor: 'pointer',
+        background: '#000',
+        color: '#fff',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+        opacity: '0.95',
+        textAlign: 'center',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box',
+        userSelect: 'none'
+      });
+
+      p.onclick = () => {
+        state.autoActionEnabled = !state.autoActionEnabled;
+        localStorage.setItem(AUTO_ACTION_KEY, state.autoActionEnabled ? '1' : '0');
+        updateAutoActionButton();
+
+        if (state.autoActionEnabled) {
+          checkInputPageCheckboxes();
+          processReservationNoticePopup();
+          processDuplicationTimePopup();
+        }
+      };
+
+      document.body.appendChild(p);
+      return p;
+    }
+
+    function updateAutoActionButton() {
+      if (!autoActionButton) return;
+
+      autoActionButton.textContent = state.autoActionEnabled ? '操作ON' : '操作OFF';
+      autoActionButton.style.background = state.autoActionEnabled ? '#198754' : '#000';
+      autoActionButton.style.color = '#fff';
+    }
+
     function panelText(meal) {
       const ms = state.mealStates[meal.key];
 
@@ -957,6 +1011,8 @@
       drawExclusionSwitches();
       updatePanels();
     });
+
+    autoActionButton = createAutoActionPanel();
 
     $(document).ajaxComplete(function (event, jqXHR, ajaxOptions) {
       if (!ajaxOptions || !ajaxOptions.url) return;
@@ -1065,6 +1121,7 @@
     }
 
     function checkInputPageCheckboxes() {
+      if (!state.autoActionEnabled) return false;
       if (!isReservationInputPage()) return false;
 
       const targets = [
@@ -1089,6 +1146,7 @@
       win.__tdr_priv_input_next_autocheck_installed = true;
 
       document.addEventListener('click', function (e) {
+        if (!state.autoActionEnabled) return;
         if (!(e.target instanceof Element)) return;
 
         const btn = e.target.closest('a, button, input[type="button"], input[type="submit"]');
@@ -1153,6 +1211,11 @@
     }
 
     function processReservationNoticePopup() {
+      if (!state.autoActionEnabled) {
+        reservationNoticePopupActive = false;
+        return;
+      }
+
       const popup = findReservationNoticePopup();
 
       if (!popup) {
@@ -1175,6 +1238,11 @@
       }
 
       setTimeout(() => {
+        if (!state.autoActionEnabled) {
+          reservationNoticePopupActive = false;
+          return;
+        }
+
         const latestPopup = findReservationNoticePopup();
 
         if (!latestPopup) {
@@ -1222,6 +1290,11 @@
     }
 
     function processDuplicationTimePopup() {
+      if (!state.autoActionEnabled) {
+        duplicationTimePopupActive = false;
+        return;
+      }
+
       const popup = findDuplicationTimePopup();
 
       if (!popup) {
@@ -1252,9 +1325,12 @@
     new MutationObserver(() => {
       attachMealBarClickEvents();
       drawExclusionSwitches();
-      checkInputPageCheckboxes();
-      processReservationNoticePopup();
-      processDuplicationTimePopup();
+
+      if (state.autoActionEnabled) {
+        checkInputPageCheckboxes();
+        processReservationNoticePopup();
+        processDuplicationTimePopup();
+      }
     }).observe(document.body, {
       childList: true,
       subtree: true,
@@ -1281,12 +1357,16 @@
     }, 1000);
 
     updatePanels();
+    updateAutoActionButton();
     attachMealBarClickEvents();
     drawExclusionSwitches();
-    checkInputPageCheckboxes();
     installInputPageNextAutoCheck();
-    processReservationNoticePopup();
-    processDuplicationTimePopup();
+
+    if (state.autoActionEnabled) {
+      checkInputPageCheckboxes();
+      processReservationNoticePopup();
+      processDuplicationTimePopup();
+    }
   }
 
   boot();
