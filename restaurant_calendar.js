@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      3.96
+// @version      4.06
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -150,7 +150,36 @@ function sendAnalysisSnapshot(state,mode,endAt){
 function flushAnalysis(mode,forceCurrent=false){const now=Date.now();if(!forceCurrent)rollAnalysisPeriod(now);if(!analysisState.active){console.log(`[${NAME}] 解析ログ：送信対象なし`);return false;}const old=analysisState;if(!sendAnalysisSnapshot(old,mode,now))return false;analysisState=createAnalysisState(now);seedAnalysisMeals();return true;}
 function copyAnalysis(mode){const now=Date.now();if(!analysisState.active)return false;return sendAnalysisSnapshot(analysisState,mode,now);}
 function manualAnalysisFlush(){flushAnalysis('手動');}
-function flashAnalysisButton(){analysisFlashUntil=Date.now()+1000;clearTimeout(analysisFlashTimer);renderPanels();analysisFlashTimer=setTimeout(renderPanels,1000);}
+function playAnalysisClickSound(){
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC)return;
+  try{
+    const ctx=new AC(),osc=ctx.createOscillator(),gain=ctx.createGain();
+    osc.type='sine';
+    osc.frequency.setValueAtTime(880,ctx.currentTime);
+    gain.gain.setValueAtTime(0.08,ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.12);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime+0.12);
+    osc.onended=()=>ctx.close().catch(()=>{});
+  }catch(e){console.warn(`[${NAME}] 確認音再生失敗`,e);}
+}
+function handleAnalysisClick(){
+  playAnalysisClickSound();
+  analysisFlashUntil=Date.now()+1000;
+  clearTimeout(analysisFlashTimer);
+  if(analysisSendPanel){
+    analysisSendPanel.style.background='#d32f2f';
+    analysisSendPanel.style.color='#fff';
+  }
+  analysisFlashTimer=setTimeout(()=>{
+    analysisFlashUntil=0;
+    renderPanels();
+  },1000);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>manualAnalysisFlush()));
+}
 function analysisTick(){rollAnalysisPeriod();}
 
 function loadNotifyState(){try{const v=JSON.parse(localStorage.getItem(NOTIFY_KEY)||'null');if(v?.date===ymd()&&['vacancy','all','off'].includes(v.mode))return v;}catch{}const v={date:ymd(),mode:'vacancy'};localStorage.setItem(NOTIFY_KEY,JSON.stringify(v));return v;}
@@ -225,7 +254,7 @@ function createPanels(){
     compactButtonStyle(analysisSendPanel,29);
     analysisSendPanel.textContent='📤';
     analysisSendPanel.title='解析ログを送信';
-    analysisSendPanel.onclick=()=>{flashAnalysisButton();manualAnalysisFlush();};
+    analysisSendPanel.onclick=handleAnalysisClick;
 
     notifyPanel=document.createElement('div');
     compactButtonStyle(notifyPanel,29);
@@ -1002,5 +1031,5 @@ function init(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 setInterval(()=>{maintenanceTick();researchTick();analysisTick();renderPanels();},UI_TICK);
-console.log(`[${NAME}] v3.96 起動`);
+console.log(`[${NAME}] v4.06 起動`);
 })();
