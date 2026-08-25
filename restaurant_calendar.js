@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      3.56
+// @version      3.66
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -31,7 +31,7 @@ function ymd(){const d=new Date();return `${d.getFullYear()}${String(d.getMonth(
 function nowText(){const d=new Date();return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;}
 function fmtDateJa(v){const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8),dt=new Date(y,m-1,d);return `${y}年${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;}
 function fmtDateShortJa(v){const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8),dt=new Date(y,m-1,d);return `${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;}
-function fmtResearchRange(start,end){const sy=+start.slice(0,4),sm=+start.slice(4,6),sd=+start.slice(6,8),ey=+end.slice(0,4),em=+end.slice(4,6),ed=+end.slice(6,8),sdt=new Date(sy,sm-1,sd),edt=new Date(ey,em-1,ed);return sy===ey?`${sy}年${sm}月${sd}日（${'日月火水木金土'[sdt.getDay()]}）～${em}月${ed}日（${'日月火水木金土'[edt.getDay()]}）`:`${fmtDateJa(start)}～${fmtDateJa(end)}`;}
+function fmtResearchRange(start,end){const sy=+start.slice(0,4),sm=+start.slice(4,6),sd=+start.slice(6,8),ey=+end.slice(0,4),em=+end.slice(5,7),ed=+end.slice(6,8),sdt=new Date(sy,sm-1,sd),edt=new Date(ey,em-1,ed);return sy===ey?`${sy}年${sm}月${sd}日（${'日月火水木金土'[sdt.getDay()]}）～${em}月${ed}日（${'日月火水木金土'[edt.getDay()]}）`:`${fmtDateJa(start)}～${fmtDateJa(end)}`;}
 function isMaintenance(){const h=new Date().getHours();return h>=3&&h<5;}
 function existingMeals(){return [...blocks.keys()];}
 function has(obj,key){return Object.prototype.hasOwnProperty.call(obj,key);}
@@ -113,7 +113,7 @@ function createPanels(){
   MEALS.forEach((meal,i)=>{const s=getState(meal);if(!blocks.has(meal)){if(s.row)s.row.style.display='none';return;}if(!s.row){const row=document.createElement('div');Object.assign(row.style,{order:String(i),display:'flex',gap:'5px'});const manual=document.createElement('div');baseButtonStyle(manual);Object.assign(manual.style,{width:'32px',background:'#444',color:'#fff',fontSize:'18px',padding:'3px 0'});manual.textContent='↻';manual.title=`${meal} 手動発火`;manual.onclick=()=>manualFire(meal);const panel=document.createElement('div');baseButtonStyle(panel);Object.assign(panel.style,{width:'90px',color:'#fff'});panel.title=`${meal} 自動監視 ON / OFF`;panel.onclick=()=>toggleMeal(meal);row.append(manual,panel);panelRoot.appendChild(row);s.row=row;s.manual=manual;s.panel=panel;}s.row.style.display='flex';});
   if(!notifyPanel){notifyPanel=document.createElement('div');baseButtonStyle(notifyPanel);Object.assign(notifyPanel.style,{order:'10',width:'127px'});notifyPanel.title='通知モード：空席通知 → 全通知 → OFF';notifyPanel.onclick=toggleNotify;panelRoot.appendChild(notifyPanel);}
   if(!researchNotifyPanel){researchNotifyPanel=document.createElement('div');baseButtonStyle(researchNotifyPanel);Object.assign(researchNotifyPanel.style,{order:'11',width:'127px'});researchNotifyPanel.title='調査通知 / 解析ログ周期：長期 → 中期 → 短期 → OFF';researchNotifyPanel.onclick=toggleResearchNotify;panelRoot.appendChild(researchNotifyPanel);}
-  if(!analysisSendPanel){analysisSendPanel=document.createElement('div');baseButtonStyle(analysisSendPanel);Object.assign(analysisSendPanel.style,{order:'12',width:'127px',background:'#0d6efd',color:'#fff'});analysisSendPanel.textContent='📤 解析ログ';analysisSendPanel.title='現在までの解析ログをレストラン調査チャンネルへ強制送信';analysisSendPanel.onclick=manualAnalysisFlush;panelRoot.appendChild(analysisSendPanel);}
+  if(!analysisSendPanel){analysisSendPanel=document.createElement('div');baseButtonStyle(analysisSendPanel);Object.assign(analysisSendPanel.style,{order:'12',width:'127px',background:'#198754',color:'#fff'});analysisSendPanel.textContent='📤 解析ログ';analysisSendPanel.title='現在までの解析ログをレストラン調査チャンネルへ強制送信';analysisSendPanel.onclick=manualAnalysisFlush;panelRoot.appendChild(analysisSendPanel);}
   if(!researchPanel){researchPanel=document.createElement('div');baseButtonStyle(researchPanel);Object.assign(researchPanel.style,{order:'13',width:'127px'});researchPanel.title='ON時に保険基準取得 / 8:57正式基準 / 9:00に2周調査';researchPanel.onclick=toggleResearchMode;panelRoot.appendChild(researchPanel);}
   if(!datePanel){datePanel=document.createElement('div');Object.assign(datePanel.style,{order:'14',width:'127px',display:'flex',flexDirection:'column',gap:'3px'});const rows=[[['当',0],['翌',1],['3',3],['5',5]],[['7',7],['14',14],['21',21],['28',28]],[['35',35],['42',42],['49',49],['56',56]],[['63',63],['70',70],['77',77],['末','end']]];rows.forEach(items=>{const row=document.createElement('div');Object.assign(row.style,{display:'flex',gap:'3px'});items.forEach(([label,value])=>{const b=document.createElement('div');baseButtonStyle(b);Object.assign(b.style,{width:'29px',height:'29px',padding:'5px 0',background:'#0b1f3a',color:'#fff',fontSize:'12px',borderRadius:'6px'});b.textContent=label;b.title=value==='end'?'3か月後を最終日に含む週を検索':`本日から${value}日後を開始日にして検索`;b.onclick=()=>value==='end'?searchEndWeek():searchOffset(value);row.appendChild(b);});datePanel.appendChild(row);});panelRoot.appendChild(datePanel);}
   renderPanels();
@@ -262,5 +262,5 @@ window.SNAPSHOT=()=>{const text=snapshotText();console.log(text);if(navigator.cl
 function init(){refreshBlocks();setTimeout(refreshBlocks,300);setTimeout(refreshBlocks,1000);if(researchMode)enforceResearchAutoOff();if(document.body)new MutationObserver(ms=>{if(ms.some(m=>!panelRoot?.contains(m.target)))queueRefresh();}).observe(document.body,{childList:true,subtree:true});}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 setInterval(()=>{maintenanceTick();researchTick();analysisTick();renderPanels();},UI_TICK);
-console.log(`[${NAME}] v3.56 起動`);
+console.log(`[${NAME}] v3.66 起動`);
 })();
