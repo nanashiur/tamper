@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      3.66
+// @version      3.86
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -15,15 +15,15 @@ window.__tdr_weekly_restaurant_monitor=true;
 
 const NAME='🍴💻️レストラン週間モニター';
 const UI_TICK=1000,PENDING_ERROR_MS=300000,IP_TIMEOUT=5000,MAX_ERRORS=5,VACANCY_RENOTIFY_MS=3600000;
-const RED=0xFF0000,BLACK=0x000001,BLUE=0x3498DB,ORANGE=0xFFA500,GRAY=0x808080;
+const RED=0xFF0000,BLACK=0x000001,BLUE=0x3498DB,ORANGE=0xFFA500,GRAY=0x808080,YELLOW=0xFFD700;
 const AUTO_PREFIX='tdr_weekly_restaurant_auto_',OLD_AUTO_KEY='tdr_weekly_restaurant_auto';
-const NOTIFY_KEY='tdr_weekly_restaurant_notify_v3',RESEARCH_NOTIFY_KEY='tdr_weekly_restaurant_research_notify_v1';
+const NOTIFY_KEY='tdr_weekly_restaurant_notify_v3',RESEARCH_NOTIFY_KEY='tdr_weekly_restaurant_research_notify_v1',DATE_SELECT_KEY='tdr_weekly_restaurant_date_select_v1';
 const RESEARCH_KEY='tdr_weekly_restaurant_9am_mode_v3',RESEARCH_PREV_AUTO_KEY='tdr_weekly_restaurant_9am_prev_auto_v3',RESEARCH_BASELINE_KEY='tdr_weekly_restaurant_9am_baseline_v3',RESEARCH_857_RUN_KEY='tdr_weekly_restaurant_857_run_date_v3',RESEARCH_900_RUN_KEY='tdr_weekly_restaurant_900_run_date_v3';
 const MEALS=['朝食','昼食','夕食'];
 const PATHS=['/restaurant/weekReservation/','/restaurant/ajaxNextWeekList/','/restaurant/ajaxPreWeekList/'];
 const blocks=new Map(),commodityMeal=new Map(),mealStates=new Map(),snapshots=new Map(),vacancyHistory=new Map(),unresolved=[],errorNotifyHistory=new Map(),insuranceInherited=new Set();
 
-let panelRoot=null,notifyPanel=null,researchPanel=null,researchNotifyPanel=null,analysisSendPanel=null,datePanel=null,autoHint='',researchPhaseHint='',refreshTimer=null,wasMaintenance=isMaintenance(),notifyState=loadNotifyState();
+let panelRoot=null,notifyPanel=null,researchPanel=null,researchNotifyPanel=null,analysisSendPanel=null,datePanel=null,dateButtons=[],autoHint='',researchPhaseHint='',refreshTimer=null,wasMaintenance=isMaintenance(),notifyState=loadNotifyState();
 let researchMode=sessionStorage.getItem(RESEARCH_KEY)==='1',researchNotifyMode=loadResearchNotifyMode(),researchRound=null,research857Queued=false,researchPass1Queued=false;
 let analysisState=createAnalysisState(Date.now()),analysisResearchHold=false;
 
@@ -31,7 +31,7 @@ function ymd(){const d=new Date();return `${d.getFullYear()}${String(d.getMonth(
 function nowText(){const d=new Date();return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;}
 function fmtDateJa(v){const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8),dt=new Date(y,m-1,d);return `${y}年${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;}
 function fmtDateShortJa(v){const y=+v.slice(0,4),m=+v.slice(4,6),d=+v.slice(6,8),dt=new Date(y,m-1,d);return `${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;}
-function fmtResearchRange(start,end){const sy=+start.slice(0,4),sm=+start.slice(4,6),sd=+start.slice(6,8),ey=+end.slice(0,4),em=+end.slice(5,7),ed=+end.slice(6,8),sdt=new Date(sy,sm-1,sd),edt=new Date(ey,em-1,ed);return sy===ey?`${sy}年${sm}月${sd}日（${'日月火水木金土'[sdt.getDay()]}）～${em}月${ed}日（${'日月火水木金土'[edt.getDay()]}）`:`${fmtDateJa(start)}～${fmtDateJa(end)}`;}
+function fmtResearchRange(start,end){const sy=+start.slice(0,4),sm=+start.slice(4,6),sd=+start.slice(6,8),ey=+end.slice(0,4),em=+end.slice(4,6),ed=+end.slice(6,8),sdt=new Date(sy,sm-1,sd),edt=new Date(ey,em-1,ed);return sy===ey?`${sy}年${sm}月${sd}日（${'日月火水木金土'[sdt.getDay()]}）～${em}月${ed}日（${'日月火水木金土'[edt.getDay()]}）`:`${fmtDateJa(start)}～${fmtDateJa(end)}`;}
 function isMaintenance(){const h=new Date().getHours();return h>=3&&h<5;}
 function existingMeals(){return [...blocks.keys()];}
 function has(obj,key){return Object.prototype.hasOwnProperty.call(obj,key);}
@@ -115,23 +115,48 @@ function createPanels(){
   if(!researchNotifyPanel){researchNotifyPanel=document.createElement('div');baseButtonStyle(researchNotifyPanel);Object.assign(researchNotifyPanel.style,{order:'11',width:'127px'});researchNotifyPanel.title='調査通知 / 解析ログ周期：長期 → 中期 → 短期 → OFF';researchNotifyPanel.onclick=toggleResearchNotify;panelRoot.appendChild(researchNotifyPanel);}
   if(!analysisSendPanel){analysisSendPanel=document.createElement('div');baseButtonStyle(analysisSendPanel);Object.assign(analysisSendPanel.style,{order:'12',width:'127px',background:'#198754',color:'#fff'});analysisSendPanel.textContent='📤 解析ログ';analysisSendPanel.title='現在までの解析ログをレストラン調査チャンネルへ強制送信';analysisSendPanel.onclick=manualAnalysisFlush;panelRoot.appendChild(analysisSendPanel);}
   if(!researchPanel){researchPanel=document.createElement('div');baseButtonStyle(researchPanel);Object.assign(researchPanel.style,{order:'13',width:'127px'});researchPanel.title='ON時に保険基準取得 / 8:57正式基準 / 9:00に2周調査';researchPanel.onclick=toggleResearchMode;panelRoot.appendChild(researchPanel);}
-  if(!datePanel){datePanel=document.createElement('div');Object.assign(datePanel.style,{order:'14',width:'127px',display:'flex',flexDirection:'column',gap:'3px'});const rows=[[['当',0],['翌',1],['3',3],['5',5]],[['7',7],['14',14],['21',21],['28',28]],[['35',35],['42',42],['49',49],['56',56]],[['63',63],['70',70],['77',77],['末','end']]];rows.forEach(items=>{const row=document.createElement('div');Object.assign(row.style,{display:'flex',gap:'3px'});items.forEach(([label,value])=>{const b=document.createElement('div');baseButtonStyle(b);Object.assign(b.style,{width:'29px',height:'29px',padding:'5px 0',background:'#0b1f3a',color:'#fff',fontSize:'12px',borderRadius:'6px'});b.textContent=label;b.title=value==='end'?'3か月後を最終日に含む週を検索':`本日から${value}日後を開始日にして検索`;b.onclick=()=>value==='end'?searchEndWeek():searchOffset(value);row.appendChild(b);});datePanel.appendChild(row);});panelRoot.appendChild(datePanel);}
+  if(!datePanel){
+    datePanel=document.createElement('div');
+    Object.assign(datePanel.style,{order:'14',width:'127px',display:'flex',flexDirection:'column',gap:'3px'});
+    const rows=[[['当',0],['翌',1],['3',3],['5',5]],[['7',7],['14',14],['21',21],['28',28]],[['35',35],['42',42],['49',49],['56',56]],[['63',63],['70',70],['77',77],['末','end']]];
+    dateButtons=[];
+    rows.forEach(items=>{
+      const row=document.createElement('div');
+      Object.assign(row.style,{display:'flex',gap:'3px'});
+      items.forEach(([label,value])=>{
+        const b=document.createElement('div');
+        baseButtonStyle(b);
+        Object.assign(b.style,{width:'29px',height:'29px',padding:'5px 0',background:'#0b1f3a',color:'#fff',fontSize:'12px',borderRadius:'6px'});
+        b.textContent=label;
+        b.dataset.value=String(value);
+        b.title=value==='end'?'3か月後を最終日に含む週を検索':`本日から${value}日後を開始日にして検索`;
+        b.onclick=()=>{
+          selectDateShortcut(value);
+          value==='end'?searchEndWeek():searchOffset(value);
+        };
+        dateButtons.push(b);
+        row.appendChild(b);
+      });
+      datePanel.appendChild(row);
+    });
+    panelRoot.appendChild(datePanel);
+    renderDateSelection();
+  }
   renderPanels();
 }
+function selectDateShortcut(value){sessionStorage.setItem(DATE_SELECT_KEY,String(value));renderDateSelection();}
+function renderDateSelection(){const selected=sessionStorage.getItem(DATE_SELECT_KEY)||'';dateButtons.forEach(b=>{b.style.background=b.dataset.value===selected?'#d32f2f':'#0b1f3a';b.style.color='#fff';});}
 function setSearchDate(d){const y=d.getFullYear(),m=d.getMonth()+1,day=d.getDate(),displayDate=`${y}/${m}/${day}`,searchDate=`${y}${String(m).padStart(2,'0')}${String(day).padStart(2,'0')}`,datepicker=document.querySelector('#datepicker'),searchUseDate=document.querySelector('#searchUseDate');if(!datepicker||!searchUseDate){console.warn(`[${NAME}] 日付検索：日付入力欄なし`);return;}datepicker.value=displayDate;datepicker.setAttribute('value',displayDate);searchUseDate.value=searchDate;searchUseDate.setAttribute('value',searchDate);datepicker.dispatchEvent(new Event('input',{bubbles:true}));datepicker.dispatchEvent(new Event('change',{bubbles:true}));const button=document.querySelector('#detailFormId input[type="image"][alt="検索する"],#detailFormId input[type="image"][onclick*="Restaurant.detail"]');if(!button){console.warn(`[${NAME}] 日付検索：検索ボタンなし`);return;}console.log(`[${NAME}] 日付検索：${displayDate}`);button.click();}
 function searchOffset(days){const d=new Date();d.setDate(d.getDate()+days);setSearchDate(d);}
 function addMonthsClamped(date,months){const d=new Date(date.getFullYear(),date.getMonth(),1),targetMonth=d.getMonth()+months,targetYear=d.getFullYear()+Math.floor(targetMonth/12),month=((targetMonth%12)+12)%12,lastDay=new Date(targetYear,month+1,0).getDate();return new Date(targetYear,month,Math.min(date.getDate(),lastDay));}
 function searchEndWeek(){const end=addMonthsClamped(new Date(),3);end.setDate(end.getDate()-6);setSearchDate(end);}
 function sameLocalDate(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();}
+function reservationLeadDays(v){const s=String(v||'').replace(/\D/g,'');if(s.length<8)return null;const now=new Date(),target=new Date(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8));return Math.round((Date.UTC(target.getFullYear(),target.getMonth(),target.getDate())-Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()))/86400000);}
 function reservationLeadLabel(v){
   const s=String(v||'').replace(/\D/g,'');if(s.length<8)return '';
-  const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate()),target=new Date(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8));
-  const days=Math.round((Date.UTC(target.getFullYear(),target.getMonth(),target.getDate())-Date.UTC(today.getFullYear(),today.getMonth(),today.getDate()))/86400000);
-  if(days===0)return '当日';
-  if(days<0)return `${Math.abs(days)}日経過`;
-  let text=`${days}日前`,months=(target.getFullYear()-today.getFullYear())*12+target.getMonth()-today.getMonth();
-  if(months>0&&sameLocalDate(addMonthsClamped(today,months),target))text+=`（${months}ヶ月前）`;
-  return text;
+  const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate()),target=new Date(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8)),days=reservationLeadDays(s);
+  if(days===0)return '当日';if(days<0)return `${Math.abs(days)}日経過`;
+  let text=`${days}日前`,months=(target.getFullYear()-today.getFullYear())*12+target.getMonth()-today.getMonth();if(months>0&&sameLocalDate(addMonthsClamped(today,months),target))text+=`（${months}ヶ月前）`;return text;
 }
 function withReservationLead(description,date){const label=reservationLeadLabel(date);return label?`${description}\n\n${label}`:description;}
 
@@ -141,7 +166,7 @@ function loadResearchBaseline(){try{const d=JSON.parse(sessionStorage.getItem(RE
 function saveResearchBaselineData(data){sessionStorage.setItem(RESEARCH_BASELINE_KEY,JSON.stringify(data));}
 function clearResearchBaseline(){saveResearchBaselineData({date:ymd(),entries:{}});}
 function enforceResearchAutoOff(){existingMeals().forEach(meal=>{const s=getState(meal);s.enabled=false;clearTimer(s);});}
-function restoreAutoAfterResearch(){const prev=loadPreviousAuto();existingMeals().forEach(meal=>{const s=getState(meal),enable=!!prev[meal]&&!s.forcedStopError;s.enabled=enable;localStorage.setItem(AUTO_PREFIX+meal,enable?'1':'0');clearTimer(s);if(enable&&!s.pending&&!isMaintenance())schedule(meal);});}
+function restoreAutoAfterResearch(){const prev=loadPreviousAuto();existingMeals().forEach(meal=>{const s=getState(meal),savedEnable=!!prev[meal];clearTimer(s);if(s.forcedStopError){s.enabled=false;return;}s.enabled=savedEnable;localStorage.setItem(AUTO_PREFIX+meal,savedEnable?'1':'0');if(savedEnable&&!s.pending&&!isMaintenance())schedule(meal);});}
 function finishResearchModeAuto(){researchMode=false;researchRound=null;research857Queued=false;researchPass1Queued=false;analysisResearchHold=false;insuranceInherited.clear();sessionStorage.setItem(RESEARCH_KEY,'0');restoreAutoAfterResearch();sessionStorage.removeItem(RESEARCH_PREV_AUTO_KEY);sessionStorage.removeItem(RESEARCH_BASELINE_KEY);sessionStorage.removeItem(RESEARCH_857_RUN_KEY);sessionStorage.removeItem(RESEARCH_900_RUN_KEY);console.log(`[${NAME}] 9時調査完了 / 自動OFF / 通常監視復帰`);renderPanels();}
 function saveResearchBase(meal,meta,current,source){const data=loadResearchBaseline(),key=snapshotKey(meta,meal,current);data.entries[meal]={source,key,weekStart:current.weekStart,weekEnd:current.weekEnd,slots:current.slots,savedAt:Date.now()};saveResearchBaselineData(data);snapshots.set(key,current.slots);seedVacancyHistory(meal,current);console.log(`[${NAME}] ${meal} 9時調査基準保存：${source}`);}
 function toggleResearchMode(){refreshBlocks();if(!researchMode){const prev={};existingMeals().forEach(meal=>prev[meal]=getState(meal).enabled);savePreviousAuto(prev);researchMode=true;researchRound=null;research857Queued=false;researchPass1Queued=false;insuranceInherited.clear();sessionStorage.setItem(RESEARCH_KEY,'1');sessionStorage.removeItem(RESEARCH_857_RUN_KEY);sessionStorage.removeItem(RESEARCH_900_RUN_KEY);clearResearchBaseline();const pendingBefore=new Set(existingMeals().filter(meal=>getState(meal).pending>0));enforceResearchAutoOff();runResearchRound('insurance',pendingBefore);console.log(`[${NAME}] 9時調査モード ON / 保険基準読込開始`);}else{researchMode=false;researchRound=null;research857Queued=false;researchPass1Queued=false;analysisResearchHold=false;insuranceInherited.clear();sessionStorage.setItem(RESEARCH_KEY,'0');restoreAutoAfterResearch();sessionStorage.removeItem(RESEARCH_PREV_AUTO_KEY);sessionStorage.removeItem(RESEARCH_BASELINE_KEY);sessionStorage.removeItem(RESEARCH_857_RUN_KEY);sessionStorage.removeItem(RESEARCH_900_RUN_KEY);console.log(`[${NAME}] 9時調査モード OFF`);}renderPanels();}
@@ -158,6 +183,7 @@ function renderPanels(){
   if(notifyPanel){if(notifyState.mode==='vacancy'){notifyPanel.style.background='pink';notifyPanel.style.color='#000';notifyPanel.textContent='🔔 空席通知';}else if(notifyState.mode==='all'){notifyPanel.style.background='#ffc107';notifyPanel.style.color='#000';notifyPanel.textContent='📢 全通知';}else{notifyPanel.style.background='#333';notifyPanel.style.color='#fff';notifyPanel.textContent='🔕 OFF';}}
   if(researchNotifyPanel){if(researchNotifyMode==='long'){researchNotifyPanel.style.background='#1976d2';researchNotifyPanel.style.color='#fff';researchNotifyPanel.textContent='🔬 長期';}else if(researchNotifyMode==='medium'){researchNotifyPanel.style.background='#ff9800';researchNotifyPanel.style.color='#000';researchNotifyPanel.textContent='🔬 中期';}else if(researchNotifyMode==='short'){researchNotifyPanel.style.background='pink';researchNotifyPanel.style.color='#000';researchNotifyPanel.textContent='🔬 短期';}else{researchNotifyPanel.style.background='#333';researchNotifyPanel.style.color='#fff';researchNotifyPanel.textContent='🔬 OFF';}}
   if(researchPanel){researchPanel.style.background=researchMode?'#d32f2f':'#333';researchPanel.style.color='#fff';researchPanel.textContent=researchMode?'9時調査 ON':'9時調査 OFF';}
+  renderDateSelection();
 }
 function researchRoundLabel(phase){return phase==='insurance'?'保険':phase==='baseline'?'8:57':phase==='pass1'?'1周':phase==='pass2'?'2周':'調査';}
 function maintenanceTick(){const maintenance=isMaintenance();if(maintenance===wasMaintenance)return;wasMaintenance=maintenance;if(maintenance){mealStates.forEach(clearTimer);console.log(`[${NAME}] メンテナンス停止`);}else{refreshBlocks();if(!researchMode)existingMeals().forEach(meal=>{const s=mealStates.get(meal);if(s?.enabled&&!s.pending)fireSameWeek(meal,false,'');});console.log(`[${NAME}] メンテナンス終了・再開`);}renderPanels();}
@@ -165,7 +191,7 @@ function maintenanceTick(){const maintenance=isMaintenance();if(maintenance===wa
 function recordError(meal,error,count=true,notify=true){const s=getState(meal);if(count&&!s.forcedStopError){s.consecutiveErrors++;console.warn(`[${NAME}] ${meal} 連続エラー ${s.consecutiveErrors}/${MAX_ERRORS}：${error}`);if(s.consecutiveErrors>=MAX_ERRORS){forceStopError(meal,error);return true;}}if(notify)sendErrorDiscord(meal,error);renderPanels();return false;}
 function reportError(meal,error,researchPhase='',count=true){recordAnalysisError(meal,error,researchPhase);const stopped=recordError(meal,error,count,!researchPhase);if(researchPhase&&!stopped)sendResearchErrorDiscord(meal,researchPhase,error);return stopped;}
 function resetErrors(meal){const s=getState(meal);if(s.consecutiveErrors)console.log(`[${NAME}] ${meal} 正常読込 / 連続エラー ${s.consecutiveErrors} → 0`);s.consecutiveErrors=0;s.forcedStopError=false;s.error403=false;s.pendingError=false;}
-function forceStopError(meal,lastError){const s=getState(meal);if(s.forcedStopError)return;s.forcedStopError=true;s.enabled=false;clearTimer(s);localStorage.setItem(AUTO_PREFIX+meal,'0');if(researchMode){const prev=loadPreviousAuto();prev[meal]=false;savePreviousAuto(prev);}console.warn(`[${NAME}] ${meal} エラー${MAX_ERRORS}回連続 / 自動読込強制停止`);sendForceStopDiscord(meal,lastError);flushAnalysis('🔶強制停止',true);renderPanels();}
+function forceStopError(meal,lastError){const s=getState(meal);if(s.forcedStopError)return;s.forcedStopError=true;s.enabled=false;clearTimer(s);console.warn(`[${NAME}] ${meal} エラー${MAX_ERRORS}回連続 / 自動読込強制停止（保存なし）`);sendForceStopDiscord(meal,lastError);flushAnalysis('🔶強制停止',true);renderPanels();}
 
 function fireSameWeek(meal,manual=false,researchPhase=''){
   const s=getState(meal);if((!manual&&!s.enabled)||s.pending||isMaintenance())return false;
@@ -226,25 +252,44 @@ function buildAddedDescription(changes){return sortChanges(changes).map(c=>{cons
 function buildDeletedDescription(changes){return sortChanges(changes).map(c=>`${c.time}　🔷削除`).join('\n');}
 function formatGap(ms){const min=Math.floor(ms/60000);if(min<60)return `${min}分`;const h=Math.floor(min/60),m=min%60;return m?`${h}時間${m}分`:`${h}時間`;}
 function buildVacancyFilteredDescription(changes){return sortChanges(changes).map(c=>{const v=c.vacancy;if(!v||v.count<=1)return `${c.time}　🆕初回空席`;return `${c.time}　🔄再出現 ${v.count}回目（満席化から${formatGap(v.gapMs)}）`;}).join('\n');}
+function buildRareDescription(changes){return sortChanges(changes).map(c=>`${c.time}　🟡レア空席${c.type==='added'?'（新規枠）':''}`).join('\n');}
+function commodityForMeal(meal){return blocks.get(meal)?.commodity||'';}
+function isRareVacancy(c){
+  if(!((c.type==='changed'&&c.to==='空席')||(c.type==='added'&&c.to==='空席')))return false;
+  const name=restaurantName(),commodity=commodityForMeal(c.meal),days=reservationLeadDays(c.date),time=c.time||'';
+  if(name.includes('ベッラヴィスタ')){
+    if(c.meal==='朝食')return true;
+    if(c.meal==='夕食'&&['18:50','19:00','19:10'].includes(time))return true;
+  }
+  if(name.includes('オチェーアノ')&&c.meal==='夕食'&&/OCEZB/i.test(commodity)&&/^(18|19):/.test(time))return true;
+  if(name.includes('ハイピリオン')&&days!==null&&days>=4&&/HPL(?:3001|3002|3005|3006|4001|4002|4003|4004)/i.test(commodity))return true;
+  if(name.includes('シェフ・ミッキー')&&days!==null&&days>=4)return true;
+  if(name.includes('チックタック')&&days!==null&&days>=4)return true;
+  if(name.includes('ドリーマーズ')&&days!==null&&days>=11)return true;
+  return false;
+}
 function useResearchChannel(){return researchMode||researchNotifyEnabled();}
 function discordWebhook(target){return target==='research'?window.TDR_WEBHOOKS?.restaurantResearch:window.TDR_WEBHOOKS?.restaurant;}
 function postDiscord(title,description,color,target='auto'){const actual=target==='auto'?(useResearchChannel()?'research':'normal'):target,webhook=discordWebhook(actual);if(!webhook){console.warn(`[${NAME}] Discord通知先未設定：${actual==='research'?'restaurantResearch':'restaurant'}`);return;}fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({username:NAME,embeds:[{title:title.slice(0,256),description:description.slice(0,4000),color}]})}).catch(e=>console.error(`[${NAME}] Discord通知失敗`,e));}
 function postCriticalDiscord(title,description,color){postDiscord(title,description,color,'normal');if(useResearchChannel()&&discordWebhook('research')!==discordWebhook('normal'))postDiscord(title,description,color,'research');}
+function sendRareVacancyDiscord(changes){groupDateMeal(changes).forEach(g=>postCriticalDiscord(buildTitle('🟡',g.date,g.meal),withReservationLead(buildRareDescription(g.changes),g.date),YELLOW));}
 function sendChangesDiscord(changes){
-  syncNotifyDay();const added=changes.filter(c=>c.type==='added'),deleted=changes.filter(c=>c.type==='deleted');
+  syncNotifyDay();const rare=changes.filter(isRareVacancy),rareSet=new Set(rare),added=changes.filter(c=>c.type==='added'&&!rareSet.has(c)),deleted=changes.filter(c=>c.type==='deleted');
+  if(rare.length)sendRareVacancyDiscord(rare);
   groupDateMeal(added).forEach(g=>postDiscord(buildTitle('🔵',g.date,g.meal),withReservationLead(buildAddedDescription(g.changes),g.date),BLUE));
   groupDateMeal(deleted).forEach(g=>postDiscord(buildTitle('🔷',g.date,g.meal),withReservationLead(buildDeletedDescription(g.changes),g.date),BLUE));
   if(notifyState.mode==='off')return;
   if(notifyState.mode==='all'){
-    groupDateMeal(changes.filter(c=>c.type==='changed'&&c.to==='空席')).forEach(g=>postDiscord(buildTitle('🔴',g.date,g.meal),withReservationLead(buildTimeOnlyDescription(g.changes),g.date),RED));
+    groupDateMeal(changes.filter(c=>c.type==='changed'&&c.to==='空席'&&!rareSet.has(c))).forEach(g=>postDiscord(buildTitle('🔴',g.date,g.meal),withReservationLead(buildTimeOnlyDescription(g.changes),g.date),RED));
     groupDateMeal(changes.filter(c=>c.type==='changed'&&c.to==='満席')).forEach(g=>postDiscord(buildTitle('⚫️',g.date,g.meal),withReservationLead(buildTimeOnlyDescription(g.changes),g.date),BLACK));
     return;
   }
-  const vacancy=changes.filter(c=>c.type==='changed'&&c.to==='空席'&&c.vacancy?.notify);groupDateMeal(vacancy).forEach(g=>postDiscord(buildTitle('🔴',g.date,g.meal),withReservationLead(buildVacancyFilteredDescription(g.changes),g.date),RED));
+  const vacancy=changes.filter(c=>c.type==='changed'&&c.to==='空席'&&c.vacancy?.notify&&!rareSet.has(c));groupDateMeal(vacancy).forEach(g=>postDiscord(buildTitle('🔴',g.date,g.meal),withReservationLead(buildVacancyFilteredDescription(g.changes),g.date),RED));
 }
 function sendResearchResult(meal,current,changes,pass){
   const prefix=`AM9時調査 ${pass}周目`;if(!changes.length){postDiscord(buildResearchTitle('⚪️',current,meal),`${prefix}\n差分なし`,GRAY,'research');return;}
-  const added=changes.filter(c=>c.type==='added'),deleted=changes.filter(c=>c.type==='deleted'),vacancy=changes.filter(c=>c.type==='changed'&&c.to==='空席'),full=changes.filter(c=>c.type==='changed'&&c.to==='満席');
+  const rare=changes.filter(isRareVacancy),rareSet=new Set(rare),added=changes.filter(c=>c.type==='added'&&!rareSet.has(c)),deleted=changes.filter(c=>c.type==='deleted'),vacancy=changes.filter(c=>c.type==='changed'&&c.to==='空席'&&!rareSet.has(c)),full=changes.filter(c=>c.type==='changed'&&c.to==='満席');
+  if(rare.length)sendRareVacancyDiscord(rare);
   groupDateMeal(added).forEach(g=>postDiscord(buildResearchTitle('🔵',current,g.meal),withReservationLead(`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildAddedDescription(g.changes)}`,g.date),BLUE,'research'));
   groupDateMeal(deleted).forEach(g=>postDiscord(buildResearchTitle('🔷',current,g.meal),withReservationLead(`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildDeletedDescription(g.changes)}`,g.date),BLUE,'research'));
   groupDateMeal(vacancy).forEach(g=>postDiscord(buildResearchTitle('🔴',current,g.meal),withReservationLead(`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildTimeOnlyDescription(g.changes)}`,g.date),RED,'research'));
@@ -262,5 +307,5 @@ window.SNAPSHOT=()=>{const text=snapshotText();console.log(text);if(navigator.cl
 function init(){refreshBlocks();setTimeout(refreshBlocks,300);setTimeout(refreshBlocks,1000);if(researchMode)enforceResearchAutoOff();if(document.body)new MutationObserver(ms=>{if(ms.some(m=>!panelRoot?.contains(m.target)))queueRefresh();}).observe(document.body,{childList:true,subtree:true});}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 setInterval(()=>{maintenanceTick();researchTick();analysisTick();renderPanels();},UI_TICK);
-console.log(`[${NAME}] v3.66 起動`);
+console.log(`[${NAME}] v3.86 起動`);
 })();
