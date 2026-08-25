@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      3.46
+// @version      3.56
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -122,6 +122,18 @@ function setSearchDate(d){const y=d.getFullYear(),m=d.getMonth()+1,day=d.getDate
 function searchOffset(days){const d=new Date();d.setDate(d.getDate()+days);setSearchDate(d);}
 function addMonthsClamped(date,months){const d=new Date(date.getFullYear(),date.getMonth(),1),targetMonth=d.getMonth()+months,targetYear=d.getFullYear()+Math.floor(targetMonth/12),month=((targetMonth%12)+12)%12,lastDay=new Date(targetYear,month+1,0).getDate();return new Date(targetYear,month,Math.min(date.getDate(),lastDay));}
 function searchEndWeek(){const end=addMonthsClamped(new Date(),3);end.setDate(end.getDate()-6);setSearchDate(end);}
+function sameLocalDate(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();}
+function reservationLeadLabel(v){
+  const s=String(v||'').replace(/\D/g,'');if(s.length<8)return '';
+  const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate()),target=new Date(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8));
+  const days=Math.round((Date.UTC(target.getFullYear(),target.getMonth(),target.getDate())-Date.UTC(today.getFullYear(),today.getMonth(),today.getDate()))/86400000);
+  if(days===0)return '当日';
+  if(days<0)return `${Math.abs(days)}日経過`;
+  let text=`${days}日前`,months=(target.getFullYear()-today.getFullYear())*12+target.getMonth()-today.getMonth();
+  if(months>0&&sameLocalDate(addMonthsClamped(today,months),target))text+=`（${months}ヶ月前）`;
+  return text;
+}
+function withReservationLead(description,date){const label=reservationLeadLabel(date);return label?`${description}\n\n${label}`:description;}
 
 function loadPreviousAuto(){try{return JSON.parse(sessionStorage.getItem(RESEARCH_PREV_AUTO_KEY)||'{}');}catch{return {};}}
 function savePreviousAuto(prev){sessionStorage.setItem(RESEARCH_PREV_AUTO_KEY,JSON.stringify(prev));}
@@ -218,8 +230,26 @@ function useResearchChannel(){return researchMode||researchNotifyEnabled();}
 function discordWebhook(target){return target==='research'?window.TDR_WEBHOOKS?.restaurantResearch:window.TDR_WEBHOOKS?.restaurant;}
 function postDiscord(title,description,color,target='auto'){const actual=target==='auto'?(useResearchChannel()?'research':'normal'):target,webhook=discordWebhook(actual);if(!webhook){console.warn(`[${NAME}] Discord通知先未設定：${actual==='research'?'restaurantResearch':'restaurant'}`);return;}fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({username:NAME,embeds:[{title:title.slice(0,256),description:description.slice(0,4000),color}]})}).catch(e=>console.error(`[${NAME}] Discord通知失敗`,e));}
 function postCriticalDiscord(title,description,color){postDiscord(title,description,color,'normal');if(useResearchChannel()&&discordWebhook('research')!==discordWebhook('normal'))postDiscord(title,description,color,'research');}
-function sendChangesDiscord(changes){syncNotifyDay();const added=changes.filter(c=>c.type==='added'),deleted=changes.filter(c=>c.type==='deleted');groupDateMeal(added).forEach(g=>postDiscord(buildTitle('🔵',g.date,g.meal),buildAddedDescription(g.changes),BLUE));groupDateMeal(deleted).forEach(g=>postDiscord(buildTitle('🔷',g.date,g.meal),buildDeletedDescription(g.changes),BLUE));if(notifyState.mode==='off')return;if(notifyState.mode==='all'){groupDateMeal(changes.filter(c=>c.type==='changed'&&c.to==='空席')).forEach(g=>postDiscord(buildTitle('🔴',g.date,g.meal),buildTimeOnlyDescription(g.changes),RED));groupDateMeal(changes.filter(c=>c.type==='changed'&&c.to==='満席')).forEach(g=>postDiscord(buildTitle('⚫️',g.date,g.meal),buildTimeOnlyDescription(g.changes),BLACK));return;}const vacancy=changes.filter(c=>c.type==='changed'&&c.to==='空席'&&c.vacancy?.notify);groupDateMeal(vacancy).forEach(g=>postDiscord(buildTitle('🔴',g.date,g.meal),buildVacancyFilteredDescription(g.changes),RED));}
-function sendResearchResult(meal,current,changes,pass){const prefix=`AM9時調査 ${pass}周目`;if(!changes.length){postDiscord(buildResearchTitle('⚪️',current,meal),`${prefix}\n差分なし`,GRAY,'research');return;}const added=changes.filter(c=>c.type==='added'),deleted=changes.filter(c=>c.type==='deleted'),vacancy=changes.filter(c=>c.type==='changed'&&c.to==='空席'),full=changes.filter(c=>c.type==='changed'&&c.to==='満席');groupDateMeal(added).forEach(g=>postDiscord(buildResearchTitle('🔵',current,g.meal),`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildAddedDescription(g.changes)}`,BLUE,'research'));groupDateMeal(deleted).forEach(g=>postDiscord(buildResearchTitle('🔷',current,g.meal),`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildDeletedDescription(g.changes)}`,BLUE,'research'));groupDateMeal(vacancy).forEach(g=>postDiscord(buildResearchTitle('🔴',current,g.meal),`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildTimeOnlyDescription(g.changes)}`,RED,'research'));groupDateMeal(full).forEach(g=>postDiscord(buildResearchTitle('⚫️',current,g.meal),`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildTimeOnlyDescription(g.changes)}`,BLACK,'research'));}
+function sendChangesDiscord(changes){
+  syncNotifyDay();const added=changes.filter(c=>c.type==='added'),deleted=changes.filter(c=>c.type==='deleted');
+  groupDateMeal(added).forEach(g=>postDiscord(buildTitle('🔵',g.date,g.meal),withReservationLead(buildAddedDescription(g.changes),g.date),BLUE));
+  groupDateMeal(deleted).forEach(g=>postDiscord(buildTitle('🔷',g.date,g.meal),withReservationLead(buildDeletedDescription(g.changes),g.date),BLUE));
+  if(notifyState.mode==='off')return;
+  if(notifyState.mode==='all'){
+    groupDateMeal(changes.filter(c=>c.type==='changed'&&c.to==='空席')).forEach(g=>postDiscord(buildTitle('🔴',g.date,g.meal),withReservationLead(buildTimeOnlyDescription(g.changes),g.date),RED));
+    groupDateMeal(changes.filter(c=>c.type==='changed'&&c.to==='満席')).forEach(g=>postDiscord(buildTitle('⚫️',g.date,g.meal),withReservationLead(buildTimeOnlyDescription(g.changes),g.date),BLACK));
+    return;
+  }
+  const vacancy=changes.filter(c=>c.type==='changed'&&c.to==='空席'&&c.vacancy?.notify);groupDateMeal(vacancy).forEach(g=>postDiscord(buildTitle('🔴',g.date,g.meal),withReservationLead(buildVacancyFilteredDescription(g.changes),g.date),RED));
+}
+function sendResearchResult(meal,current,changes,pass){
+  const prefix=`AM9時調査 ${pass}周目`;if(!changes.length){postDiscord(buildResearchTitle('⚪️',current,meal),`${prefix}\n差分なし`,GRAY,'research');return;}
+  const added=changes.filter(c=>c.type==='added'),deleted=changes.filter(c=>c.type==='deleted'),vacancy=changes.filter(c=>c.type==='changed'&&c.to==='空席'),full=changes.filter(c=>c.type==='changed'&&c.to==='満席');
+  groupDateMeal(added).forEach(g=>postDiscord(buildResearchTitle('🔵',current,g.meal),withReservationLead(`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildAddedDescription(g.changes)}`,g.date),BLUE,'research'));
+  groupDateMeal(deleted).forEach(g=>postDiscord(buildResearchTitle('🔷',current,g.meal),withReservationLead(`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildDeletedDescription(g.changes)}`,g.date),BLUE,'research'));
+  groupDateMeal(vacancy).forEach(g=>postDiscord(buildResearchTitle('🔴',current,g.meal),withReservationLead(`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildTimeOnlyDescription(g.changes)}`,g.date),RED,'research'));
+  groupDateMeal(full).forEach(g=>postDiscord(buildResearchTitle('⚫️',current,g.meal),withReservationLead(`${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildTimeOnlyDescription(g.changes)}`,g.date),BLACK,'research'));
+}
 
 async function getPublicIp(){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),IP_TIMEOUT);try{const r=await fetch('https://api.ipify.org?format=json',{cache:'no-store',signal:controller.signal});if(!r.ok)throw new Error(`HTTP ${r.status}`);const data=await r.json();return data.ip||'取得失敗';}catch(e){console.warn(`[${NAME}] IP取得失敗`,e);return '取得失敗';}finally{clearTimeout(timer);}}
 async function sendErrorDiscord(meal,error){const key=`${meal}|${error}`,now=Date.now();if(now-(errorNotifyHistory.get(key)||0)<60000)return;errorNotifyHistory.set(key,now);const ip=await getPublicIp();postDiscord([`🟠${nowText()}`,restaurantName(),`【${meal}】`].join('\n'),[`エラー：${error}`,`公開IP：${ip}`].join('\n'),ORANGE);}
@@ -232,5 +262,5 @@ window.SNAPSHOT=()=>{const text=snapshotText();console.log(text);if(navigator.cl
 function init(){refreshBlocks();setTimeout(refreshBlocks,300);setTimeout(refreshBlocks,1000);if(researchMode)enforceResearchAutoOff();if(document.body)new MutationObserver(ms=>{if(ms.some(m=>!panelRoot?.contains(m.target)))queueRefresh();}).observe(document.body,{childList:true,subtree:true});}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 setInterval(()=>{maintenanceTick();researchTick();analysisTick();renderPanels();},UI_TICK);
-console.log(`[${NAME}] v3.46 起動`);
+console.log(`[${NAME}] v3.56 起動`);
 })();
