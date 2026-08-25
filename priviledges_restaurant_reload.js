@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.68
+// @version      2.69
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -17,7 +17,12 @@
   const FULL_ICON = '🖤';
   const ABSORB_ICON = '💙';
   const FRAME_ICON = '🔷';
-  const DIFF_COLOR = 0x007bff;
+
+  const VACANCY_COLOR = 0xff0000;
+  const FULL_COLOR = 0x000000;
+  const ABSORB_COLOR = 0x007bff;
+  const FRAME_COLOR = 0x0057ff;
+
   const ERROR_ICON = '🟠';
   const ERROR_COLOR = 0xffa500;
   const SNAPSHOT_KEY = 'tdr_priv_diff_snapshots_v1';
@@ -539,6 +544,14 @@
       return FRAME_ICON;
     }
 
+    function chooseDiffColor(titleIcon) {
+      if (titleIcon === VACANCY_ICON) return VACANCY_COLOR;
+      if (titleIcon === FULL_ICON) return FULL_COLOR;
+      if (titleIcon === ABSORB_ICON) return ABSORB_COLOR;
+      if (titleIcon === FRAME_ICON) return FRAME_COLOR;
+      return ABSORB_COLOR;
+    }
+
     function buildDiffTitle(icon, restaurantName, mealName, ajaxOptions) {
       const displayDate = getDisplayDateLong(ajaxOptions);
 
@@ -549,11 +562,12 @@
       ].join('\n');
     }
 
-    function saveLastDiffEvent(restaurantName, mealName, ajaxOptions, noticeGroups, titleIcon) {
+    function saveLastDiffEvent(restaurantName, mealName, ajaxOptions, noticeGroups, titleIcon, color) {
       const dataObj = parseAjaxData(ajaxOptions?.data);
       const event = {
         at: new Date().toISOString(),
         titleIcon,
+        color,
         restaurantName,
         mealName,
         useDate: dataObj.useDate || '',
@@ -586,7 +600,8 @@
       if (!noticeGroups.length) return;
 
       const titleIcon = chooseDiffTitleIcon(noticeGroups);
-      saveLastDiffEvent(restaurantName, mealName, ajaxOptions, noticeGroups, titleIcon);
+      const color = chooseDiffColor(titleIcon);
+      saveLastDiffEvent(restaurantName, mealName, ajaxOptions, noticeGroups, titleIcon, color);
 
       const lines = [];
 
@@ -605,7 +620,7 @@
 
       const title = buildDiffTitle(titleIcon, restaurantName, mealName, ajaxOptions);
 
-      sendDiscord(title, body, DIFF_COLOR);
+      sendDiscord(title, body, color);
     }
 
     function notifyDiffIfChanged(info, ajaxOptions, jqXHR, mealName) {
