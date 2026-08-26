@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🏨宿泊特典レストラン検索
-// @version      2.69
+// @version      2.70
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -557,8 +557,8 @@
 
       return [
         getDetectTime(icon),
-        `【宿泊特典】${restaurantName}`,
-        `${displayDate}${mealName ? ` 【${mealName}】` : ''}`
+        `${displayDate}${mealName ? ` 【${mealName}】` : ''}`,
+        `【宿泊特典】${restaurantName}`
       ].join('\n');
     }
 
