@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.76
+// @version      4.77
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -51,10 +51,14 @@
   }
 
   function isOrangeErrorPage() {
-    const bodyText = document.body?.innerText || '';
-    return /オンライン予約・購入サイトからのお知らせ/.test(bodyText) &&
-      (/アクセスが集中しておりアクセスしにくい状態/.test(bodyText) || /This site is temporarily busy or unavailable/i.test(bodyText)) &&
-      (/しばらく時間をおいてから再度アクセス/.test(bodyText) || /Please try back again later/i.test(bodyText));
+    const text = document.body?.innerText || '';
+    const isNoticePage = text.includes('オンライン予約・購入サイトからのお知らせ');
+    const hasBusyMessage =
+      text.includes('アクセスが集中') ||
+      /temporarily busy/i.test(text) ||
+      /difficulties loading the page/i.test(text) ||
+      /Please try back again later/i.test(text);
+    return isNoticePage && hasBusyMessage;
   }
 
   async function getPublicIp() {
@@ -423,7 +427,7 @@
       body: JSON.stringify({
         username: SCRIPT_NAME,
         embeds: [{
-          title: `${icon}${getDetectDateTime()}\n${getRestaurantName()}\n${getDisplayDate()}${mealName ? ` 【${mealName}】` : ''}`,
+          title: `${icon}${getDetectDateTime()}\n${getDisplayDate()}${mealName ? ` 【${mealName}】` : ''}\n${getRestaurantName()}`,
           description: lines.join('\n'),
           color
         }]
@@ -579,7 +583,7 @@
       body: JSON.stringify({
         username: SCRIPT_NAME,
         embeds: [{
-          title: `🟣${getDetectDateTime()}\n${getRestaurantName()}\n${getDisplayDate()}${mealName ? ` 【${mealName}】` : ''}`,
+          title: `🟣${getDetectDateTime()}\n${getDisplayDate()}${mealName ? ` 【${mealName}】` : ''}\n${getRestaurantName()}`,
           description: ['自動予約クリック試行', time].join('\n'),
           color: PURPLE
         }]
