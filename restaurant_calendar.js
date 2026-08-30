@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      4.37
+// @version      4.38
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
-// @grant        none
+// @grant        GM_download
+// @sandbox      raw
 // @run-at       document-start
 // ==/UserScript==
 
@@ -228,12 +229,8 @@ function buildNormalLogBody(state,endAt){
     lines.push('');
   });
   if(!meals.length)lines.push('【差分】','記録なし','');
-
-  if(endAt-SCRIPT_STARTED_AT>=START_SNAPSHOT_THRESHOLD_MS)
-    lines.push(...buildFullStateLines('【参考：スクリプト開始時点の全枠状態】',scriptStartSnapshots));
-
+  if(endAt-SCRIPT_STARTED_AT>=START_SNAPSHOT_THRESHOLD_MS)lines.push(...buildFullStateLines('【参考：スクリプト開始時点の全枠状態】',scriptStartSnapshots));
   lines.push(...buildFullStateLines('【参考：出力時点の全枠状態】',latestAnySnapshots));
-
   if(state.errors.length){
     lines.push('【エラー詳細】');
     [...state.errors].sort((a,b)=>a.at-b.at).forEach(e=>lines.push(`${analysisTime(e.at)}|${e.meal}|${e.error}`));
@@ -271,14 +268,20 @@ function safeFileName(v){return String(v||'').replace(/[\\/:*?"<>|]/g,'_').repla
 function fileStamp(ts=Date.now()){const d=new Date(ts);return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}${String(d.getSeconds()).padStart(2,'0')}`;}
 function downloadCsv(filename,rows){
   try{
-    const blob=new Blob([csvText(rows)],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=filename;a.style.display='none';
-    (document.body||document.documentElement).appendChild(a);
-    a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
-    console.log(`[${NAME}] CSV保存：${filename}`);
+    const blob=new Blob([csvText(rows)],{type:'text/csv;charset=utf-8'});
+    GM_download({
+      url:blob,
+      name:filename,
+      saveAs:false,
+      onload:()=>console.log(`[${NAME}] CSV自動保存：${filename}`),
+      onerror:e=>console.error(`[${NAME}] CSV自動保存失敗：${filename}`,e),
+      ontimeout:()=>console.error(`[${NAME}] CSV自動保存タイムアウト：${filename}`)
+    });
     return true;
-  }catch(e){console.error(`[${NAME}] CSV保存失敗`,e);return false;}
+  }catch(e){
+    console.error(`[${NAME}] CSV自動保存失敗`,e);
+    return false;
+  }
 }
 function appendSnapshotCsvRows(rows,type,map,common){
   MEALS.forEach(meal=>{
@@ -306,16 +309,13 @@ function buildNormalCsvRows(state,mode,endAt){
     logEnd:analysisDateTime(endAt),
     restaurant:state.restaurant||restaurantName()
   };
-
   [...state.events].sort((a,b)=>a.at-b.at).forEach(e=>{
     let type='通常差分',note='';
     const category=eventCategory(e);
     if(category==='reception')type='受付終了化';
     if(category==='receptionInternal')type='受付終了状態変化';
-
     const from=e.type==='added'?'枠なし':statusForLog(e.from);
     const to=e.type==='deleted'?'枠なし':statusForLog(e.to);
-
     if(e.to==='空席'&&e.vacancy){
       if(e.vacancy.count<=1)note='初回';
       else{
@@ -323,36 +323,29 @@ function buildNormalCsvRows(state,mode,endAt){
         if(e.vacancy.prevVacancyGapMs!==null)note+=` / 前回空席から${analysisGap(e.vacancy.prevVacancyGapMs)}`;
       }
     }
-
     rows.push([
       type,analysisDateTime(e.at),analysisDate(e.date),e.meal,e.time,
       from,to,to,note,
       common.output,common.logType,common.logStart,common.logEnd,common.restaurant,'',''
     ]);
   });
-
-  if(endAt-SCRIPT_STARTED_AT>=START_SNAPSHOT_THRESHOLD_MS)
-    appendSnapshotCsvRows(rows,'開始時状態',scriptStartSnapshots,common);
-
+  if(endAt-SCRIPT_STARTED_AT>=START_SNAPSHOT_THRESHOLD_MS)appendSnapshotCsvRows(rows,'開始時状態',scriptStartSnapshots,common);
   appendSnapshotCsvRows(rows,'出力時状態',latestAnySnapshots,common);
-
   const names=[...new Set([...state.knownMeals,...Object.keys(state.meals)])];
   names.forEach(meal=>{
     const m=state.meals[meal]||{success:0,errors:0,ranges:new Set()};
     const events=state.events.filter(e=>e.meal===meal);
     const counts=eventCounts(events);
     rows.push([
-      '読込集計','', '',meal,'','','','',
+      '読込集計','','',meal,'','','','',
       `読込成功=${m.success} / エラー=${m.errors} / 変化=${counts.market} / 受付終了化=${counts.reception} / 受付終了状態変化=${counts.receptionInternal} / 監視期間=${m.ranges.size?[...m.ranges].join(','):'未取得'}`,
       common.output,common.logType,common.logStart,common.logEnd,common.restaurant,'',''
     ]);
   });
-
   [...state.errors].sort((a,b)=>a.at-b.at).forEach(e=>rows.push([
     'エラー',analysisDateTime(e.at),'',e.meal,'','','','',e.error,
     common.output,common.logType,common.logStart,common.logEnd,common.restaurant,'',''
   ]));
-
   return rows;
 }
 function buildAm9CsvRows(state,endAt){
@@ -1534,5 +1527,5 @@ setInterval(()=>{
   renderPanels();
 },UI_TICK);
 
-console.log(`[${NAME}] v4.37 起動`);
+console.log(`[${NAME}] v4.38 起動`);
 })();
