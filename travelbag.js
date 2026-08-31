@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.28
+// @version      1.29
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -11,7 +11,7 @@
 // ==/UserScript==
 (() => {
 'use strict';
-const VERSION='1.28', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.29', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -527,7 +527,7 @@ function printTimeGet(source,url,response,body){
   Object.values(grouped).forEach(a=>a.sort((x,y)=>x.time.localeCompare(y.time)));
   const now=formatTimeMs(), name=restaurantLabel();
   for(const code of Object.keys(grouped)){
-    console.log(`%c${now}`,'background:#333;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px');
+    console.log(`%c${now}`,'background:#333;color:#fff;font-weight:bold;padding:2px 6px 2px 0;border-radius:3px');
     console.log(`%c${[payload.displayDate||'日付不明',name,splitCommodityCD(code).display].filter(Boolean).join(' ')}`,'font-weight:bold');
     grouped[code].forEach(r=>console.log(`%c${r.time} ${r.status} ${r.openNumKey}`,statusStyle(r.status)));
   }
