@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.27
+// @version      1.28
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -11,7 +11,7 @@
 // ==/UserScript==
 (() => {
 'use strict';
-const VERSION='1.27', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.28', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -275,9 +275,7 @@ function setRestaurantInfo(a){
   currentRoomPrivilege=!!a.querySelector('img[alt="客室特典付き"]');
   return true;
 }
-function restaurantLabel(){
-  return `${currentReservationPrivilege?'【予約特典】':''}${currentRoomPrivilege?'【客室特典】':''}${currentRestaurantName}`;
-}
+function restaurantLabel(){ return `${currentReservationPrivilege?'【宿泊特典】':''}${currentRoomPrivilege?'【客室特典】':''}${currentRestaurantName}`; }
 function captureRestaurantInfo(e){
   if(!(e.target instanceof Element)) return;
   const a=e.target.closest('a[href="javascript:void(0);"]');
@@ -423,7 +421,8 @@ function statusLabel(row){
   return timeClosing(row)?'締切':s==='0'?'空席':s==='1'?'満席':s==='2'?'吸収':`不明(${s||'空'})`;
 }
 function statusStyle(s){
-  return s==='空席'?'color:red;font-weight:bold;':s==='満席'?'':s==='吸収'?'color:blue;font-weight:bold;':s==='締切'?'color:gray;font-weight:bold;':'color:purple;font-weight:bold;';
+  const base='padding-left:6px;';
+  return base+(s==='空席'?'color:red;font-weight:bold;':s==='満席'?'':s==='吸収'?'color:blue;font-weight:bold;':s==='締切'?'color:gray;font-weight:bold;':'color:purple;font-weight:bold;');
 }
 function splitCommodityCD(code){
   const base=String(code||'').split('_')[0].trim();
