@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.29
+// @version      1.30
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -11,7 +11,7 @@
 // ==/UserScript==
 (() => {
 'use strict';
-const VERSION='1.29', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.30', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -760,8 +760,23 @@ function createPanel(){
     updateNotifyButton();
   });
   recordButton=makeButton('記録 OFF','#777',toggleRecording);
+  const allOnButton=makeButton('全部ON','#1565c0',()=>{
+    if(!autoEnabled){ autoEnabled=true; scheduleNextFire(); startCountdown(); }
+    vacancySelectMode=2;
+    vacancySelectToken++;
+    updateVacancyButton();
+    autoConfirmEnabled=true;
+    clearTimeout(autoConfirmTimer);
+    autoConfirmTimer=null;
+    const c=getSelectedTimeInfo();
+    lastObservedCurrentSignature=c?c.signature:'';
+    updateAutoConfirmButton();
+    updateAutoButtonBg();
+    pending.size?updatePending():updateCountdown();
+    manualReload();
+  });
   const manualButton=makeButton('1名','#198754',manualReload);
-  panel.append(autoButton,vacancySelectButton,priorityControls,autoConfirmButton,notifyButton,recordButton,manualButton);
+  panel.append(autoButton,vacancySelectButton,priorityControls,autoConfirmButton,notifyButton,recordButton,allOnButton,manualButton);
   document.body.appendChild(panel);
   updateVacancyButton();
   updateAutoConfirmButton();
