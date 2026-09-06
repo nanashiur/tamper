@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.30
+// @version      1.31
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -11,14 +11,15 @@
 // ==/UserScript==
 (() => {
 'use strict';
-const VERSION='1.30', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.31', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
+
 let autoEnabled=false, fireTimer=null, countdownTimer=null, nextFireAt=0, autoButton=null;
 let vacancySelectMode=0, vacancySelectButton=null, vacancySelectToken=0;
 let autoConfirmEnabled=false, autoConfirmButton=null, autoConfirmTimer=null, lastObservedCurrentSignature='';
-let notifyEnabled=true, notifyButton=null, webhookWarned=false;
+let notifyEnabled=false, notifyButton=null, webhookWarned=false;
 let recording=false, recordButton=null, recordStartedAt=null, recordedLogs=[];
 let currentRestaurantName='', currentReservationPrivilege=false, currentRoomPrivilege=false;
 let reservationNoticeActive=false, restaurantModalHandled=false, pageObserver=null, purchasePending=0;
@@ -26,9 +27,11 @@ const stockSnapshots=new Map();
 const HOURS=['11','12','13','14','15','16','17','18','19','20','21'];
 const MINUTES=['00','10','20','30','40','50'], priorityRows=[];
 const pad=(n,l=2)=>String(n).padStart(l,'0');
+
 function formatTimeMs(d=new Date()){ return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; }
 function formatDateTimeMs(d=new Date()){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${formatTimeMs(d)}`; }
 function formatFileStamp(d=new Date()){ return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; }
+
 function valueText(v,seen=new WeakSet()){
   if(v===undefined) return 'undefined';
   if(v===null) return 'null';
@@ -60,6 +63,7 @@ function consoleText(args){
   return a.map(v=>valueText(v)).join(' ');
 }
 function recordConsole(level,args){ recordedLogs.push([formatDateTimeMs(),level,consoleText(args)]); }
+
 for(const name of ['log','info','warn','error','debug']){
   const original=console[name]?.bind(console);
   if(!original) continue;
@@ -68,6 +72,7 @@ for(const name of ['log','info','warn','error','debug']){
     if(recording) recordConsole(name.toUpperCase(),args);
   };
 }
+
 function csvCell(v){ return `"${String(v??'').replace(/"/g,'""')}"`; }
 function saveRecordedCsv(){
   const rows=[['日時','レベル','ログ'],...recordedLogs];
@@ -97,6 +102,7 @@ function toggleRecording(){
   }
   updateRecordButton();
 }
+
 function normalizePriority(v){
   const m=String(v||'').trim().match(/^(11|12|13|14|15|16|17|18|19|20|21):(--|00|10|15|20|30|40|45|50)$/);
   if(!m) return '';
@@ -163,6 +169,7 @@ function priorityRank(time,ps){
   return ps.length;
 }
 function matchingPriority(time){ return getPriorities().find(p=>priorityMatches(p,time))||null; }
+
 function updatePriorityRows(){
   let active=true;
   for(const {row,label,hour,minute} of priorityRows){
@@ -261,6 +268,7 @@ function checkAutoConfirmSelection(){
   lastObservedCurrentSignature=cur.signature;
   if(autoConfirmEnabled) scheduleAutoConfirm(cur);
 }
+
 function normalizeModalText(s){ return String(s||'').replace(/\s+/g,'').trim(); }
 function visible(el){
   if(!el) return false;
@@ -290,6 +298,7 @@ function refreshRestaurantInfo(){
   if(a) setRestaurantInfo(a);
 }
 document.addEventListener('click',captureRestaurantInfo,true);
+
 function getVisibleModals(){ return Array.from(document.querySelectorAll('#modalDialog,.modalDialog')).filter(visible); }
 function modalTitle(modal){ return normalizeModalText(modal?.querySelector('h2,.hdgModal01')?.textContent||''); }
 function findModalByTitle(title,preferHighLayer=false){
@@ -368,8 +377,10 @@ function installPageObserver(){
   console.log('[TDR TravelBag] ページ状態監視 ON');
 }
 installPageObserver();
+
 let pendingSeq=0, pendingTimer=null;
 const pending=new Map();
+
 function oldestPending(){
   let t=Infinity;
   for(const v of pending.values()) if(v<t) t=v;
@@ -394,8 +405,10 @@ function endPending(id){
     updateCountdown();
   }else updatePending();
 }
+
 const isTimeGet=url=>/timeGet/i.test(String(url||''));
 const isPurchase=url=>/\/(?:privilege)?purchase(?:\/|$|\?)/i.test(String(url||''));
+
 function absUrl(url){
   try{ return new URL(String(url||''),location.href).toString(); }
   catch{ return String(url||''); }
@@ -492,45 +505,68 @@ function processStockDiff(payload,grouped){
   const codes=new Set(Object.keys(grouped));
   if(payload.targetCommodityCD) codes.add(payload.targetCommodityCD);
   const notices=[], label=restaurantLabel();
+
   for(const code of codes){
     if(!code) continue;
     const current=snapshotRows(grouped[code]||[]), key=`${payload.useDate||''}|${code}`, previous=stockSnapshots.get(key);
     const restaurant=label||previous?.restaurantLabel||'';
-    if(!previous){ stockSnapshots.set(key,{restaurantLabel:restaurant,rows:current}); continue; }
+
+    if(!previous){
+      stockSnapshots.set(key,{restaurantLabel:restaurant,rows:current});
+      continue;
+    }
+
     const changes=[];
     for(const [time,cur] of current){
       const old=previous.rows.get(time);
       if(!old) changes.push(`${time} 枠追加 → ${cur.status}`);
       else if(old.status!==cur.status) changes.push(`${time} ${old.status} → ${cur.status}`);
     }
-    for(const [time,old] of previous.rows) if(!current.has(time)) changes.push(`${time} 枠削除（${old.status}）`);
+    for(const [time,old] of previous.rows){
+      if(!current.has(time)) changes.push(`${time} 枠削除（${old.status}）`);
+    }
+
     stockSnapshots.set(key,{restaurantLabel:restaurant||previous.restaurantLabel,rows:current});
     if(changes.length) notices.push({code,restaurantLabel:restaurant||previous.restaurantLabel,changes});
   }
+
   sendStockDiffNotification(payload,notices);
 }
 function printTimeGet(source,url,response,body){
   let data;
   try{ data=parseResponse(response); }
-  catch(e){ console.warn('[TB timeGet] JSON解析失敗',{source,url:absUrl(url),response}); return null; }
-  if(!Array.isArray(data)){ console.warn('[TB timeGet] 配列ではありません',{source,url:absUrl(url),data}); return null; }
+  catch(e){
+    console.warn('[TB timeGet] JSON解析失敗',{source,url:absUrl(url),response});
+    return null;
+  }
+  if(!Array.isArray(data)){
+    console.warn('[TB timeGet] 配列ではありません',{source,url:absUrl(url),data});
+    return null;
+  }
+
   refreshRestaurantInfo();
   const payload=payloadInfo(body), rows=[], grouped={};
+
   for(const row of data){
-    const commodityCD=String(getValue(row,'commodityCD')||'').trim(), time=String(getValue(row,'exhibitionTime')||'').trim();
+    const commodityCD=String(getValue(row,'commodityCD')||'').trim();
+    const time=String(getValue(row,'exhibitionTime')||'').trim();
     if(!commodityCD||!time) continue;
     const item={time,status:statusLabel(row),openNumKey:getValue(row,'openNumKey'),salesStatus:salesStatus(row),commodityCD,commodityDisplay:splitCommodityCD(commodityCD).display};
     (grouped[commodityCD]??=[]).push(item);
     rows.push(item);
   }
+
   rows.sort((a,b)=>a.commodityCD.localeCompare(b.commodityCD)||a.time.localeCompare(b.time));
   Object.values(grouped).forEach(a=>a.sort((x,y)=>x.time.localeCompare(y.time)));
+
   const now=formatTimeMs(), name=restaurantLabel();
+
   for(const code of Object.keys(grouped)){
     console.log(`%c${now}`,'background:#333;color:#fff;font-weight:bold;padding:2px 6px 2px 0;border-radius:3px');
     console.log(`%c${[payload.displayDate||'日付不明',name,splitCommodityCD(code).display].filter(Boolean).join(' ')}`,'font-weight:bold');
     grouped[code].forEach(r=>console.log(`%c${r.time} ${r.status} ${r.openNumKey}`,statusStyle(r.status)));
   }
+
   window.tb_last_timeget={at:new Date().toISOString(),source,url:absUrl(url),payload,rows,grouped,raw:data};
   processStockDiff(payload,grouped);
   return data;
@@ -538,19 +574,28 @@ function printTimeGet(source,url,response,body){
 function getVacancyCandidates(data){
   if(!Array.isArray(data)) return [];
   const ps=getPriorities(), all=[];
+
   for(const row of data){
     if(statusLabel(row)!=='空席') continue;
-    const commodityCD=String(getValue(row,'commodityCD')||'').trim(), time=String(getValue(row,'exhibitionTime')||'').trim(), openNumKey=String(getValue(row,'openNumKey')??'').trim();
+    const commodityCD=String(getValue(row,'commodityCD')||'').trim();
+    const time=String(getValue(row,'exhibitionTime')||'').trim();
+    const openNumKey=String(getValue(row,'openNumKey')??'').trim();
     if(commodityCD&&time) all.push({commodityCD,time,openNumKey});
   }
+
   all.sort((a,b)=>priorityRank(a.time,ps)-priorityRank(b.time,ps)||a.time.localeCompare(b.time)||a.commodityCD.localeCompare(b.commodityCD));
   return vacancySelectMode===1?all.filter(x=>priorityRank(x.time,ps)<ps.length):all;
 }
 function clickVacancy(candidates){
   const items=document.querySelectorAll('#timeSlider li.vacancy');
+
   for(const target of candidates){
     for(const li of items){
-      const a=li.querySelector('a'), time=a?.textContent?.trim()||'', open=li.querySelector('input[name="openNumKey"]')?.value||'', code=li.querySelector('input[name="commodityCD"]')?.value||'';
+      const a=li.querySelector('a');
+      const time=a?.textContent?.trim()||'';
+      const open=li.querySelector('input[name="openNumKey"]')?.value||'';
+      const code=li.querySelector('input[name="commodityCD"]')?.value||'';
+
       if(time===target.time&&String(open)===String(target.openNumKey)&&code===target.commodityCD){
         const p=matchingPriority(target.time);
         console.log('[TDR TravelBag] 時間選択:',target.time,p?`【第${p.index+1}希望 ${p.display}】`:'【強制最早時間】',target.commodityCD,target.openNumKey);
@@ -564,70 +609,97 @@ function clickVacancy(candidates){
 }
 function scheduleVacancySelect(data){
   if(!vacancySelectMode) return;
+
   const vacancies=Array.isArray(data)?data.filter(r=>statusLabel(r)==='空席'):[];
   if(!vacancies.length) return console.log('[TDR TravelBag] 時間選択: 空席なし');
+
   const candidates=getVacancyCandidates(data);
   if(vacancySelectMode===1&&!candidates.length) return console.log('[TDR TravelBag] 時間選択: 希望条件一致なし → 選択なし');
   if(!candidates.length) return;
+
   const token=++vacancySelectToken;
   let n=0;
+
   const run=()=>{
     if(!vacancySelectMode||token!==vacancySelectToken) return;
     if(clickVacancy(candidates)) return;
     if(++n<25) setTimeout(run,20);
     else console.warn('[TDR TravelBag] 時間選択: 対象DOMを確認できませんでした',candidates);
   };
+
   setTimeout(run,0);
 }
+
 const originalFetch=window.fetch;
+
 window.fetch=function(input,init){
-  const url=typeof input==='string'?input:input?.url||'', method=(init?.method||(typeof input!=='string'?input?.method:'')||'GET').toUpperCase(), body=init?.body||'';
+  const url=typeof input==='string'?input:input?.url||'';
+  const method=(init?.method||(typeof input!=='string'?input?.method:'')||'GET').toUpperCase();
+  const body=init?.body||'';
   const timeGet=isTimeGet(url), purchase=isPurchase(url);
   let id=null,p;
+
   if(timeGet) id=startPending();
   if(purchase) purchasePending++;
+
   try{ p=originalFetch.apply(this,arguments); }
   catch(e){
     if(id!==null) endPending(id);
     if(purchase) purchasePending=Math.max(0,purchasePending-1);
     throw e;
   }
+
   if(timeGet){
-    p.then(res=>res.clone().text().then(text=>{
-      const data=printTimeGet(`fetch/${method}`,url,text,body);
-      if(data) scheduleVacancySelect(data);
-    }).catch(e=>console.warn('[TB timeGet] fetch response read failed',e)).finally(()=>endPending(id))).catch(e=>{
+    p.then(res=>res.clone().text()
+      .then(text=>{
+        const data=printTimeGet(`fetch/${method}`,url,text,body);
+        if(data) scheduleVacancySelect(data);
+      })
+      .catch(e=>console.warn('[TB timeGet] fetch response read failed',e))
+      .finally(()=>endPending(id))
+    ).catch(e=>{
       console.warn('[TB timeGet] fetch failed',e);
       endPending(id);
     });
   }
+
   if(purchase) p.finally(()=>purchasePending=Math.max(0,purchasePending-1)).catch(()=>{});
   return p;
 };
-const originalOpen=XMLHttpRequest.prototype.open, originalSend=XMLHttpRequest.prototype.send;
+
+const originalOpen=XMLHttpRequest.prototype.open;
+const originalSend=XMLHttpRequest.prototype.send;
+
 XMLHttpRequest.prototype.open=function(method,url){
   this.__tb={method:String(method||'').toUpperCase(),url:String(url||'')};
   return originalOpen.apply(this,arguments);
 };
+
 XMLHttpRequest.prototype.send=function(body){
   const info=this.__tb, timeGet=info&&isTimeGet(info.url), purchase=info&&isPurchase(info.url);
   let id=null;
+
   if(timeGet){
     id=startPending();
     this.addEventListener('loadend',()=>{
       let response='';
       try{ response=(this.responseType===''||this.responseType==='text')?this.responseText||'':this.response; }
       catch{ try{ response=this.response||''; }catch{} }
+
       try{
         const data=printTimeGet(`xhr/${info.method}`,info.url,response,body);
         if(data) scheduleVacancySelect(data);
-      }finally{ endPending(id); }
+      }finally{
+        endPending(id);
+      }
     });
   }
+
   if(purchase){
     purchasePending++;
     this.addEventListener('loadend',()=>purchasePending=Math.max(0,purchasePending-1),{once:true});
   }
+
   try{ return originalSend.apply(this,arguments); }
   catch(e){
     if(id!==null) endPending(id);
@@ -635,9 +707,14 @@ XMLHttpRequest.prototype.send=function(body){
     throw e;
   }
 };
+
 const isEditPage=()=>location.pathname.startsWith('/online/travelbag/edit/');
+
 function adultNum(){
-  if(!window.jQuery){ console.warn('[TDR TravelBag] jQuery が見つかりません'); return null; }
+  if(!window.jQuery){
+    console.warn('[TDR TravelBag] jQuery が見つかりません');
+    return null;
+  }
   const $a=window.jQuery('select[name="adultNum"]');
   return $a.length?$a:null;
 }
@@ -657,10 +734,14 @@ function manualReload(){
 function scheduleNextFire(){
   clearTimeout(fireTimer);
   if(!autoEnabled) return;
+
   const now=new Date(), next=new Date(now);
-  next.setSeconds(59,700);
+  const randomMs=700+Math.floor(Math.random()*101);
+  next.setSeconds(59,randomMs);
+
   if(now>=next) next.setMinutes(next.getMinutes()+1);
   nextFireAt=next.getTime();
+
   fireTimer=setTimeout(()=>{
     if(!autoEnabled) return;
     if(autoButton&&!pending.size) autoButton.textContent='00';
@@ -670,7 +751,10 @@ function scheduleNextFire(){
 }
 function updateCountdown(){
   if(!autoButton||pending.size) return;
-  if(!autoEnabled){ autoButton.textContent='自動OFF'; return; }
+  if(!autoEnabled){
+    autoButton.textContent='自動OFF';
+    return;
+  }
   const ms=nextFireAt-Date.now();
   autoButton.textContent=ms<=0?'00':String(Math.min(59,Math.ceil(ms/1000))).padStart(2,'0');
 }
@@ -687,29 +771,38 @@ function stopCountdown(){
 function makePriorityControls(){
   const host=document.createElement('div');
   host.style.cssText='width:120px;pointer-events:auto';
+
   const shadow=host.attachShadow({mode:'open'}), box=document.createElement('div');
   box.style.cssText='display:flex;flex-direction:column;width:120px;gap:3px;font-family:sans-serif';
+
   const saved=loadPriorityTimes(), labels=['①','②','③','④','⑤'];
   const css='width:48px;height:30px;box-sizing:border-box;padding:0 1px;margin:0;border:1px solid #777;border-radius:4px;background:#fff;color:#000;font-size:13px;font-weight:bold;cursor:pointer';
+
   for(let i=0;i<5;i++){
-    const row=document.createElement('div'), label=document.createElement('span'), hour=document.createElement('select'), minute=document.createElement('select');
+    const row=document.createElement('div'), label=document.createElement('span');
+    const hour=document.createElement('select'), minute=document.createElement('select');
+
     row.style.cssText='display:flex;align-items:center;width:120px;height:30px;gap:2px';
     label.textContent=labels[i];
     label.style.cssText='display:inline-flex;align-items:center;justify-content:center;width:20px;height:30px;font-size:15px;font-weight:bold;color:#000';
+
     hour.innerHTML='<option value="">--</option>'+HOURS.map(v=>`<option value="${v}">${v}</option>`).join('');
     minute.innerHTML='<option value="">--</option>'+MINUTES.map(v=>`<option value="${v}">${v}</option>`).join('');
     hour.style.cssText=minute.style.cssText=css;
+
     if(saved[i]){
       const [h,m]=saved[i].split(':');
       hour.value=h;
       minute.value=m==='--'?'':m;
     }
+
     hour.addEventListener('change',()=>priorityHourChanged(i));
     minute.addEventListener('change',savePriorityTimes);
     row.append(label,hour,minute);
     box.appendChild(row);
     priorityRows.push({row,label,hour,minute});
   }
+
   shadow.appendChild(box);
   updatePriorityRows();
   return host;
@@ -724,71 +817,101 @@ function makeButton(text,bg,handler){
 }
 function createPanel(){
   if(!isEditPage()||document.getElementById(PANEL_ID)||!document.body) return;
+
   const panel=document.createElement('div');
   panel.id=PANEL_ID;
   panel.style.cssText='position:fixed;top:10px;right:10px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;width:120px;z-index:2147483647;pointer-events:none';
+
   autoButton=makeButton('自動OFF','#777',()=>{
     autoEnabled=!autoEnabled;
-    if(autoEnabled){ scheduleNextFire(); startCountdown(); }
-    else{
+
+    if(autoEnabled){
+      scheduleNextFire();
+      startCountdown();
+    }else{
       clearTimeout(fireTimer);
       fireTimer=null;
       nextFireAt=0;
       stopCountdown();
     }
+
     updateAutoButtonBg();
     pending.size?updatePending():updateCountdown();
   });
+
   vacancySelectButton=makeButton('選択OFF','#777',()=>{
     vacancySelectMode=vacancySelectMode===0?2:vacancySelectMode===2?1:0;
     vacancySelectToken++;
     updateVacancyButton();
   });
+
   const priorityControls=makePriorityControls();
+
   autoConfirmButton=makeButton('確定 OFF','#777',()=>{
     autoConfirmEnabled=!autoConfirmEnabled;
     clearTimeout(autoConfirmTimer);
     autoConfirmTimer=null;
+
     if(autoConfirmEnabled){
       const c=getSelectedTimeInfo();
       lastObservedCurrentSignature=c?c.signature:'';
     }
+
     updateAutoConfirmButton();
   });
-  notifyButton=makeButton('通知 ON','#f9a825',()=>{
+
+  notifyButton=makeButton('通知 OFF','#777',()=>{
     notifyEnabled=!notifyEnabled;
     updateNotifyButton();
   });
+
   recordButton=makeButton('記録 OFF','#777',toggleRecording);
-  const allOnButton=makeButton('全部ON','#1565c0',()=>{
-    if(!autoEnabled){ autoEnabled=true; scheduleNextFire(); startCountdown(); }
+
+  const allOnButton=makeButton('全部ON','#6a1b9a',()=>{
+    if(!autoEnabled){
+      autoEnabled=true;
+      scheduleNextFire();
+      startCountdown();
+    }
+
     vacancySelectMode=2;
     vacancySelectToken++;
     updateVacancyButton();
+
     autoConfirmEnabled=true;
     clearTimeout(autoConfirmTimer);
     autoConfirmTimer=null;
+
     const c=getSelectedTimeInfo();
     lastObservedCurrentSignature=c?c.signature:'';
+
     updateAutoConfirmButton();
     updateAutoButtonBg();
     pending.size?updatePending():updateCountdown();
+
     manualReload();
   });
+
   const manualButton=makeButton('1名','#198754',manualReload);
+
   panel.append(autoButton,vacancySelectButton,priorityControls,autoConfirmButton,notifyButton,recordButton,allOnButton,manualButton);
   document.body.appendChild(panel);
+
   updateVacancyButton();
   updateAutoConfirmButton();
   updateNotifyButton();
   updateRecordButton();
   updateAutoButtonBg();
   pending.size?updatePending():updateCountdown();
+
   const c=getSelectedTimeInfo();
   lastObservedCurrentSignature=c?c.signature:'';
+
   console.log(`[TDR TravelBag] v${VERSION} パネル起動`);
 }
+
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',createPanel,{once:true});
 else createPanel();
+
 console.log(`[TDR TravelBag] v${VERSION} 通信監視起動`);
 })();
