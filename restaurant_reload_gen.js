@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.77
+// @version      4.78
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -85,9 +85,7 @@
     const lastTime = Number(localStorage.getItem('accessDeniedLastNotifyTime') || '0');
     const lastReference = localStorage.getItem('accessDeniedLastReference') || '';
     const currentReference = reference || location.href;
-
     if (currentReference === lastReference && now - lastTime < ACCESS_DENIED_NOTIFY_COOLDOWN) return false;
-
     localStorage.setItem('accessDeniedLastNotifyTime', String(now));
     localStorage.setItem('accessDeniedLastReference', currentReference);
     return true;
@@ -205,6 +203,8 @@
     return Math.floor(Math.random() * (1320 - 1080 + 1)) + 1080;
   }
 
+  const savedSearchStatus = localStorage.getItem('searchStatus');
+
   const state = {
     lastSearchStartTime: 0,
     isSearchPending: false,
@@ -213,10 +213,12 @@
     autoF5: localStorage.getItem('autoF520min') !== '0',
     autoReserve: localStorage.getItem('autoReserveClick') === '1',
     notifyMode: loadNotifyMode(),
-    searchStatus: localStorage.getItem('searchStatus') || 'M',
+    searchStatus: ['OFF', 'L', 'M', 'S', 'T'].includes(savedSearchStatus) ? savedSearchStatus : 'M',
     excludedTimes: JSON.parse(localStorage.getItem('excludedTimes') || '[]'),
     autoReserveNotifyHistory: JSON.parse(localStorage.getItem('autoReserveNotifyHistory') || '{}'),
     waitSec: 15,
+    exactTargetAt: 0,
+    exactTimer: null,
     f5WaitSec: createF5WaitSec(),
     lastClickedMealName: '',
     commodityMealMap: {},
@@ -255,11 +257,9 @@
 
   function refreshCommodityMealMap(root = document) {
     if (!root?.querySelectorAll) return;
-
     root.querySelectorAll('section').forEach(section => {
       const meal = normalizeMealName(section.querySelector('h1.hdg03, h1')?.textContent || '');
       if (!meal) return;
-
       section.querySelectorAll('.commodityCD').forEach(input => {
         const code = input.value?.trim();
         if (code) state.commodityMealMap[code] = meal;
@@ -286,7 +286,6 @@
     for (const row of document.querySelectorAll('.conditionBox tr')) {
       const th = row.querySelector('th');
       const td = row.querySelector('td');
-
       if (th && td && th.textContent.includes('時間帯')) {
         const meal = normalizeMealName(td.textContent);
         if (meal) return meal;
@@ -304,7 +303,6 @@
       const meal = normalizeMealName(h1.textContent);
       if (meal) return meal;
     }
-
     return '';
   }
 
@@ -665,6 +663,7 @@
     state.searchStatus = 'OFF';
     state.isSearchPending = false;
     state.ajaxPendingCount = 0;
+    clearExactSearchTimer();
 
     if (state.ajaxBatchFinalizeTimer) {
       clearTimeout(state.ajaxBatchFinalizeTimer);
@@ -852,6 +851,7 @@
     state.autoReserve = false;
     localStorage.setItem('searchStatus', 'OFF');
     localStorage.setItem('autoReserveClick', '0');
+    clearExactSearchTimer();
     updatePanels();
   }
 
@@ -870,9 +870,7 @@
         !time ||
         state.excludedTimes.includes(time) ||
         !link
-      ) {
-        continue;
-      }
+      ) continue;
 
       state.autoReserveLockUntil = Date.now() + 3000;
 
@@ -889,9 +887,7 @@
       return;
     }
 
-    if (attempt < 5) {
-      setTimeout(() => tryAutoReserveClick(attempt + 1), 100);
-    }
+    if (attempt < 5) setTimeout(() => tryAutoReserveClick(attempt + 1), 100);
   }
 
   const panels = {};
@@ -933,15 +929,21 @@
         OFF: '#333',
         L: '#007bff',
         M: '#ff8c00',
+        T: '#28a745',
         S: '#e83e8c'
       };
 
-      panels.main.textContent =
-        state.isSearchPending
-          ? '読込中'
-          : state.searchStatus === 'OFF'
-            ? 'OFF'
-            : state.waitSec;
+      if (state.isSearchPending) {
+        panels.main.textContent = '読込中';
+      } else if (state.searchStatus === 'OFF') {
+        panels.main.textContent = 'OFF';
+      } else if (state.searchStatus === 'T') {
+        panels.main.textContent = state.exactTargetAt
+          ? Math.max(0, Math.ceil((state.exactTargetAt - Date.now()) / 1000))
+          : 0;
+      } else {
+        panels.main.textContent = state.waitSec;
+      }
 
       panels.main.style.background = colors[state.searchStatus];
     }
@@ -981,8 +983,78 @@
     }
   }
 
+  function clearExactSearchTimer() {
+    if (state.exactTimer) {
+      clearTimeout(state.exactTimer);
+      state.exactTimer = null;
+    }
+    state.exactTargetAt = 0;
+  }
+
+  function isMaintenanceNow() {
+    const d = new Date();
+    const secTotal = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+    return secTotal >= 10795 && secTotal <= 18005;
+  }
+
+  function scheduleExactSearch() {
+    clearExactSearchTimer();
+    if (state.searchStatus !== 'T') return;
+
+    const now = Date.now();
+    const minuteStart = Math.floor(now / 60000) * 60000;
+    const offset = 59700 + Math.random() * 100;
+    let target = minuteStart + offset;
+
+    if (target <= now) target += 60000;
+
+    state.exactTargetAt = target;
+    state.waitSec = Math.max(0, Math.ceil((target - now) / 1000));
+
+    state.exactTimer = setTimeout(() => {
+      state.exactTimer = null;
+
+      if (state.searchStatus !== 'T') {
+        state.exactTargetAt = 0;
+        return;
+      }
+
+      if (
+        state.errorReloadScheduled ||
+        state.freezeReloadScheduled ||
+        state.isSearchPending ||
+        isMaintenanceNow()
+      ) {
+        scheduleExactSearch();
+        updatePanels(isMaintenanceNow());
+        return;
+      }
+
+      state.exactTargetAt = 0;
+      const targetDisp = document.querySelector('#reservationOfDateDisp1');
+
+      if (targetDisp) {
+        targetDisp.click();
+      } else {
+        scheduleExactSearch();
+      }
+    }, Math.max(0, target - now));
+
+    updatePanels();
+  }
+
   function resetWaitSec() {
-    if (state.searchStatus === 'OFF') return;
+    if (state.searchStatus === 'OFF') {
+      clearExactSearchTimer();
+      return;
+    }
+
+    if (state.searchStatus === 'T') {
+      scheduleExactSearch();
+      return;
+    }
+
+    clearExactSearchTimer();
 
     const ranges = {
       S: [1, 5],
@@ -996,13 +1068,14 @@
 
   panels.main = createPanel(10, '#333', () => {
     const nextStatus = {
+      M: 'T',
+      T: 'S',
+      S: 'OFF',
       OFF: 'L',
-      L: 'M',
-      M: 'S',
-      S: 'OFF'
+      L: 'M'
     };
 
-    state.searchStatus = nextStatus[state.searchStatus];
+    state.searchStatus = nextStatus[state.searchStatus] || 'M';
     localStorage.setItem('searchStatus', state.searchStatus);
     state.lastNotificationTime = 0;
     resetWaitSec();
@@ -1043,7 +1116,6 @@
     state.autoOpen = !state.autoOpen;
     localStorage.setItem('autoOpenTimeTabs', state.autoOpen ? '1' : '0');
     updatePanels();
-
     if (state.autoOpen) openAllTimeSlots();
   });
   panels.open.style.right = '84px';
@@ -1065,7 +1137,6 @@
       if (h1 && contents && contents.style.display === 'none') {
         setTimeout(() => {
           state.suppressReloadClick = true;
-
           try {
             h1.click();
           } finally {
@@ -1109,9 +1180,7 @@
         if (
           !/^\d{1,2}:\d{2}$/.test(timeStr) ||
           tdState.querySelector('.ex-switch')
-        ) {
-          return;
-        }
+        ) return;
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -1301,9 +1370,7 @@
 
   const targetDisp = document.querySelector('#reservationOfDateDisp1');
 
-  if (targetDisp) {
-    reloadSP($(targetDisp));
-  }
+  if (targetDisp) reloadSP($(targetDisp));
 
   document
     .querySelectorAll('section > div > h1:nth-child(1)')
@@ -1330,9 +1397,7 @@
     if (
       state.errorReloadScheduled ||
       state.freezeReloadScheduled
-    ) {
-      return;
-    }
+    ) return;
 
     if (
       secTotal >= 10795 &&
@@ -1359,6 +1424,18 @@
         location.reload();
         return;
       }
+    }
+
+    if (state.searchStatus === 'T') {
+      updatePanels();
+
+      if (state.isSearchPending) return;
+
+      if (!state.exactTargetAt || !state.exactTimer) {
+        scheduleExactSearch();
+      }
+
+      return;
     }
 
     if (state.isSearchPending) {
