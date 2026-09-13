@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.64
+// @version      1.66
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.64', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.66', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -22,7 +22,7 @@ let autoReloadSeq=0, autoReloadWatch=null;
 let vacancySelectMode=0, vacancySelectButton=null, vacancySelectToken=0;
 let autoConfirmEnabled=false, autoConfirmButton=null, autoConfirmTimer=null, lastObservedCurrentSignature='';
 let notifyEnabled=false, notifyButton=null, webhookWarned=false;
-let recordButton=null, recordStartedAt=new Date(), recordedLogs=[];
+let recordButton=null, recordedLogs=[], lastLoggedRestaurantLabel='';
 let currentRestaurantName='', currentReservationPrivilege=false, currentRoomPrivilege=false;
 let reservationNoticeActive=false, restaurantModalHandled=false, pageObserver=null, purchasePending=0;
 
@@ -34,13 +34,18 @@ const pad=(n,l=2)=>String(n).padStart(l,'0');
 function formatTimeMs(d=new Date()){
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
 }
-
 function formatDateTimeMs(d=new Date()){
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${formatTimeMs(d)}`;
 }
-
 function formatFileStamp(d=new Date()){
   return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+function sanitizeFilePart(s){
+  return String(s||'')
+    .replace(/[\\/:*?"<>|]/g,'_')
+    .replace(/\s+/g,' ')
+    .trim()
+    .replace(/[. ]+$/g,'')||'レストラン不明';
 }
 
 function valueText(v,seen=new WeakSet()){
@@ -50,35 +55,28 @@ function valueText(v,seen=new WeakSet()){
   if(typeof v==='bigint') return `${v}n`;
   if(v instanceof Error) return v.stack||v.message||String(v);
   if(v instanceof Element) return v.outerHTML;
-
   if(typeof v==='object'){
     try{
       return JSON.stringify(v,(k,x)=>{
         if(typeof x==='bigint') return `${x}n`;
-
         if(x&&typeof x==='object'){
           if(seen.has(x)) return '[Circular]';
           seen.add(x);
         }
-
         return x;
       });
     }catch{}
   }
-
   return String(v);
 }
 
 function consoleText(args){
   const a=[...args];
-
   if(typeof a[0]==='string'){
     const styles=(a[0].match(/%c/g)||[]).length;
     a[0]=a[0].replace(/%c/g,'');
-
     if(styles) a.splice(1,styles);
   }
-
   return a.map(v=>valueText(v)).join(' ');
 }
 
@@ -88,9 +86,7 @@ function recordConsole(level,args){
 
 for(const name of ['log','info','warn','error','debug']){
   const original=console[name]?.bind(console);
-
   if(!original) continue;
-
   console[name]=(...args)=>{
     original(...args);
     recordConsole(name.toUpperCase(),args);
@@ -104,37 +100,30 @@ function csvCell(v){
 function playExportSound(){
   try{
     const AC=window.AudioContext||window.webkitAudioContext;
-
     if(!AC) return;
-
-    const ctx=new AC();
-    const osc=ctx.createOscillator();
-    const gain=ctx.createGain();
+    const ctx=new AC(), osc=ctx.createOscillator(), gain=ctx.createGain();
 
     osc.type='sine';
     osc.frequency.setValueAtTime(880,ctx.currentTime);
-
     gain.gain.setValueAtTime(.08,ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.12);
 
     osc.connect(gain);
     gain.connect(ctx.destination);
-
     osc.start();
     osc.stop(ctx.currentTime+.12);
 
-    osc.addEventListener('ended',()=>{
-      ctx.close().catch(()=>{});
-    },{once:true});
+    osc.addEventListener('ended',()=>ctx.close().catch(()=>{}),{once:true});
   }catch{}
 }
 
 function exportRecordedCsv(){
   const logs=recordedLogs;
-  const startedAt=recordStartedAt;
+  const savedAt=new Date();
+  const restaurant=sanitizeFilePart(lastLoggedRestaurantLabel);
 
   recordedLogs=[];
-  recordStartedAt=new Date();
+  lastLoggedRestaurantLabel='';
 
   playExportSound();
 
@@ -145,7 +134,7 @@ function exportRecordedCsv(){
   const a=document.createElement('a');
 
   a.href=url;
-  a.download=`travelbag_log_${formatFileStamp(startedAt)}.csv`;
+  a.download=`${formatFileStamp(savedAt)}_${restaurant}_travelbag.csv`;
   a.style.display='none';
 
   document.body.appendChild(a);
@@ -157,15 +146,12 @@ function exportRecordedCsv(){
 
 function normalizePriority(v){
   const m=String(v||'').trim().match(/^(11|12|13|14|15|16|17|18|19|20|21):(--|00|10|15|20|30|40|45|50)$/);
-
   if(!m) return '';
-
   return `${m[1]}:${m[2]==='15'?'10':m[2]==='45'?'40':m[2]}`;
 }
 
 function normalizePriorityTimes(a){
   const out=['','','','',''];
-
   if(!Array.isArray(a)) return out;
 
   let stop=false;
@@ -189,11 +175,9 @@ function normalizePriorityTimes(a){
 function loadPriorityTimes(){
   try{
     const raw=localStorage.getItem(PRIORITY_KEY);
-
     if(raw) return normalizePriorityTimes(JSON.parse(raw));
 
     const legacy=normalizePriority(localStorage.getItem(LEGACY_KEY));
-
     if(legacy) return [legacy,'','','',''];
   }catch(e){
     console.warn('[TDR TravelBag] 優先時間読込失敗',e);
@@ -234,7 +218,6 @@ function getPriorities(){
 
   for(let i=0;i<vals.length;i++){
     const v=normalizePriority(vals[i]);
-
     if(!v) break;
 
     const [hour,minute]=v.split(':');
@@ -252,7 +235,6 @@ function getPriorities(){
 
 function priorityMatches(p,time){
   const m=String(time||'').trim().match(/^(\d{1,2}):(\d{2})$/);
-
   if(!p||!m) return false;
 
   const hour=m[1].padStart(2,'0');
@@ -270,7 +252,6 @@ function priorityRank(time,ps){
   for(let i=0;i<ps.length;i++){
     if(priorityMatches(ps[i],time)) return i;
   }
-
   return ps.length;
 }
 
@@ -308,7 +289,6 @@ function updatePriorityRows(){
 
 function priorityHourChanged(index){
   const r=priorityRows[index];
-
   if(!r) return;
 
   if(!r.hour.value){
@@ -368,7 +348,6 @@ function prepareReservationForm(){
     window.jQuery('input[name="telNum"]').val(phone);
   }else{
     const el=document.querySelector('input[name="telNum"]');
-
     if(el) el.value=phone;
   }
 
@@ -379,7 +358,6 @@ function prepareReservationForm(){
 
 function getSelectedTimeInfo(){
   const li=document.querySelector('#timeSlider li.current');
-
   if(!li) return null;
 
   const time=li.querySelector('a')?.textContent?.trim()||'';
@@ -410,7 +388,6 @@ function scheduleAutoConfirm(info){
     }
 
     const cur=getSelectedTimeInfo();
-
     if(!cur||cur.signature!==sig) return;
 
     prepareReservationForm();
@@ -528,7 +505,6 @@ function findModalByTitle(title,preferHighLayer=false){
 
   if(preferHighLayer){
     const high=modals.find(m=>m.classList.contains('highLayer'));
-
     if(high) return high;
   }
 
@@ -1157,6 +1133,10 @@ function printTimeGet(source,url,response,body){
   const now=formatTimeMs();
   const name=restaurantLabel();
 
+  if(name){
+    lastLoggedRestaurantLabel=name;
+  }
+
   for(const code of Object.keys(grouped)){
     console.log(
       `%c${now}`,
@@ -1438,51 +1418,42 @@ XMLHttpRequest.prototype.send=function(body){
 
   if(timeGet){
     markAutoReloadTimeGetStarted();
-
     id=startPending();
 
-    this.addEventListener(
-      'loadend',
-      ()=>{
-        let response='';
+    this.addEventListener('loadend',()=>{
+      let response='';
 
+      try{
+        response=
+          this.responseType===''||
+          this.responseType==='text'
+            ?this.responseText||''
+            :this.response;
+      }catch{
         try{
-          response=
-            this.responseType===''||
-            this.responseType==='text'
-              ?this.responseText||''
-              :this.response;
-        }catch{
-          try{
-            response=
-              this.response||'';
-          }catch{}
-        }
-
-        try{
-          const data=
-            printTimeGet(
-              `xhr/${info.method}`,
-              info.url,
-              response,
-              body
-            );
-
-          if(data){
-            scheduleVacancySelect(
-              data
-            );
-          }
-        }finally{
-          endPending(id);
-        }
+          response=this.response||'';
+        }catch{}
       }
-    );
+
+      try{
+        const data=printTimeGet(
+          `xhr/${info.method}`,
+          info.url,
+          response,
+          body
+        );
+
+        if(data){
+          scheduleVacancySelect(data);
+        }
+      }finally{
+        endPending(id);
+      }
+    });
   }
 
   if(detail){
-    detailSeq=
-      markAutoReloadDetailStarted();
+    detailSeq=markAutoReloadDetailStarted();
 
     if(detailSeq!==null){
       this.addEventListener(
@@ -1503,11 +1474,10 @@ XMLHttpRequest.prototype.send=function(body){
     this.addEventListener(
       'loadend',
       ()=>{
-        purchasePending=
-          Math.max(
-            0,
-            purchasePending-1
-          );
+        purchasePending=Math.max(
+          0,
+          purchasePending-1
+        );
       },
       {once:true}
     );
@@ -1530,11 +1500,10 @@ XMLHttpRequest.prototype.send=function(body){
     }
 
     if(purchase){
-      purchasePending=
-        Math.max(
-          0,
-          purchasePending-1
-        );
+      purchasePending=Math.max(
+        0,
+        purchasePending-1
+      );
     }
 
     throw e;
@@ -1565,9 +1534,7 @@ function adultNum(){
     :null;
 }
 
-function fireStockReload(
-  isFirstAuto=false
-){
+function fireStockReload(isFirstAuto=false){
   const $a=
     adultNum();
 
@@ -1602,9 +1569,7 @@ function manualReload(){
   );
 }
 
-function scheduleNextFire(
-  forceNextMinute=false
-){
+function scheduleNextFire(forceNextMinute=false){
   clearTimeout(
     fireTimer
   );
