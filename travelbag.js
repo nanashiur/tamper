@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.66
+// @version      1.76
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.66', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.76', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -31,21 +31,11 @@ const HOURS=['11','12','13','14','15','16','17','18','19','20','21'];
 const MINUTES=['00','10','20','30','40','50'], priorityRows=[];
 const pad=(n,l=2)=>String(n).padStart(l,'0');
 
-function formatTimeMs(d=new Date()){
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
-}
-function formatDateTimeMs(d=new Date()){
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${formatTimeMs(d)}`;
-}
-function formatFileStamp(d=new Date()){
-  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-}
+function formatTimeMs(d=new Date()){ return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; }
+function formatDateTimeMs(d=new Date()){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${formatTimeMs(d)}`; }
+function formatFileStamp(d=new Date()){ return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; }
 function sanitizeFilePart(s){
-  return String(s||'')
-    .replace(/[\\/:*?"<>|]/g,'_')
-    .replace(/\s+/g,' ')
-    .trim()
-    .replace(/[. ]+$/g,'')||'レストラン不明';
+  return String(s||'').replace(/[\\/:*?"<>|]/g,'_').replace(/\s+/g,' ').trim().replace(/[. ]+$/g,'')||'レストラン不明';
 }
 
 function valueText(v,seen=new WeakSet()){
@@ -80,9 +70,7 @@ function consoleText(args){
   return a.map(v=>valueText(v)).join(' ');
 }
 
-function recordConsole(level,args){
-  recordedLogs.push([formatDateTimeMs(),level,consoleText(args)]);
-}
+function recordConsole(level,args){ recordedLogs.push([formatDateTimeMs(),level,consoleText(args)]); }
 
 for(const name of ['log','info','warn','error','debug']){
   const original=console[name]?.bind(console);
@@ -93,54 +81,40 @@ for(const name of ['log','info','warn','error','debug']){
   };
 }
 
-function csvCell(v){
-  return `"${String(v??'').replace(/"/g,'""')}"`;
-}
+function csvCell(v){ return `"${String(v??'').replace(/"/g,'""')}"`; }
 
 function playExportSound(){
   try{
     const AC=window.AudioContext||window.webkitAudioContext;
     if(!AC) return;
     const ctx=new AC(), osc=ctx.createOscillator(), gain=ctx.createGain();
-
     osc.type='sine';
     osc.frequency.setValueAtTime(880,ctx.currentTime);
     gain.gain.setValueAtTime(.08,ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.12);
-
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime+.12);
-
     osc.addEventListener('ended',()=>ctx.close().catch(()=>{}),{once:true});
   }catch{}
 }
 
 function exportRecordedCsv(){
-  const logs=recordedLogs;
-  const savedAt=new Date();
-  const restaurant=sanitizeFilePart(lastLoggedRestaurantLabel);
-
+  const logs=recordedLogs, savedAt=new Date(), restaurant=sanitizeFilePart(lastLoggedRestaurantLabel);
   recordedLogs=[];
   lastLoggedRestaurantLabel='';
-
   playExportSound();
 
   const rows=[['日時','レベル','ログ'],...logs];
   const csv='\uFEFF'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url;
   a.download=`${formatFileStamp(savedAt)}_${restaurant}_travelbag.csv`;
   a.style.display='none';
-
   document.body.appendChild(a);
   a.click();
   a.remove();
-
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
@@ -153,22 +127,13 @@ function normalizePriority(v){
 function normalizePriorityTimes(a){
   const out=['','','','',''];
   if(!Array.isArray(a)) return out;
-
   let stop=false;
-
   for(let i=0;i<5;i++){
     if(stop) continue;
-
     const v=normalizePriority(a[i]);
-
-    if(!v){
-      stop=true;
-      continue;
-    }
-
+    if(!v){ stop=true; continue; }
     out[i]=v;
   }
-
   return out;
 }
 
@@ -176,30 +141,19 @@ function loadPriorityTimes(){
   try{
     const raw=localStorage.getItem(PRIORITY_KEY);
     if(raw) return normalizePriorityTimes(JSON.parse(raw));
-
     const legacy=normalizePriority(localStorage.getItem(LEGACY_KEY));
     if(legacy) return [legacy,'','','',''];
-  }catch(e){
-    console.warn('[TDR TravelBag] 優先時間読込失敗',e);
-  }
-
+  }catch(e){ console.warn('[TDR TravelBag] 優先時間読込失敗',e); }
   return ['','','','',''];
 }
 
 function getPriorityTimes(){
   const out=[];
-
   for(const {hour,minute} of priorityRows){
-    if(!hour.value){
-      out.push('');
-      break;
-    }
-
+    if(!hour.value){ out.push(''); break; }
     out.push(`${hour.value}:${minute.value||'--'}`);
   }
-
   while(out.length<5) out.push('');
-
   return normalizePriorityTimes(out);
 }
 
@@ -207,211 +161,138 @@ function savePriorityTimes(){
   try{
     localStorage.setItem(PRIORITY_KEY,JSON.stringify(getPriorityTimes()));
     localStorage.removeItem(LEGACY_KEY);
-  }catch(e){
-    console.warn('[TDR TravelBag] 優先時間保存失敗',e);
-  }
+  }catch(e){ console.warn('[TDR TravelBag] 優先時間保存失敗',e); }
 }
 
 function getPriorities(){
-  const vals=priorityRows.length?getPriorityTimes():loadPriorityTimes();
-  const out=[];
-
+  const vals=priorityRows.length?getPriorityTimes():loadPriorityTimes(), out=[];
   for(let i=0;i<vals.length;i++){
     const v=normalizePriority(vals[i]);
     if(!v) break;
-
     const [hour,minute]=v.split(':');
-
-    out.push({
-      index:i,
-      hour,
-      minute:minute==='--'?'':minute,
-      display:v
-    });
+    out.push({index:i,hour,minute:minute==='--'?'':minute,display:v});
   }
-
   return out;
 }
 
 function priorityMatches(p,time){
   const m=String(time||'').trim().match(/^(\d{1,2}):(\d{2})$/);
   if(!p||!m) return false;
-
-  const hour=m[1].padStart(2,'0');
-  const minute=m[2];
-
+  const hour=m[1].padStart(2,'0'), minute=m[2];
   if(hour!==p.hour) return false;
   if(!p.minute) return true;
   if(p.minute==='10') return minute==='10'||minute==='15';
   if(p.minute==='40') return minute==='40'||minute==='45';
-
   return minute===p.minute;
 }
 
 function priorityRank(time,ps){
-  for(let i=0;i<ps.length;i++){
-    if(priorityMatches(ps[i],time)) return i;
-  }
+  for(let i=0;i<ps.length;i++) if(priorityMatches(ps[i],time)) return i;
   return ps.length;
 }
 
-function matchingPriority(time){
-  return getPriorities().find(p=>priorityMatches(p,time))||null;
-}
+function matchingPriority(time){ return getPriorities().find(p=>priorityMatches(p,time))||null; }
 
 function updatePriorityRows(){
   let active=true;
-
   for(const {row,label,hour,minute} of priorityRows){
     if(!active){
-      hour.value='';
-      minute.value='';
-      hour.disabled=true;
-      minute.disabled=true;
+      hour.value=minute.value='';
+      hour.disabled=minute.disabled=true;
       row.style.opacity='.4';
       label.style.color='#777';
       continue;
     }
-
     hour.disabled=false;
     row.style.opacity='1';
     label.style.color='#000';
-
     if(!hour.value){
       minute.value='';
       minute.disabled=true;
       active=false;
-    }else{
-      minute.disabled=false;
-    }
+    }else minute.disabled=false;
   }
 }
 
 function priorityHourChanged(index){
   const r=priorityRows[index];
   if(!r) return;
-
   if(!r.hour.value){
     r.minute.value='';
-
-    for(let i=index+1;i<priorityRows.length;i++){
-      priorityRows[i].hour.value='';
-      priorityRows[i].minute.value='';
-    }
+    for(let i=index+1;i<priorityRows.length;i++) priorityRows[i].hour.value=priorityRows[i].minute.value='';
   }
-
   updatePriorityRows();
   savePriorityTimes();
 }
 
 function updateVacancyButton(){
   if(!vacancySelectButton) return;
-
-  const states=[
-    ['選択OFF','#777'],
-    ['選択回避','#fb8c00'],
-    ['選択強制','#e65100']
-  ];
-
+  const states=[['選択OFF','#777'],['選択回避','#fb8c00'],['選択強制','#e65100']];
   vacancySelectButton.textContent=states[vacancySelectMode][0];
   vacancySelectButton.style.background=states[vacancySelectMode][1];
 }
 
 function updateAutoConfirmButton(){
   if(!autoConfirmButton) return;
-
   autoConfirmButton.textContent=autoConfirmEnabled?'確定 ON':'確定 OFF';
   autoConfirmButton.style.background=autoConfirmEnabled?'#d32f2f':'#777';
 }
 
 function updateNotifyButton(){
   if(!notifyButton) return;
-
   notifyButton.textContent=notifyEnabled?'通知 ON':'通知 OFF';
   notifyButton.style.background=notifyEnabled?'#f9a825':'#777';
 }
 
 function getPhoneNumber(){
   const phone=window.TDR_WEBHOOKS?.phone;
-
   if(typeof phone==='string'&&phone.trim()) return phone.trim();
-
   console.warn('[TDR TravelBag] 電話番号を取得できないため090を使用します');
-
   return '090';
 }
 
 function prepareReservationForm(){
   const phone=getPhoneNumber();
-
-  if(window.jQuery){
-    window.jQuery('input[name="telNum"]').val(phone);
-  }else{
+  if(window.jQuery) window.jQuery('input[name="telNum"]').val(phone);
+  else{
     const el=document.querySelector('input[name="telNum"]');
     if(el) el.value=phone;
   }
-
   const agree=document.getElementById('agree');
-
   if(agree&&!agree.checked) agree.click();
 }
 
 function getSelectedTimeInfo(){
   const li=document.querySelector('#timeSlider li.current');
   if(!li) return null;
-
   const time=li.querySelector('a')?.textContent?.trim()||'';
   const openNumKey=li.querySelector('input[name="openNumKey"]')?.value||'';
   const commodityCD=li.querySelector('input[name="commodityCD"]')?.value||'';
-
-  return time?{
-    time,
-    openNumKey,
-    commodityCD,
-    signature:`${commodityCD}|${openNumKey}|${time}`
-  }:null;
+  return time?{time,openNumKey,commodityCD,signature:`${commodityCD}|${openNumKey}|${time}`}:null;
 }
 
 function scheduleAutoConfirm(info){
   if(!autoConfirmEnabled||!info) return;
-
   clearTimeout(autoConfirmTimer);
-
   const sig=info.signature;
 
   autoConfirmTimer=setTimeout(()=>{
     if(!autoConfirmEnabled) return;
-
-    if(purchasePending>0){
-      console.log('[TDR TravelBag] 自動確定: purchase系通信中 → スキップ');
-      return;
-    }
+    if(purchasePending>0) return console.log('[TDR TravelBag] 自動確定: purchase系通信中 → スキップ');
 
     const cur=getSelectedTimeInfo();
     if(!cur||cur.signature!==sig) return;
-
     prepareReservationForm();
 
     setTimeout(()=>{
       if(!autoConfirmEnabled) return;
+      if(purchasePending>0) return console.log('[TDR TravelBag] 自動確定: purchase系通信中 → スキップ');
 
-      if(purchasePending>0){
-        console.log('[TDR TravelBag] 自動確定: purchase系通信中 → スキップ');
-        return;
-      }
-
-      const now=getSelectedTimeInfo();
-      const btn=document.getElementById('confirmBtn');
-
+      const now=getSelectedTimeInfo(), btn=document.getElementById('confirmBtn');
       if(!now||now.signature!==sig) return;
-
-      if(!btn){
-        console.warn('[TDR TravelBag] 自動確定: confirmBtn が見つかりません');
-        return;
-      }
+      if(!btn) return console.warn('[TDR TravelBag] 自動確定: confirmBtn が見つかりません');
 
       console.log('[TDR TravelBag] 自動確定:',now.time,now.commodityCD,now.openNumKey);
-
       btn.click();
     },0);
   },0);
@@ -419,42 +300,26 @@ function scheduleAutoConfirm(info){
 
 function checkAutoConfirmSelection(){
   const cur=getSelectedTimeInfo();
-
-  if(!cur){
-    lastObservedCurrentSignature='';
-    return;
-  }
-
+  if(!cur){ lastObservedCurrentSignature=''; return; }
   if(cur.signature===lastObservedCurrentSignature) return;
-
   lastObservedCurrentSignature=cur.signature;
-
   if(autoConfirmEnabled) scheduleAutoConfirm(cur);
 }
 
-function normalizeModalText(s){
-  return String(s||'').replace(/\s+/g,'').trim();
-}
+function normalizeModalText(s){ return String(s||'').replace(/\s+/g,'').trim(); }
 
 function visible(el){
   if(!el) return false;
-
   const s=getComputedStyle(el);
-
-  return s.display!=='none'&&
-         s.visibility!=='hidden'&&
-         Number(s.opacity||1)!==0;
+  return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)!==0;
 }
 
 function setRestaurantInfo(a){
   const name=a?.querySelector(':scope > p.caption > span')?.textContent?.trim();
-
   if(!name) return false;
-
   currentRestaurantName=name;
   currentReservationPrivilege=!!a.querySelector('img[alt="予約特典付き"]');
   currentRoomPrivilege=!!a.querySelector('img[alt="客室特典付き"]');
-
   return true;
 }
 
@@ -464,26 +329,18 @@ function restaurantLabel(){
 
 function captureRestaurantInfo(e){
   if(!(e.target instanceof Element)) return;
-
   const a=e.target.closest('a[href="javascript:void(0);"]');
-
-  if(!a||
-     !a.querySelector(':scope > p.photo')||
-     !a.querySelector(':scope > p.caption > span')) return;
-
+  if(!a||!a.querySelector(':scope > p.photo')||!a.querySelector(':scope > p.caption > span')) return;
   const modal=a.closest('.js-travelBagModal');
-
   if(modal&&visible(modal)) setRestaurantInfo(a);
 }
 
 function refreshRestaurantInfo(){
   const modal=[...document.querySelectorAll('.js-travelBagModal')].find(visible);
-
   if(!modal) return;
 
   const a=[...modal.querySelectorAll('li.current > a')].find(x=>
-    x.querySelector(':scope > p.photo')&&
-    x.querySelector(':scope > p.caption > span')
+    x.querySelector(':scope > p.photo')&&x.querySelector(':scope > p.caption > span')
   );
 
   if(a) setRestaurantInfo(a);
@@ -513,7 +370,6 @@ function findModalByTitle(title,preferHighLayer=false){
 
 function findOverlapReservationModal(){
   const modal=findModalByTitle('選択されたご予約時間が、下記のご予約時間と重なっています。');
-
   if(!modal) return null;
 
   const h3=Array.from(modal.querySelectorAll('h3')).map(el=>normalizeModalText(el.textContent));
@@ -526,21 +382,18 @@ function findOverlapReservationModal(){
 
 function closeOverlapReservationModal(){
   const modal=findOverlapReservationModal();
-
   if(!modal) return false;
 
   const img=modal.querySelector('img[alt="確認しました"]');
 
   console.log('[TDR TravelBag] 重複警告を自動クローズ');
-
   (img.closest('a,button')||img).click();
 
   return true;
 }
 
 function setupNoticeModal(modal){
-  const accept=modal.querySelector('#accept');
-  const next=modal.querySelector('#btnNext');
+  const accept=modal.querySelector('#accept'), next=modal.querySelector('#btnNext');
 
   if(!accept||!next){
     reservationNoticeActive=false;
@@ -570,7 +423,6 @@ function setupNoticeModal(modal){
     }
 
     console.log('[TDR TravelBag] ポップアップ自動処理: 同意ON → 次へ');
-
     btn.click();
 
     setTimeout(()=>{
@@ -592,17 +444,13 @@ function processTravelBagModals(){
 
   reservationNoticeActive=false;
 
-  if(closeOverlapReservationModal()){
-    setTimeout(processTravelBagModals,300);
-  }
+  if(closeOverlapReservationModal()) setTimeout(processTravelBagModals,300);
 }
 
 function processRestaurantModal(){
   const modal=[...document.querySelectorAll('.js-travelBagModal')].find(visible);
 
-  if(!modal||
-     !modal.querySelector('select[name="adultNum"]')||
-     !modal.querySelector('#timeSlider')){
+  if(!modal||!modal.querySelector('select[name="adultNum"]')||!modal.querySelector('#timeSlider')){
     restaurantModalHandled=false;
     return;
   }
@@ -615,9 +463,8 @@ function processRestaurantModal(){
 
   if(adult.value==='1') return;
 
-  if(window.jQuery){
-    window.jQuery(adult).val('1').trigger('change');
-  }else{
+  if(window.jQuery) window.jQuery(adult).val('1').trigger('change');
+  else{
     adult.value='1';
     adult.dispatchEvent(new Event('change',{bubbles:true}));
   }
@@ -625,11 +472,7 @@ function processRestaurantModal(){
 
 function installPageObserver(){
   if(pageObserver) return;
-
-  if(!document.documentElement){
-    setTimeout(installPageObserver,0);
-    return;
-  }
+  if(!document.documentElement) return setTimeout(installPageObserver,0);
 
   pageObserver=new MutationObserver(()=>{
     processRestaurantModal();
@@ -658,39 +501,25 @@ const pending=new Map();
 
 function oldestPending(){
   let t=Infinity;
-
-  for(const v of pending.values()){
-    if(v<t) t=v;
-  }
-
+  for(const v of pending.values()) if(v<t) t=v;
   return t===Infinity?0:t;
 }
 
 function updateAutoButtonBg(){
   if(!autoButton) return;
-
-  autoButton.style.background=
-    pending.size?'#800080':
-    autoEnabled?'#198754':
-    '#777';
+  autoButton.style.background=pending.size?'#800080':autoEnabled?'#198754':'#777';
 }
 
 function updatePending(){
-  if(autoButton&&pending.size){
-    autoButton.textContent=((Date.now()-oldestPending())/1000).toFixed(1);
-  }
+  if(autoButton&&pending.size) autoButton.textContent=((Date.now()-oldestPending())/1000).toFixed(1);
 }
 
 function startPending(){
   const id=++pendingSeq;
-
   pending.set(id,Date.now());
-
   updateAutoButtonBg();
 
-  if(!pendingTimer){
-    pendingTimer=setInterval(updatePending,100);
-  }
+  if(!pendingTimer) pendingTimer=setInterval(updatePending,100);
 
   updatePending();
 
@@ -702,21 +531,20 @@ function endPending(id){
 
   if(!pending.size){
     if(pendingTimer) clearInterval(pendingTimer);
-
     pendingTimer=null;
-
     updateAutoButtonBg();
     updateCountdown();
-  }else{
-    updatePending();
-  }
+  }else updatePending();
+}
+
+function isFlyingDom(){
+  const slider=document.getElementById('timeSlider');
+  if(!slider) return false;
+  return normalizeModalText(slider.textContent).includes('ご予約開始となります');
 }
 
 function clearAutoReloadWatch(){
-  if(autoReloadWatch?.judgeTimer){
-    clearTimeout(autoReloadWatch.judgeTimer);
-  }
-
+  if(autoReloadWatch?.judgeTimer) clearTimeout(autoReloadWatch.judgeTimer);
   autoReloadWatch=null;
 }
 
@@ -725,6 +553,7 @@ function armAutoReloadWatch(){
 
   autoReloadWatch={
     seq:++autoReloadSeq,
+    stage:1,
     detailStarted:false,
     detailEnded:false,
     timeGetStarted:false,
@@ -734,14 +563,11 @@ function armAutoReloadWatch(){
 
 function markAutoReloadTimeGetStarted(){
   const watch=autoReloadWatch;
-
   if(!watch) return;
 
   watch.timeGetStarted=true;
 
-  if(watch.judgeTimer){
-    clearTimeout(watch.judgeTimer);
-  }
+  if(watch.judgeTimer) clearTimeout(watch.judgeTimer);
 
   autoReloadWatch=null;
 }
@@ -753,40 +579,96 @@ function markAutoReloadDetailStarted(){
 
   watch.detailStarted=true;
 
-  return watch.seq;
+  return {
+    seq:watch.seq,
+    stage:watch.stage
+  };
 }
 
-function markAutoReloadDetailEnded(seq){
+function scheduleAutoReloadJudge(seq,stage,attempt=0){
   const watch=autoReloadWatch;
 
   if(!watch||
      watch.seq!==seq||
-     watch.detailEnded) return;
+     watch.stage!==stage||
+     watch.timeGetStarted) return;
 
-  watch.detailEnded=true;
+  if(watch.judgeTimer) clearTimeout(watch.judgeTimer);
 
   watch.judgeTimer=setTimeout(()=>{
     const current=autoReloadWatch;
 
     if(!current||
        current.seq!==seq||
+       current.stage!==stage||
        current.timeGetStarted) return;
 
-    autoReloadWatch=null;
+    current.judgeTimer=null;
 
-    if(!autoEnabled) return;
+    if(isFlyingDom()){
+      if(current.stage<3){
+        const nextStage=current.stage+1;
 
-    const $a=adultNum();
+        console.log(
+          `[TDR TravelBag] フライング判定 → 第${nextStage}読込:`,
+          formatTimeMs()
+        );
 
-    if(!$a) return;
+        current.stage=nextStage;
+        current.detailStarted=false;
+        current.detailEnded=false;
+        current.timeGetStarted=false;
+
+        const $a=adultNum();
+
+        if(!$a){
+          clearAutoReloadWatch();
+          return;
+        }
+
+        $a.trigger('change');
+      }else{
+        console.warn(
+          '[TDR TravelBag] 第3読込後もフライング:',
+          formatTimeMs()
+        );
+
+        clearAutoReloadWatch();
+      }
+
+      return;
+    }
+
+    if(attempt<9){
+      scheduleAutoReloadJudge(seq,stage,attempt+1);
+      return;
+    }
 
     console.log(
-      '[TDR TravelBag] フライング判定 → 第2読込:',
-      formatTimeMs()
+      '[TDR TravelBag] フライング判定保留: timeGetなし・開始前DOMなし'
     );
 
-    $a.trigger('change');
-  },0);
+    clearAutoReloadWatch();
+  },attempt===0?0:20);
+}
+
+function markAutoReloadDetailEnded(token){
+  if(!token) return;
+
+  const watch=autoReloadWatch;
+
+  if(!watch||
+     watch.seq!==token.seq||
+     watch.stage!==token.stage||
+     watch.detailEnded) return;
+
+  watch.detailEnded=true;
+
+  scheduleAutoReloadJudge(
+    token.seq,
+    token.stage,
+    0
+  );
 }
 
 const isTimeGet=url=>/timeGet/i.test(String(url||''));
@@ -804,9 +686,7 @@ function absUrl(url){
 function getValue(row,key){
   if(!row||typeof row!=='object') return '';
 
-  if(Object.prototype.hasOwnProperty.call(row,key)){
-    return row[key];
-  }
+  if(Object.prototype.hasOwnProperty.call(row,key)) return row[key];
 
   const k=Object.keys(row).find(x=>String(x).trim()===key);
 
@@ -881,9 +761,7 @@ function splitCommodityCD(code){
 
 function bodyString(body){
   if(!body) return '';
-
   if(typeof body==='string') return body;
-
   if(body instanceof URLSearchParams) return body.toString();
 
   if(body instanceof FormData){
@@ -1015,9 +893,7 @@ function sendStockDiffNotification(payload,groups){
 function processStockDiff(payload,grouped){
   const codes=new Set(Object.keys(grouped));
 
-  if(payload.targetCommodityCD){
-    codes.add(payload.targetCommodityCD);
-  }
+  if(payload.targetCommodityCD) codes.add(payload.targetCommodityCD);
 
   const notices=[];
   const label=restaurantLabel();
@@ -1133,9 +1009,7 @@ function printTimeGet(source,url,response,body){
   const now=formatTimeMs();
   const name=restaurantLabel();
 
-  if(name){
-    lastLoggedRestaurantLabel=name;
-  }
+  if(name) lastLoggedRestaurantLabel=name;
 
   for(const code of Object.keys(grouped)){
     console.log(
@@ -1236,7 +1110,6 @@ function clickVacancy(candidates){
         );
 
         a.click();
-
         setTimeout(checkAutoConfirmSelection,0);
 
         return true;
@@ -1306,7 +1179,7 @@ window.fetch=function(input,init){
   const purchase=isPurchase(url);
 
   let id=null;
-  let detailSeq=null;
+  let detailToken=null;
   let p;
 
   if(timeGet){
@@ -1315,7 +1188,7 @@ window.fetch=function(input,init){
   }
 
   if(detail){
-    detailSeq=markAutoReloadDetailStarted();
+    detailToken=markAutoReloadDetailStarted();
   }
 
   if(purchase){
@@ -1327,8 +1200,8 @@ window.fetch=function(input,init){
   }catch(e){
     if(id!==null) endPending(id);
 
-    if(detailSeq!==null){
-      markAutoReloadDetailEnded(detailSeq);
+    if(detailToken){
+      markAutoReloadDetailEnded(detailToken);
     }
 
     if(purchase){
@@ -1349,9 +1222,7 @@ window.fetch=function(input,init){
             body
           );
 
-          if(data){
-            scheduleVacancySelect(data);
-          }
+          if(data) scheduleVacancySelect(data);
         })
         .catch(e=>{
           console.warn(
@@ -1363,29 +1234,20 @@ window.fetch=function(input,init){
           endPending(id);
         })
     ).catch(e=>{
-      console.warn(
-        '[TB timeGet] fetch failed',
-        e
-      );
-
+      console.warn('[TB timeGet] fetch failed',e);
       endPending(id);
     });
   }
 
-  if(detail&&detailSeq!==null){
+  if(detail&&detailToken){
     p.finally(()=>{
-      markAutoReloadDetailEnded(
-        detailSeq
-      );
+      markAutoReloadDetailEnded(detailToken);
     }).catch(()=>{});
   }
 
   if(purchase){
     p.finally(()=>{
-      purchasePending=Math.max(
-        0,
-        purchasePending-1
-      );
+      purchasePending=Math.max(0,purchasePending-1);
     }).catch(()=>{});
   }
 
@@ -1401,10 +1263,7 @@ XMLHttpRequest.prototype.open=function(method,url){
     url:String(url||'')
   };
 
-  return originalOpen.apply(
-    this,
-    arguments
-  );
+  return originalOpen.apply(this,arguments);
 };
 
 XMLHttpRequest.prototype.send=function(body){
@@ -1414,7 +1273,7 @@ XMLHttpRequest.prototype.send=function(body){
   const purchase=info&&isPurchase(info.url);
 
   let id=null;
-  let detailSeq=null;
+  let detailToken=null;
 
   if(timeGet){
     markAutoReloadTimeGetStarted();
@@ -1443,9 +1302,7 @@ XMLHttpRequest.prototype.send=function(body){
           body
         );
 
-        if(data){
-          scheduleVacancySelect(data);
-        }
+        if(data) scheduleVacancySelect(data);
       }finally{
         endPending(id);
       }
@@ -1453,15 +1310,13 @@ XMLHttpRequest.prototype.send=function(body){
   }
 
   if(detail){
-    detailSeq=markAutoReloadDetailStarted();
+    detailToken=markAutoReloadDetailStarted();
 
-    if(detailSeq!==null){
+    if(detailToken){
       this.addEventListener(
         'loadend',
         ()=>{
-          markAutoReloadDetailEnded(
-            detailSeq
-          );
+          markAutoReloadDetailEnded(detailToken);
         },
         {once:true}
       );
@@ -1474,69 +1329,44 @@ XMLHttpRequest.prototype.send=function(body){
     this.addEventListener(
       'loadend',
       ()=>{
-        purchasePending=Math.max(
-          0,
-          purchasePending-1
-        );
+        purchasePending=Math.max(0,purchasePending-1);
       },
       {once:true}
     );
   }
 
   try{
-    return originalSend.apply(
-      this,
-      arguments
-    );
+    return originalSend.apply(this,arguments);
   }catch(e){
-    if(id!==null){
-      endPending(id);
-    }
+    if(id!==null) endPending(id);
 
-    if(detailSeq!==null){
-      markAutoReloadDetailEnded(
-        detailSeq
-      );
+    if(detailToken){
+      markAutoReloadDetailEnded(detailToken);
     }
 
     if(purchase){
-      purchasePending=Math.max(
-        0,
-        purchasePending-1
-      );
+      purchasePending=Math.max(0,purchasePending-1);
     }
 
     throw e;
   }
 };
 
-const isEditPage=()=>
-  location.pathname.startsWith(
-    '/online/travelbag/edit/'
-  );
+const isEditPage=()=>location.pathname.startsWith('/online/travelbag/edit/');
 
 function adultNum(){
   if(!window.jQuery){
-    console.warn(
-      '[TDR TravelBag] jQuery が見つかりません'
-    );
-
+    console.warn('[TDR TravelBag] jQuery が見つかりません');
     return null;
   }
 
-  const $a=
-    window.jQuery(
-      'select[name="adultNum"]'
-    );
+  const $a=window.jQuery('select[name="adultNum"]');
 
-  return $a.length
-    ?$a
-    :null;
+  return $a.length?$a:null;
 }
 
 function fireStockReload(isFirstAuto=false){
-  const $a=
-    adultNum();
+  const $a=adultNum();
 
   if(!$a) return;
 
@@ -1549,284 +1379,132 @@ function fireStockReload(isFirstAuto=false){
     armAutoReloadWatch();
   }
 
-  $a.trigger(
-    'change'
-  );
+  $a.trigger('change');
 }
 
 function manualReload(){
-  const $a=
-    adultNum();
+  const $a=adultNum();
 
   if(!$a) return;
 
   $a.val('1');
-
   prepareReservationForm();
-
-  $a.trigger(
-    'change'
-  );
+  $a.trigger('change');
 }
 
 function scheduleNextFire(forceNextMinute=false){
-  clearTimeout(
-    fireTimer
-  );
+  clearTimeout(fireTimer);
 
   if(!autoEnabled) return;
 
   const now=new Date();
   const next=new Date(now);
-
-  const randomMs=
-    700+
-    Math.floor(
-      Math.random()*101
-    );
+  const randomMs=700+Math.floor(Math.random()*101);
 
   if(forceNextMinute){
-    next.setMinutes(
-      next.getMinutes()+1
-    );
+    next.setMinutes(next.getMinutes()+1);
   }
 
-  next.setSeconds(
-    59,
-    randomMs
-  );
+  next.setSeconds(59,randomMs);
 
-  if(
-    !forceNextMinute&&
-    now>=next
-  ){
-    next.setMinutes(
-      next.getMinutes()+1
-    );
+  if(!forceNextMinute&&now>=next){
+    next.setMinutes(next.getMinutes()+1);
   }
 
-  nextFireAt=
-    next.getTime();
+  nextFireAt=next.getTime();
 
-  fireTimer=
-    setTimeout(
-      ()=>{
-        if(!autoEnabled) return;
+  fireTimer=setTimeout(()=>{
+    if(!autoEnabled) return;
 
-        if(
-          autoButton&&
-          !pending.size
-        ){
-          autoButton.textContent=
-            '00';
-        }
+    if(autoButton&&!pending.size){
+      autoButton.textContent='00';
+    }
 
-        fireStockReload(
-          true
-        );
-
-        scheduleNextFire(
-          true
-        );
-      },
-      Math.max(
-        0,
-        nextFireAt-Date.now()
-      )
-    );
+    fireStockReload(true);
+    scheduleNextFire(true);
+  },Math.max(0,nextFireAt-Date.now()));
 }
 
 function updateCountdown(){
-  if(
-    !autoButton||
-    pending.size
-  ) return;
+  if(!autoButton||pending.size) return;
 
   if(!autoEnabled){
-    autoButton.textContent=
-      '自動OFF';
-
+    autoButton.textContent='自動OFF';
     return;
   }
 
-  const ms=
-    nextFireAt-
-    Date.now();
+  const ms=nextFireAt-Date.now();
 
   autoButton.textContent=
     ms<=0
       ?'00'
-      :String(
-        Math.min(
-          59,
-          Math.ceil(
-            ms/1000
-          )
-        )
-      ).padStart(
-        2,
-        '0'
-      );
+      :String(Math.min(59,Math.ceil(ms/1000))).padStart(2,'0');
 }
 
 function startCountdown(){
-  clearInterval(
-    countdownTimer
-  );
-
+  clearInterval(countdownTimer);
   updateCountdown();
-
-  countdownTimer=
-    setInterval(
-      updateCountdown,
-      200
-    );
+  countdownTimer=setInterval(updateCountdown,200);
 }
 
 function stopCountdown(){
-  clearInterval(
-    countdownTimer
-  );
-
+  clearInterval(countdownTimer);
   countdownTimer=null;
 
-  if(
-    autoButton&&
-    !pending.size
-  ){
-    autoButton.textContent=
-      '自動OFF';
+  if(autoButton&&!pending.size){
+    autoButton.textContent='自動OFF';
   }
 }
 
 function makePriorityControls(){
-  const host=
-    document.createElement(
-      'div'
-    );
+  const host=document.createElement('div');
 
-  host.style.cssText=
-    'width:120px;pointer-events:auto';
+  host.style.cssText='width:120px;pointer-events:auto';
 
-  const shadow=
-    host.attachShadow({
-      mode:'open'
-    });
+  const shadow=host.attachShadow({mode:'open'});
+  const box=document.createElement('div');
 
-  const box=
-    document.createElement(
-      'div'
-    );
+  box.style.cssText='display:flex;flex-direction:column;width:120px;gap:3px;font-family:sans-serif';
 
-  box.style.cssText=
-    'display:flex;flex-direction:column;width:120px;gap:3px;font-family:sans-serif';
+  const saved=loadPriorityTimes();
+  const labels=['①','②','③','④','⑤'];
+  const css='width:48px;height:30px;box-sizing:border-box;padding:0 1px;margin:0;border:1px solid #777;border-radius:4px;background:#fff;color:#000;font-size:13px;font-weight:bold;cursor:pointer';
 
-  const saved=
-    loadPriorityTimes();
+  for(let i=0;i<5;i++){
+    const row=document.createElement('div');
+    const label=document.createElement('span');
+    const hour=document.createElement('select');
+    const minute=document.createElement('select');
 
-  const labels=[
-    '①',
-    '②',
-    '③',
-    '④',
-    '⑤'
-  ];
+    row.style.cssText='display:flex;align-items:center;width:120px;height:30px;gap:2px';
 
-  const css=
-    'width:48px;height:30px;box-sizing:border-box;padding:0 1px;margin:0;border:1px solid #777;border-radius:4px;background:#fff;color:#000;font-size:13px;font-weight:bold;cursor:pointer';
+    label.textContent=labels[i];
 
-  for(
-    let i=0;
-    i<5;
-    i++
-  ){
-    const row=
-      document.createElement(
-        'div'
-      );
-
-    const label=
-      document.createElement(
-        'span'
-      );
-
-    const hour=
-      document.createElement(
-        'select'
-      );
-
-    const minute=
-      document.createElement(
-        'select'
-      );
-
-    row.style.cssText=
-      'display:flex;align-items:center;width:120px;height:30px;gap:2px';
-
-    label.textContent=
-      labels[i];
-
-    label.style.cssText=
-      'display:inline-flex;align-items:center;justify-content:center;width:20px;height:30px;font-size:15px;font-weight:bold;color:#000';
+    label.style.cssText='display:inline-flex;align-items:center;justify-content:center;width:20px;height:30px;font-size:15px;font-weight:bold;color:#000';
 
     hour.innerHTML=
       '<option value="">--</option>'+
-      HOURS.map(
-        v=>
-          `<option value="${v}">${v}</option>`
-      ).join('');
+      HOURS.map(v=>`<option value="${v}">${v}</option>`).join('');
 
     minute.innerHTML=
       '<option value="">--</option>'+
-      MINUTES.map(
-        v=>
-          `<option value="${v}">${v}</option>`
-      ).join('');
+      MINUTES.map(v=>`<option value="${v}">${v}</option>`).join('');
 
-    hour.style.cssText=
-      css;
-
-    minute.style.cssText=
-      css;
+    hour.style.cssText=css;
+    minute.style.cssText=css;
 
     if(saved[i]){
-      const [h,m]=
-        saved[i].split(
-          ':'
-        );
+      const [h,m]=saved[i].split(':');
 
-      hour.value=
-        h;
-
-      minute.value=
-        m==='--'
-          ?''
-          :m;
+      hour.value=h;
+      minute.value=m==='--'?'':m;
     }
 
-    hour.addEventListener(
-      'change',
-      ()=>{
-        priorityHourChanged(
-          i
-        );
-      }
-    );
+    hour.addEventListener('change',()=>priorityHourChanged(i));
+    minute.addEventListener('change',savePriorityTimes);
 
-    minute.addEventListener(
-      'change',
-      savePriorityTimes
-    );
-
-    row.append(
-      label,
-      hour,
-      minute
-    );
-
-    box.appendChild(
-      row
-    );
+    row.append(label,hour,minute);
+    box.appendChild(row);
 
     priorityRows.push({
       row,
@@ -1836,225 +1514,139 @@ function makePriorityControls(){
     });
   }
 
-  shadow.appendChild(
-    box
-  );
-
+  shadow.appendChild(box);
   updatePriorityRows();
 
   return host;
 }
 
-function makeButton(
-  text,
-  bg,
-  handler
-){
-  const b=
-    document.createElement(
-      'button'
-    );
+function makeButton(text,bg,handler){
+  const b=document.createElement('button');
 
-  b.type=
-    'button';
-
-  b.textContent=
-    text;
+  b.type='button';
+  b.textContent=text;
 
   b.style.cssText=
     `width:72px;height:42px;border:none;border-radius:6px;background:${bg};color:#fff;font-size:13px;font-weight:bold;cursor:pointer;pointer-events:auto`;
 
-  b.addEventListener(
-    'click',
-    handler
-  );
+  b.addEventListener('click',handler);
 
   return b;
 }
 
 function createPanel(){
-  if(
-    !isEditPage()||
-    document.getElementById(
-      PANEL_ID
-    )||
-    !document.body
-  ) return;
+  if(!isEditPage()||document.getElementById(PANEL_ID)||!document.body) return;
 
-  const panel=
-    document.createElement(
-      'div'
-    );
+  const panel=document.createElement('div');
 
-  panel.id=
-    PANEL_ID;
+  panel.id=PANEL_ID;
 
   panel.style.cssText=
     'position:fixed;top:10px;right:10px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;width:120px;z-index:2147483647;pointer-events:none';
 
-  autoButton=
-    makeButton(
-      '自動OFF',
-      '#777',
-      ()=>{
-        autoEnabled=
-          !autoEnabled;
+  autoButton=makeButton('自動OFF','#777',()=>{
+    autoEnabled=!autoEnabled;
 
-        if(autoEnabled){
-          scheduleNextFire();
-          startCountdown();
-        }else{
-          clearTimeout(
-            fireTimer
-          );
+    if(autoEnabled){
+      scheduleNextFire();
+      startCountdown();
+    }else{
+      clearTimeout(fireTimer);
 
-          fireTimer=null;
+      fireTimer=null;
+      nextFireAt=0;
 
-          nextFireAt=0;
+      clearAutoReloadWatch();
+      stopCountdown();
+    }
 
-          clearAutoReloadWatch();
+    updateAutoButtonBg();
 
-          stopCountdown();
-        }
+    pending.size
+      ?updatePending()
+      :updateCountdown();
+  });
 
-        updateAutoButtonBg();
+  vacancySelectButton=makeButton('選択OFF','#777',()=>{
+    vacancySelectMode=
+      vacancySelectMode===0
+        ?2
+        :vacancySelectMode===2
+          ?1
+          :0;
 
-        pending.size
-          ?updatePending()
-          :updateCountdown();
-      }
-    );
+    vacancySelectToken++;
 
-  vacancySelectButton=
-    makeButton(
-      '選択OFF',
-      '#777',
-      ()=>{
-        vacancySelectMode=
-          vacancySelectMode===0
-            ?2
-            :vacancySelectMode===2
-              ?1
-              :0;
+    updateVacancyButton();
+  });
 
-        vacancySelectToken++;
+  const priorityControls=makePriorityControls();
 
-        updateVacancyButton();
-      }
-    );
+  autoConfirmButton=makeButton('確定 OFF','#777',()=>{
+    autoConfirmEnabled=!autoConfirmEnabled;
 
-  const priorityControls=
-    makePriorityControls();
+    clearTimeout(autoConfirmTimer);
 
-  autoConfirmButton=
-    makeButton(
-      '確定 OFF',
-      '#777',
-      ()=>{
-        autoConfirmEnabled=
-          !autoConfirmEnabled;
+    autoConfirmTimer=null;
 
-        clearTimeout(
-          autoConfirmTimer
-        );
+    if(autoConfirmEnabled){
+      const c=getSelectedTimeInfo();
 
-        autoConfirmTimer=
-          null;
+      lastObservedCurrentSignature=
+        c?c.signature:'';
+    }
 
-        if(
-          autoConfirmEnabled
-        ){
-          const c=
-            getSelectedTimeInfo();
+    updateAutoConfirmButton();
+  });
 
-          lastObservedCurrentSignature=
-            c
-              ?c.signature
-              :'';
-        }
+  notifyButton=makeButton('通知 OFF','#777',()=>{
+    notifyEnabled=!notifyEnabled;
+    updateNotifyButton();
+  });
 
-        updateAutoConfirmButton();
-      }
-    );
+  recordButton=makeButton(
+    '保存',
+    '#f06292',
+    exportRecordedCsv
+  );
 
-  notifyButton=
-    makeButton(
-      '通知 OFF',
-      '#777',
-      ()=>{
-        notifyEnabled=
-          !notifyEnabled;
+  const allOnButton=makeButton('全部ON','#6a1b9a',()=>{
+    if(!autoEnabled){
+      autoEnabled=true;
+      scheduleNextFire();
+      startCountdown();
+    }
 
-        updateNotifyButton();
-      }
-    );
+    vacancySelectMode=2;
+    vacancySelectToken++;
 
-  recordButton=
-    makeButton(
-      '保存',
-      '#e91e63',
-      exportRecordedCsv
-    );
+    updateVacancyButton();
 
-  const allOnButton=
-    makeButton(
-      '全部ON',
-      '#6a1b9a',
-      ()=>{
-        if(
-          !autoEnabled
-        ){
-          autoEnabled=
-            true;
+    autoConfirmEnabled=true;
 
-          scheduleNextFire();
+    clearTimeout(autoConfirmTimer);
+    autoConfirmTimer=null;
 
-          startCountdown();
-        }
+    const c=getSelectedTimeInfo();
 
-        vacancySelectMode=
-          2;
+    lastObservedCurrentSignature=
+      c?c.signature:'';
 
-        vacancySelectToken++;
+    updateAutoConfirmButton();
+    updateAutoButtonBg();
 
-        updateVacancyButton();
+    pending.size
+      ?updatePending()
+      :updateCountdown();
 
-        autoConfirmEnabled=
-          true;
+    manualReload();
+  });
 
-        clearTimeout(
-          autoConfirmTimer
-        );
-
-        autoConfirmTimer=
-          null;
-
-        const c=
-          getSelectedTimeInfo();
-
-        lastObservedCurrentSignature=
-          c
-            ?c.signature
-            :'';
-
-        updateAutoConfirmButton();
-
-        updateAutoButtonBg();
-
-        pending.size
-          ?updatePending()
-          :updateCountdown();
-
-        manualReload();
-      }
-    );
-
-  const manualButton=
-    makeButton(
-      '1名',
-      '#198754',
-      manualReload
-    );
+  const manualButton=makeButton(
+    '1名',
+    '#198754',
+    manualReload
+  );
 
   panel.append(
     autoButton,
@@ -2067,45 +1659,32 @@ function createPanel(){
     manualButton
   );
 
-  document.body.appendChild(
-    panel
-  );
+  document.body.appendChild(panel);
 
   updateVacancyButton();
-
   updateAutoConfirmButton();
-
   updateNotifyButton();
-
   updateAutoButtonBg();
 
   pending.size
     ?updatePending()
     :updateCountdown();
 
-  const c=
-    getSelectedTimeInfo();
+  const c=getSelectedTimeInfo();
 
   lastObservedCurrentSignature=
-    c
-      ?c.signature
-      :'';
+    c?c.signature:'';
 
   console.log(
     `[TDR TravelBag] v${VERSION} パネル起動`
   );
 }
 
-if(
-  document.readyState===
-  'loading'
-){
+if(document.readyState==='loading'){
   document.addEventListener(
     'DOMContentLoaded',
     createPanel,
-    {
-      once:true
-    }
+    {once:true}
   );
 }else{
   createPanel();
