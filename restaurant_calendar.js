@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.30
+// @version      5.31
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -2415,7 +2415,16 @@
   }
   function believeRange(date) {
     const key = normalizeYmd(date);
+    if (key >= '20261005') return ['17:30', '19:30'];
+    if (key >= '20261001') return ['17:40', '19:40'];
     return key && key <= '20260914' ? ['18:20', '20:10'] : ['17:50', '19:50'];
+  }
+  function believeSuspended(date) {
+    const key = normalizeYmd(date);
+    return (
+      ['20260925', '20261127', '20270205', '20270219', '20270305'].includes(key) ||
+      (key >= '20270106' && key <= '20270204')
+    );
   }
   function vacancyCategory(c) {
     if (!((c.type === 'changed' && c.to === '空席') || (c.type === 'added' && c.to === '空席'))) return null;
@@ -2457,7 +2466,19 @@
   function buildCategoryDescription(changes, category) {
     const label = category === 'special' ? '⭐️Sレア空席' : category === 'believe' ? '💫ビリーヴ時間帯' : '🟡レア空席';
     return sortChanges(changes)
-      .map((c) => `${c.time}　${label}${c.type === 'added' ? '（新規枠）' : ''}`)
+      .map((c) => {
+        const range = believeRange(c.date),
+          suspended =
+            believeSuspended(c.date) &&
+            c.meal === '夕食' &&
+            (category === 'believe' || (category === 'special' && timeInRange(c.time, range[0], range[1]))),
+          text = suspended
+            ? category === 'believe'
+              ? '💫ビリーヴ時間帯 （❌️休止）'
+              : `${label} / 💫ビリーヴ時間帯 （❌️休止）`
+            : label;
+        return `${c.time}　${text}${c.type === 'added' ? '（新規枠）' : ''}`;
+      })
       .join('\n');
   }
   function useResearchChannel() {
@@ -2785,5 +2806,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.30 起動`);
+  console.log(`[${NAME}] v5.31 起動`);
 })();
