@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.31
+// @version      5.32
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -810,6 +810,27 @@
     );
     return rows;
   }
+  function csvLeadLabel(state, referenceAt) {
+    const reference = new Date(referenceAt),
+      referenceDay = Date.UTC(reference.getFullYear(), reference.getMonth(), reference.getDate()),
+      distances = new Set();
+    const addStart = (value) => {
+      const key = normalizeYmd(value);
+      if (!key) return;
+      const day = Date.UTC(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6, 8));
+      distances.add(Math.round((day - referenceDay) / 86400000));
+    };
+    Object.values(state.meals || {}).forEach((meal) => {
+      [...(meal.ranges || [])].forEach((range) => addStart(range.split('-')[0]));
+    });
+    (state.hourlySnapshots || []).forEach((snapshot) => {
+      snapshot.states.forEach((value) => addStart(value.weekStart));
+    });
+    (state.comparisons || []).forEach((comparison) => addStart(comparison.weekStart));
+    return distances.size
+      ? [...distances].sort((a, b) => a - b).map((days) => `D${days}`).join('+')
+      : 'D不明';
+  }
   function downloadNormalCsv(state, mode, endAt) {
     const d = new Date(endAt);
     let stamp = fileStamp(endAt);
@@ -824,13 +845,13 @@
       stamp = `${fileStamp(d.getTime()).slice(0, 8)}_240000`;
     }
     return downloadCsv(
-      `${stamp}_${safeFileName(state.restaurant || restaurantName())}_通常在庫差分.csv`,
+      `${stamp}_${safeFileName(state.restaurant || restaurantName())}_${csvLeadLabel(state, d.getTime())}_通常.csv`,
       buildNormalCsvRows(state, mode, endAt)
     );
   }
   function downloadAm9Csv(state, endAt) {
     return downloadCsv(
-      `${fileStamp(endAt)}_${safeFileName(state.restaurant || restaurantName())}_AM9状態.csv`,
+      `${fileStamp(endAt)}_${safeFileName(state.restaurant || restaurantName())}_${csvLeadLabel(state, endAt)}_AM9.csv`,
       buildAm9CsvRows(state, endAt)
     );
   }
@@ -2806,5 +2827,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.31 起動`);
+  console.log(`[${NAME}] v5.32 起動`);
 })();
