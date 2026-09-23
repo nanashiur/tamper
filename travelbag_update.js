@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         🧳💻️トラベルバッグ時間変更
-// @version      1.50
-// @match        https://reserve.tokyodisneyresort.jp/online/restaurant/update/index*
+// @name         🍴💻️PC版レストラン時間変更
+// @version      1.60
+// @match        https://reserve.tokyodisneyresort.jp/online/restaurant/update/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag_update.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag_update.js
 // @run-at       document-start
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.50', INSTALLED='__tdr_restaurant_update_installed__', PANEL_ID='__tdr_restaurant_update_panel';
+const VERSION='1.60', INSTALLED='__tdr_restaurant_update_installed__', PANEL_ID='__tdr_restaurant_update_panel';
 const PRIORITY_KEY='tdr_restaurant_update_priority_times';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -145,7 +145,7 @@ function updateAutoButton(){
   }else if(autoEnabled){
     const ms=nextFireAt-Date.now();
     autoButton.textContent=ms<=0?'00':String(Math.min(59,Math.ceil(ms/1000))).padStart(2,'0');
-    autoButton.style.background='#1976d2';
+    autoButton.style.background='#198754';
   }else{
     autoButton.textContent='自動OFF';
     autoButton.style.background='#777';
