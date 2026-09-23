@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.28
+// @version      5.30
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -229,7 +229,7 @@
       y = d.getFullYear(),
       m = d.getMonth(),
       day = d.getDate(),
-      hours = [0, 8, 12, 16, 20, 24];
+      hours = [0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
     for (let i = 0; i < hours.length - 1; i++) {
       const startAt = new Date(y, m, day, hours[i], 0, 0, 0).getTime(),
         endAt = new Date(y, m, day, hours[i + 1], 0, 0, 0).getTime();
@@ -1737,7 +1737,7 @@
         researchNotifyPanel.style.background = '#f8bbd0';
         researchNotifyPanel.style.color = '#000';
         researchNotifyPanel.textContent = '🔬';
-        researchNotifyPanel.title = '調査ON：毎日8:00・12:00・16:00・20:00・24:00自動出力';
+        researchNotifyPanel.title = '調査ON：毎正時に自動出力（4:00・5:00を除く）';
       } else {
         researchNotifyPanel.style.background = '#000';
         researchNotifyPanel.style.color = '#fff';
@@ -2445,7 +2445,7 @@
       return 'believe';
     if (name.includes('ベッラヴィスタ') && (['11:30', '11:40'].includes(time) || (days !== null && days >= 11)))
       return 'rare';
-    if (name.includes('ハイピリオン') && days !== null && /HPL(?:3001|3002|3005|3006)/i.test(commodity) && days >= 7)
+    if (name.includes('ハイピリオン') && days !== null && /HPL(?:3001|3002|3005|3006)/i.test(commodity) && days >= 4)
       return 'rare';
     if (name.includes('ハイピリオン') && days !== null && /HPL(?:4001|4002|4003|4004)/i.test(commodity) && days >= 4)
       return 'rare';
@@ -2455,7 +2455,7 @@
     return null;
   }
   function buildCategoryDescription(changes, category) {
-    const label = category === 'special' ? '⭐️特レア空席' : category === 'believe' ? '💫ビリーヴ時間帯' : '🟡レア空席';
+    const label = category === 'special' ? '⭐️Sレア空席' : category === 'believe' ? '💫ビリーヴ時間帯' : '🟡レア空席';
     return sortChanges(changes)
       .map((c) => `${c.time}　${label}${c.type === 'added' ? '（新規枠）' : ''}`)
       .join('\n');
@@ -2785,5 +2785,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.28 起動`);
+  console.log(`[${NAME}] v5.30 起動`);
 })();
