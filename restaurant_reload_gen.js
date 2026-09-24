@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.78
+// @version      4.81
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -213,7 +213,7 @@
     autoF5: localStorage.getItem('autoF520min') !== '0',
     autoReserve: localStorage.getItem('autoReserveClick') === '1',
     notifyMode: loadNotifyMode(),
-    searchStatus: ['OFF', 'L', 'M', 'S', 'T'].includes(savedSearchStatus) ? savedSearchStatus : 'M',
+    searchStatus: ['OFF', 'L', 'M', 'S', 'T'].includes(savedSearchStatus) ? savedSearchStatus : 'L',
     excludedTimes: JSON.parse(localStorage.getItem('excludedTimes') || '[]'),
     autoReserveNotifyHistory: JSON.parse(localStorage.getItem('autoReserveNotifyHistory') || '{}'),
     waitSec: 15,
@@ -225,6 +225,7 @@
     autoReserveLockUntil: 0,
     errorReloadCount: Math.max(0, Number(localStorage.getItem('errorReloadCount')) || 0),
     errorReloadScheduled: false,
+    errorStopped: false,
     freezeReloadScheduled: false,
     suppressReloadClick: false,
     snapshots: loadSnapshotMap(),
@@ -660,6 +661,7 @@
     if (state.freezeReloadScheduled) return;
 
     state.freezeReloadScheduled = true;
+    state.errorStopped = true;
     state.searchStatus = 'OFF';
     state.isSearchPending = false;
     state.ajaxPendingCount = 0;
@@ -683,6 +685,11 @@
     if (state.errorReloadScheduled) return;
 
     state.errorReloadScheduled = true;
+    state.errorStopped = true;
+    state.searchStatus = 'OFF';
+    state.isSearchPending = false;
+    clearExactSearchTimer();
+    updatePanels();
 
     if (countAsError) {
       state.errorReloadCount++;
@@ -847,6 +854,7 @@
   }
 
   function stopAutomationForReservation() {
+    state.errorStopped = false;
     state.searchStatus = 'OFF';
     state.autoReserve = false;
     localStorage.setItem('searchStatus', 'OFF');
@@ -926,7 +934,7 @@
       panels.main.style.background = '#888';
     } else {
       const colors = {
-        OFF: '#333',
+        OFF: state.errorStopped ? '#dc3545' : '#333',
         L: '#007bff',
         M: '#ff8c00',
         T: '#28a745',
@@ -945,7 +953,7 @@
         panels.main.textContent = state.waitSec;
       }
 
-      panels.main.style.background = colors[state.searchStatus];
+      panels.main.style.background = state.isSearchPending ? '#800080' : colors[state.searchStatus];
     }
 
     if (!state.autoF5) {
@@ -1068,14 +1076,15 @@
 
   panels.main = createPanel(10, '#333', () => {
     const nextStatus = {
-      M: 'T',
-      T: 'S',
+      L: 'T',
+      T: 'M',
+      M: 'S',
       S: 'OFF',
-      OFF: 'L',
-      L: 'M'
+      OFF: 'L'
     };
 
-    state.searchStatus = nextStatus[state.searchStatus] || 'M';
+    state.errorStopped = false;
+    state.searchStatus = nextStatus[state.searchStatus] || 'L';
     localStorage.setItem('searchStatus', state.searchStatus);
     state.lastNotificationTime = 0;
     resetWaitSec();
