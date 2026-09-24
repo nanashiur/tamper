@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.35
+// @version      5.36
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -2486,7 +2486,7 @@
           text = suspended
             ? category === 'believe'
               ? '💫ビリーヴ時間帯 （❌️休止）'
-              : `${label} / 💫ビリーヴ時間帯 （❌️休止）`
+              : `${label} （❌️休止）`
             : label;
         return `${c.time}　${text}${c.type === 'added' ? '（新規枠）' : ''}`;
       })
@@ -2817,5 +2817,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.35 起動`);
+  console.log(`[${NAME}] v5.36 起動`);
 })();
