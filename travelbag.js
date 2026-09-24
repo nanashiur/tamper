@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.77
+// @version      1.78
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.77', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.78', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -291,6 +291,15 @@ function scheduleAutoConfirm(info){
       const now=getSelectedTimeInfo(), btn=document.getElementById('confirmBtn');
       if(!now||now.signature!==sig) return;
       if(!btn) return console.warn('[TDR TravelBag] 自動確定: confirmBtn が見つかりません');
+
+      autoEnabled=false;
+      clearTimeout(fireTimer);
+      fireTimer=null;
+      nextFireAt=0;
+      clearAutoReloadWatch();
+      stopCountdown();
+      updateAutoButtonBg();
+      pending.size?updatePending():updateCountdown();
 
       console.log(formatTimeMs(),'[TDR TravelBag] 自動確定:',now.time,now.commodityCD,now.openNumKey);
       btn.click();
