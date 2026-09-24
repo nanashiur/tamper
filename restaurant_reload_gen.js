@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.83
+// @version      4.84
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -14,6 +14,7 @@
   const SCRIPT_NAME = '🍴📱レストラン一般再検索';
   const MARK_ID = '__restaurant_reload_running_v4';
   const SNAPSHOT_STORAGE_KEY = 'restaurantDiffSnapshotsV2';
+  const ERROR_CONTEXT_STORAGE_KEY = 'restaurantErrorNotificationContextV1';
   if (document.getElementById(MARK_ID)) return;
 
   sessionStorage.removeItem('restaurantReservationPendingV1');
@@ -35,6 +36,21 @@
   const BLUE = 0x3498DB;
   const ORANGE = 0xFFA500;
   const PURPLE = 0x800080;
+
+  function getErrorNotificationContextLines() {
+    let context = {};
+    try {
+      context = JSON.parse(sessionStorage.getItem(ERROR_CONTEXT_STORAGE_KEY) || '{}');
+    } catch (e) {
+      console.error('エラー通知用情報の取得失敗:', e);
+    }
+
+    return [
+      `レストラン：${context.restaurantName || '特定できず'}`,
+      `対象日：${context.displayDate || '不明'}`,
+      `食事区分：${context.mealName || 'すべて'}`
+    ];
+  }
 
   function isAccessDeniedPage() {
     const title = document.title || '';
@@ -110,6 +126,7 @@
           title: `🔶${detectedAt}`,
           description: [
             'Access Deniedを検出しました。',
+            ...getErrorNotificationContextLines(),
             `公開IP：${ip}`,
             `Reference：${reference}`,
             `エラーF5：${errorReloadCount}回`,
@@ -138,9 +155,10 @@
         body: JSON.stringify({
           username: SCRIPT_NAME,
           embeds: [{
-            title: `🟠${detectedAt}`,
-            description: [
+          title: `🟠${detectedAt}`,
+          description: [
               'オレンジエラーを検出しました。',
+              ...getErrorNotificationContextLines(),
               `公開IP：${ip}`,
               `エラーF5：${errorReloadCount}回`,
               `URL：${location.href}`,
@@ -305,6 +323,20 @@
       if (meal) return meal;
     }
     return '';
+  }
+
+  function saveErrorNotificationContext() {
+    const context = {
+      restaurantName: getRestaurantName() || '特定できず',
+      displayDate: getDisplayDate() || '不明',
+      mealName: state.lastClickedMealName || getMealName(document) || 'すべて'
+    };
+
+    try {
+      sessionStorage.setItem(ERROR_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+    } catch (e) {
+      console.error('エラー通知用情報の保存失敗:', e);
+    }
   }
 
   function getMealNameFromRow(row, tempDiv) {
@@ -751,6 +783,7 @@
     state.ajaxBatchSlots = {};
     state.ajaxBatchMeals = new Set();
     state.isSearchPending = false;
+    saveErrorNotificationContext();
     updatePanels();
 
     if (!statuses.length) return;
@@ -1443,6 +1476,7 @@
     });
 
   refreshCommodityMealMap(document);
+  saveErrorNotificationContext();
   resetWaitSec();
   updatePanels();
 
