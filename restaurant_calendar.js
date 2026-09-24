@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.32
+// @version      5.34
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -810,15 +810,22 @@
     );
     return rows;
   }
-  function csvLeadLabel(state, referenceAt) {
+  function csvLeadLabel(state, referenceAt, mode = '') {
     const reference = new Date(referenceAt),
       referenceDay = Date.UTC(reference.getFullYear(), reference.getMonth(), reference.getDate()),
+      midnightAt = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate()).getTime(),
+      midnightCarry =
+        mode === '自動' &&
+        reference.getHours() === 1 &&
+        state.periodStartAt === midnightAt &&
+        (state.hourlySnapshots || []).some((snapshot) => snapshot.at === midnightAt),
       distances = new Set();
     const addStart = (value) => {
       const key = normalizeYmd(value);
       if (!key) return;
       const day = Date.UTC(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6, 8));
-      distances.add(Math.round((day - referenceDay) / 86400000));
+      const days = Math.round((day - referenceDay) / 86400000);
+      distances.add(midnightCarry && days === -1 ? 0 : days);
     };
     Object.values(state.meals || {}).forEach((meal) => {
       [...(meal.ranges || [])].forEach((range) => addStart(range.split('-')[0]));
@@ -827,8 +834,10 @@
       snapshot.states.forEach((value) => addStart(value.weekStart));
     });
     (state.comparisons || []).forEach((comparison) => addStart(comparison.weekStart));
-    return distances.size
-      ? [...distances].sort((a, b) => a - b).map((days) => `D${days}`).join('+')
+    const sorted = [...distances].sort((a, b) => a - b);
+    return sorted.length
+      ? sorted.filter((days, index) => index === sorted.length - 1 || sorted[index + 1] !== days + 1)
+          .map((days) => `D${days}`).join('+')
       : 'D不明';
   }
   function downloadNormalCsv(state, mode, endAt) {
@@ -845,7 +854,7 @@
       stamp = `${fileStamp(d.getTime()).slice(0, 8)}_240000`;
     }
     return downloadCsv(
-      `${stamp}_${safeFileName(state.restaurant || restaurantName())}_${csvLeadLabel(state, d.getTime())}_通常.csv`,
+      `${stamp}_${safeFileName(state.restaurant || restaurantName())}_${csvLeadLabel(state, d.getTime(), mode)}_通常.csv`,
       buildNormalCsvRows(state, mode, endAt)
     );
   }
@@ -2827,5 +2836,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.32 起動`);
+  console.log(`[${NAME}] v5.34 起動`);
 })();
