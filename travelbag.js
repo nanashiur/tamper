@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.76
+// @version      1.77
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.76', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.77', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -292,7 +292,7 @@ function scheduleAutoConfirm(info){
       if(!now||now.signature!==sig) return;
       if(!btn) return console.warn('[TDR TravelBag] 自動確定: confirmBtn が見つかりません');
 
-      console.log('[TDR TravelBag] 自動確定:',now.time,now.commodityCD,now.openNumKey);
+      console.log(formatTimeMs(),'[TDR TravelBag] 自動確定:',now.time,now.commodityCD,now.openNumKey);
       btn.click();
     },0);
   },0);
@@ -1100,7 +1100,7 @@ function clickVacancy(candidates){
         const p=matchingPriority(target.time);
 
         console.log(
-          '[TDR TravelBag] 時間選択:',
+          formatTimeMs(),'[TDR TravelBag] 時間選択:',
           target.time,
           p
             ?`【第${p.index+1}希望 ${p.display}】`
