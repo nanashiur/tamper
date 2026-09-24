@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.81
+// @version      4.83
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -1111,6 +1111,7 @@
       cb.checked = true;
     });
 
+    document.querySelectorAll('section.reservationTime').forEach(updateSectionExclusionSwitch);
     updatePanels();
   });
 
@@ -1174,10 +1175,61 @@
 
   let debounceTimer;
 
+  function updateSectionExclusionSwitch(section) {
+    const master = section.querySelector('.ex-section-switch');
+    if (!master) return;
+
+    const switches = [...section.querySelectorAll('.ex-slot-switch')];
+    const checkedCount = switches.filter(checkbox => checkbox.checked).length;
+    master.checked = checkedCount === switches.length;
+    master.indeterminate = checkedCount > 0 && checkedCount < switches.length;
+  }
+
+  function addSectionExclusionSwitch(section) {
+    const heading = section.querySelector('h1');
+    if (!heading || heading.querySelector('.ex-section-switch')) return;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'ex-section-switch';
+    checkbox.checked = true;
+    checkbox.title = 'この時間帯の枠を一括でチェック／解除';
+    checkbox.style.cssText = 'margin-left:8px;transform:scale(1.1);vertical-align:middle;cursor:pointer;position:relative;z-index:100;';
+    checkbox.onclick = event => event.stopPropagation();
+    checkbox.onchange = event => {
+      event.stopPropagation();
+      const times = [...new Set([...section.querySelectorAll('tr')]
+        .map(row => row.querySelector('th')?.innerText.trim())
+        .filter(time => /^\d{1,2}:\d{2}$/.test(time)))];
+
+      for (const time of times) {
+        if (event.target.checked) {
+          state.excludedTimes = state.excludedTimes.filter(excluded => excluded !== time);
+        } else if (!state.excludedTimes.includes(time)) {
+          state.excludedTimes.push(time);
+        }
+      }
+
+      localStorage.setItem('excludedTimes', JSON.stringify(state.excludedTimes));
+      document.querySelectorAll('.ex-slot-switch').forEach(slotSwitch => {
+        const row = slotSwitch.closest('tr');
+        const time = row?.querySelector('th')?.innerText.trim();
+        slotSwitch.checked = !!time && !state.excludedTimes.includes(time);
+      });
+      document.querySelectorAll('section.reservationTime').forEach(updateSectionExclusionSwitch);
+      updatePanels();
+    };
+
+    heading.appendChild(checkbox);
+    updateSectionExclusionSwitch(section);
+  }
+
   function addExclusionSwitchesDebounced() {
     clearTimeout(debounceTimer);
 
     debounceTimer = setTimeout(() => {
+      document.querySelectorAll('section.reservationTime').forEach(addSectionExclusionSwitch);
+
       document.querySelectorAll('tr').forEach(row => {
         const th = row.querySelector('th');
         const tdState = row.querySelector('.state');
@@ -1193,7 +1245,7 @@
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.className = 'ex-switch';
+        checkbox.className = 'ex-switch ex-slot-switch';
         checkbox.checked = !state.excludedTimes.includes(timeStr);
         checkbox.style.cssText = 'margin-left:10px;transform:scale(1.1);vertical-align:middle;cursor:pointer;position:relative;z-index:100;';
         tdState.style.whiteSpace = 'nowrap';
@@ -1208,10 +1260,13 @@
           }
 
           localStorage.setItem('excludedTimes', JSON.stringify(state.excludedTimes));
+          document.querySelectorAll('section.reservationTime').forEach(updateSectionExclusionSwitch);
           updatePanels();
         };
 
         tdState.appendChild(checkbox);
+        const section = row.closest('section.reservationTime');
+        if (section) updateSectionExclusionSwitch(section);
       });
     }, 200);
   }
