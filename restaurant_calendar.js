@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.36
+// @version      5.37
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -89,6 +89,10 @@
     const d = new Date();
     return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
   }
+  function detectedAtText() {
+    const d = new Date();
+    return `${String(d.getFullYear()).slice(-2)}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+  }
   function clockHM() {
     const d = new Date();
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -152,6 +156,14 @@
   function analysisDateTime(ts) {
     const d = new Date(ts);
     return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+  }
+  function normalRecordTime(state, endAt) {
+    const startAt = state.periodStartAt || state.startAt || endAt,
+      start = new Date(startAt),
+      end = new Date(endAt),
+      midnightEnd = end.getHours() === 0 && end.getMinutes() === 0 && end.getSeconds() === 0 &&
+        end.getMilliseconds() === 0 && !sameLocalDate(start, end);
+    return `${analysisDateTime(startAt)} ～ ${midnightEnd ? '24:00:00' : analysisTime(endAt)}`;
   }
   function analysisTime(ts) {
     const d = new Date(ts);
@@ -508,7 +520,7 @@
     const lines = [
       `出力：${mode}`,
       `ログ型：${researchNotifyLabel(state.mode)}`,
-      `期間：${analysisDateTime(state.startAt)} ～ ${analysisDateTime(endAt)}`,
+      `記録時間：${normalRecordTime(state, endAt)}`,
       `調査期間：${snapshotRangesText(latestAnySnapshots)}`,
       ''
     ];
@@ -852,7 +864,7 @@
     const discordOk = sendSummaryLog(
       `📊 通常在庫差分ログ\n${state.restaurant || restaurantName()}`,
       buildNormalDiscordSummary(state, mode, endAt, csvOk),
-      BLUE
+      PURPLE
     );
     return requireCsv ? csvOk : discordOk || csvOk;
   }
@@ -1437,7 +1449,7 @@
   }
   function withReservationLead(description, date) {
     const label = reservationLeadLabel(date);
-    return label ? `${description}\n\n${label}` : description;
+    return `${description}\n${detectedAtText()}${label ? `　${label}` : ''}`;
   }
 
   function savePreviousAuto() {
@@ -2358,17 +2370,28 @@
     return [...map.values()];
   }
   function buildTitle(icon, date, meal) {
-    return [`${icon}${nowText()}`, `${fmtDateJa(date)} 【${meal}】`, restaurantName()].join('\n');
+    return [`${icon}${fmtDateJa(date)}【${meal}】`, restaurantName()].join('\n');
   }
   function buildResearchTitle(icon, current, meal) {
     return [
-      `${icon}${nowText()}`,
-      `調査期間：${fmtResearchRange(current.weekStart, current.weekEnd)} 【${meal}】`,
+      `${icon}調査期間：${fmtResearchRange(current.weekStart, current.weekEnd)}【${meal}】`,
       restaurantName()
     ].join('\n');
   }
-  function buildTimeOnlyDescription(changes) {
-    const times = sortChanges(changes).map((c) => c.time),
+  function buildErrorTitle(icon, meal, fallback = '') {
+    const block = blocks.get(meal),
+      dates = block
+        ? [...block.box.querySelectorAll('.timeList .date li .display')]
+            .map((element) => element.textContent.trim()).filter(Boolean)
+        : [],
+      last = lastKnownRanges.get(meal) || latestAnySnapshots.get(meal),
+      start = dates[0] || last?.weekStart,
+      end = dates[dates.length - 1] || last?.weekEnd,
+      range = start && end ? fmtResearchRange(start, end) : fallback || '未取得';
+    return [`${icon}対象期間：${range}【${meal}】`, restaurantName()].join('\n');
+  }
+  function buildTimeOnlyDescription(changes, label = '') {
+    const times = sortChanges(changes).map((c) => `${c.time}${label ? `　${label}` : ''}`),
       lines = [];
     for (let i = 0; i < times.length; i += 2) lines.push(times.slice(i, i + 2).join(' '));
     return lines.join('\n');
@@ -2406,8 +2429,8 @@
     return sortChanges(changes)
       .map((c) => {
         const v = c.vacancy;
-        if (!v || v.count <= 1) return `${c.time}　🆕初回空席`;
-        return `${c.time}　🔄再出現 ${v.count}回目（満席化から${formatGap(v.gapMs)}）`;
+        if (!v || v.count <= 1) return `${c.time}　🔴空席`;
+        return `${c.time}　🔴空席（🔄再出現 ${v.count}回目・満席化から${formatGap(v.gapMs)}）`;
       })
       .join('\n');
   }
@@ -2526,13 +2549,17 @@
       if (notifyState.mode === 'all') postDiscord(title, description, BLUE);
     } else postCriticalDiscord(title, description, BLUE);
   }
-  function sendCategoryDiscord(changes, category) {
+  function sendCategoryDiscord(changes, category, research = null) {
     const categoryIcon = category === 'special' ? '⭐️' : category === 'believe' ? '💫' : '🟡';
     groupDateMeal(changes).forEach((g) => {
-      const icon = g.changes.some((c) => c.type === 'added') ? `${categoryIcon}🔵` : categoryIcon;
+      const icon = g.changes.some((c) => c.type === 'added') ? `${categoryIcon}🔵` : categoryIcon,
+        content = buildCategoryDescription(g.changes, category),
+        description = research
+          ? `AM9時調査 ${research.pass}周目\n変化日：${fmtDateShortJa(g.date)}\n${content}`
+          : content;
       postCriticalDiscord(
-        buildTitle(icon, g.date, g.meal),
-        withReservationLead(buildCategoryDescription(g.changes, category), g.date),
+        research ? buildResearchTitle(icon, research.current, g.meal) : buildTitle(icon, g.date, g.meal),
+        withReservationLead(description, g.date),
         YELLOW
       );
     });
@@ -2572,7 +2599,7 @@
       groupDateMeal(changes.filter((c) => c.type === 'changed' && c.to === '空席' && !taken.has(c))).forEach((g) =>
         postDiscord(
           buildTitle('🔴', g.date, g.meal),
-          withReservationLead(buildTimeOnlyDescription(g.changes), g.date),
+          withReservationLead(buildTimeOnlyDescription(g.changes, '🔴空席'), g.date),
           RED
         )
       );
@@ -2607,7 +2634,8 @@
     syncNotifyDay();
     const prefix = `AM9時調査 ${pass}周目`;
     if (!changes.length) {
-      if (notifyState.mode !== 'off') postDiscord(buildResearchTitle('⚪️', current, meal), `${prefix}\n差分なし`, GRAY);
+      if (notifyState.mode !== 'off')
+        postDiscord(buildResearchTitle('⚪️', current, meal), `${prefix}\n差分なし\n${detectedAtText()}`, GRAY);
       return;
     }
     const categorized = { special: [], believe: [], rare: [] },
@@ -2620,7 +2648,7 @@
       }
     });
     ['special', 'believe', 'rare'].forEach((cat) => {
-      if (categorized[cat].length) sendCategoryDiscord(categorized[cat], cat);
+      if (categorized[cat].length) sendCategoryDiscord(categorized[cat], cat, { current, pass });
     });
     const added = changes.filter((c) => c.type === 'added' && !taken.has(c)),
       deleted = changes.filter((c) => c.type === 'deleted'),
@@ -2652,7 +2680,7 @@
       postDiscord(
         buildResearchTitle('🔴', current, g.meal),
         withReservationLead(
-          `${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildTimeOnlyDescription(g.changes)}`,
+          `${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildTimeOnlyDescription(g.changes, '🔴空席')}`,
           g.date
         ),
         RED
@@ -2726,8 +2754,8 @@
     }
     const target = useResearchChannel() ? 'research' : 'normal';
     postDiscord(
-      [`🟠${nowText()}`, restaurantName(), `【${meal}】`].join('\n'),
-      [`エラー：${error}`, `公開IP：${ip}`].join('\n'),
+      buildErrorTitle('🟠', meal),
+      [`読込エラー：${error}`, `公開IP：${ip}`, detectedAtText()].join('\n'),
       ORANGE,
       target
     );
@@ -2745,21 +2773,21 @@
             ? '2周目'
             : '';
     postDiscord(
-      [`🟠${nowText()}`, restaurantName(), `【${meal}】`].join('\n'),
-      [`AM9時調査 ${label}`, `読込エラー：${error}`, `公開IP：${ip}`].join('\n'),
+      buildErrorTitle('🟠', meal),
+      [`AM9時調査 ${label}`, `読込エラー：${error}`, `公開IP：${ip}`, detectedAtText()].join('\n'),
       ORANGE
     );
   }
   async function sendForceStopDiscord(meal, lastError, range) {
     const ip = await getPublicIp();
     postCriticalDiscord(
-      [`🔶${nowText()}`, restaurantName(), `【${meal}】`].join('\n'),
+      buildErrorTitle('🔶', meal, range),
       [
-        `検索期間：${range}`,
         `エラーが${MAX_ERRORS}回連続しました。`,
         '安全のため自動読込を停止しました。',
         `最後のエラー：${lastError}`,
-        `公開IP：${ip}`
+        `公開IP：${ip}`,
+        detectedAtText()
       ].join('\n'),
       ORANGE
     );
@@ -2817,5 +2845,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.36 起動`);
+  console.log(`[${NAME}] v5.37 起動`);
 })();
