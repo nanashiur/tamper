@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.78
+// @version      1.80
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.78', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.80', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -25,6 +25,7 @@ let notifyEnabled=false, notifyButton=null, webhookWarned=false;
 let recordButton=null, recordedLogs=[], lastLoggedRestaurantLabel='';
 let currentRestaurantName='', currentReservationPrivilege=false, currentRoomPrivilege=false;
 let reservationNoticeActive=false, restaurantModalHandled=false, pageObserver=null, purchasePending=0;
+let confirmTimeGetUntil=0;
 
 const stockSnapshots=new Map();
 const HOURS=['11','12','13','14','15','16','17','18','19','20','21'];
@@ -271,6 +272,11 @@ function getSelectedTimeInfo(){
   return time?{time,openNumKey,commodityCD,signature:`${commodityCD}|${openNumKey}|${time}`}:null;
 }
 
+function skipAutoConfirm(stage){
+  console.log(`[TDR TravelBag] 自動確定: purchase系通信中（${stage}）→ スキップ`);
+  exportRecordedCsv();
+}
+
 function scheduleAutoConfirm(info){
   if(!autoConfirmEnabled||!info) return;
   clearTimeout(autoConfirmTimer);
@@ -278,7 +284,7 @@ function scheduleAutoConfirm(info){
 
   autoConfirmTimer=setTimeout(()=>{
     if(!autoConfirmEnabled) return;
-    if(purchasePending>0) return console.log('[TDR TravelBag] 自動確定: purchase系通信中 → スキップ');
+    if(purchasePending>0) return skipAutoConfirm('フォーム準備前');
 
     const cur=getSelectedTimeInfo();
     if(!cur||cur.signature!==sig) return;
@@ -286,7 +292,7 @@ function scheduleAutoConfirm(info){
 
     setTimeout(()=>{
       if(!autoConfirmEnabled) return;
-      if(purchasePending>0) return console.log('[TDR TravelBag] 自動確定: purchase系通信中 → スキップ');
+      if(purchasePending>0) return skipAutoConfirm('確定ボタン直前');
 
       const now=getSelectedTimeInfo(), btn=document.getElementById('confirmBtn');
       if(!now||now.signature!==sig) return;
@@ -356,6 +362,15 @@ function refreshRestaurantInfo(){
 }
 
 document.addEventListener('click',captureRestaurantInfo,true);
+document.addEventListener('click',e=>{
+  if(e.target instanceof Element&&e.target.closest('#confirmBtn')) confirmTimeGetUntil=Date.now()+15000;
+},true);
+
+function takeConfirmTimeGet(){
+  const matched=confirmTimeGetUntil>0&&Date.now()<=confirmTimeGetUntil;
+  confirmTimeGetUntil=0;
+  return matched;
+}
 
 function getVisibleModals(){
   return Array.from(document.querySelectorAll('#modalDialog,.modalDialog')).filter(visible);
@@ -958,7 +973,7 @@ function processStockDiff(payload,grouped){
   sendStockDiffNotification(payload,notices);
 }
 
-function printTimeGet(source,url,response,body){
+function printTimeGet(source,url,response,body,confirmTimeGet=false){
   let data;
 
   try{
@@ -1022,7 +1037,7 @@ function printTimeGet(source,url,response,body){
 
   for(const code of Object.keys(grouped)){
     console.log(
-      `%c${now}`,
+      `%c${now}${confirmTimeGet?'（確定時在庫）':''}`,
       'background:#333;color:#fff;font-weight:bold;padding:2px 6px 2px 0;border-radius:3px'
     );
 
@@ -1186,6 +1201,7 @@ window.fetch=function(input,init){
   const timeGet=isTimeGet(url);
   const detail=isDetail(url);
   const purchase=isPurchase(url);
+  const confirmTimeGet=timeGet&&takeConfirmTimeGet();
 
   let id=null;
   let detailToken=null;
@@ -1228,7 +1244,8 @@ window.fetch=function(input,init){
             `fetch/${method}`,
             url,
             text,
-            body
+            body,
+            confirmTimeGet
           );
 
           if(data) scheduleVacancySelect(data);
@@ -1280,6 +1297,7 @@ XMLHttpRequest.prototype.send=function(body){
   const timeGet=info&&isTimeGet(info.url);
   const detail=info&&isDetail(info.url);
   const purchase=info&&isPurchase(info.url);
+  const confirmTimeGet=timeGet&&takeConfirmTimeGet();
 
   let id=null;
   let detailToken=null;
@@ -1308,7 +1326,8 @@ XMLHttpRequest.prototype.send=function(body){
           `xhr/${info.method}`,
           info.url,
           response,
-          body
+          body,
+          confirmTimeGet
         );
 
         if(data) scheduleVacancySelect(data);
