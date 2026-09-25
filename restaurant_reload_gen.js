@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.84
+// @version      4.85
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -37,19 +37,24 @@
   const ORANGE = 0xFFA500;
   const PURPLE = 0x800080;
 
-  function getErrorNotificationContextLines() {
+  function getErrorNotificationContext() {
     let context = {};
     try {
-      context = JSON.parse(sessionStorage.getItem(ERROR_CONTEXT_STORAGE_KEY) || '{}');
+      const stored = JSON.parse(sessionStorage.getItem(ERROR_CONTEXT_STORAGE_KEY) || '{}');
+      if (stored && typeof stored === 'object') context = stored;
     } catch (e) {
       console.error('エラー通知用情報の取得失敗:', e);
     }
 
-    return [
-      `レストラン：${context.restaurantName || '特定できず'}`,
-      `対象日：${context.displayDate || '不明'}`,
-      `食事区分：${context.mealName || 'すべて'}`
-    ];
+    return {
+      restaurantName: context.restaurantName || '特定できず',
+      displayDate: context.displayDate || '不明',
+      mealName: context.mealName || 'すべて'
+    };
+  }
+
+  function getNotificationTitle(icon, displayDate, mealName, restaurantName) {
+    return `${icon}${displayDate}【${mealName || 'すべて'}】\n${restaurantName}`;
   }
 
   function isAccessDeniedPage() {
@@ -112,9 +117,7 @@
     if (!DISCORD_WEBHOOK_URL || !shouldNotifyAccessDenied(reference)) return;
 
     const ip = await getPublicIp();
-    const d = new Date();
-    const detectedAt = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
-    const errorReloadCount = Math.max(0, Number(localStorage.getItem('errorReloadCount')) || 0);
+    const context = getErrorNotificationContext();
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -123,14 +126,14 @@
       body: JSON.stringify({
         username: SCRIPT_NAME,
         embeds: [{
-          title: `🔶${detectedAt}`,
+          title: getNotificationTitle('🔶', context.displayDate, context.mealName, context.restaurantName),
           description: [
             'Access Deniedを検出しました。',
-            ...getErrorNotificationContextLines(),
-            `公開IP：${ip}`,
             `Reference：${reference}`,
-            `エラーF5：${errorReloadCount}回`,
-            `URL：${location.href}`
+            `公開IP：${ip}`,
+            `URL：${location.href}`,
+            '',
+            getDetectDateTime()
           ].join('\n'),
           color: ORANGE
         }]
@@ -144,9 +147,7 @@
 
     (async () => {
       const ip = await getPublicIp();
-      const d = new Date();
-      const detectedAt = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
-      const errorReloadCount = Math.max(0, Number(localStorage.getItem('errorReloadCount')) || 0);
+      const context = getErrorNotificationContext();
 
       fetch(DISCORD_WEBHOOK_URL, {
         method: 'POST',
@@ -155,14 +156,14 @@
         body: JSON.stringify({
           username: SCRIPT_NAME,
           embeds: [{
-          title: `🟠${detectedAt}`,
-          description: [
+            title: getNotificationTitle('🟠', context.displayDate, context.mealName, context.restaurantName),
+            description: [
               'オレンジエラーを検出しました。',
-              ...getErrorNotificationContextLines(),
               `公開IP：${ip}`,
-              `エラーF5：${errorReloadCount}回`,
               `URL：${location.href}`,
-              '60秒後に強制再読み込みします'
+              '60秒後に強制再読み込みします',
+              '',
+              getDetectDateTime()
             ].join('\n'),
             color: ORANGE
           }]
@@ -325,11 +326,15 @@
     return '';
   }
 
+  function getCurrentNotificationMealName() {
+    return state.lastClickedMealName || getMealName(document) || 'すべて';
+  }
+
   function saveErrorNotificationContext() {
     const context = {
       restaurantName: getRestaurantName() || '特定できず',
       displayDate: getDisplayDate() || '不明',
-      mealName: state.lastClickedMealName || getMealName(document) || 'すべて'
+      mealName: getCurrentNotificationMealName()
     };
 
     try {
@@ -353,9 +358,20 @@
     return getMealName(tempDiv) || state.lastClickedMealName || '';
   }
 
-  function getDetectDateTime() {
+  function getDetectDateTime(d = new Date()) {
+    return `${String(d.getFullYear()).slice(-2)}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+  }
+
+  function getNotificationDetectedLine(displayDate) {
     const d = new Date();
-    return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+    const match = displayDate.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+    if (!match) return getDetectDateTime(d);
+
+    const targetDay = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    const detectedDay = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const days = Math.round((targetDay - detectedDay) / 86400000);
+    const relative = days > 0 ? `${days}日前` : days < 0 ? `${Math.abs(days)}日後` : '当日';
+    return `${getDetectDateTime(d)}　${relative}`;
   }
 
   function statusFromRow(row) {
@@ -452,14 +468,16 @@
     if ((notifyType === 'FULL' || notifyType === 'STATUS') && state.notifyMode !== 'ALL') return;
     if (!DISCORD_WEBHOOK_URL || !lines.length) return;
 
+    const displayDate = getDisplayDate();
+
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: SCRIPT_NAME,
         embeds: [{
-          title: `${icon}${getDetectDateTime()}\n${getDisplayDate()}${mealName ? ` 【${mealName}】` : ''}\n${getRestaurantName()}`,
-          description: lines.join('\n'),
+          title: getNotificationTitle(icon, displayDate, mealName, getRestaurantName()),
+          description: [...lines, getNotificationDetectedLine(displayDate)].join('\n'),
           color
         }]
       })
@@ -607,6 +625,8 @@
   function sendAutoReserveDiscord(time, mealName) {
     if (!DISCORD_WEBHOOK_URL) return;
 
+    const displayDate = getDisplayDate();
+
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -614,8 +634,8 @@
       body: JSON.stringify({
         username: SCRIPT_NAME,
         embeds: [{
-          title: `🟣${getDetectDateTime()}\n${getDisplayDate()}${mealName ? ` 【${mealName}】` : ''}\n${getRestaurantName()}`,
-          description: ['自動予約クリック試行', time].join('\n'),
+          title: getNotificationTitle('🟣', displayDate, mealName, getRestaurantName()),
+          description: [`${time}　🟣自動予約クリック試行`, getNotificationDetectedLine(displayDate)].join('\n'),
           color: PURPLE
         }]
       })
@@ -639,6 +659,7 @@
 
     const ip = await getPublicIp();
     const errorText = formatErrorStatuses(statuses);
+    const displayDate = getDisplayDate();
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -647,14 +668,14 @@
       body: JSON.stringify({
         username: SCRIPT_NAME,
         embeds: [{
-          title: `🟠${getDetectDateTime()}`,
+          title: getNotificationTitle('🟠', displayDate, getCurrentNotificationMealName(), getRestaurantName()),
           description: [
             `通信エラーによるF5再読み込みが${errorReloadCount}回目に達しました。`,
-            getRestaurantName(),
-            getDisplayDate(),
             `エラー：${errorText}`,
             `エラーF5：${errorReloadCount}回目`,
-            `公開IP：${ip}`
+            `公開IP：${ip}`,
+            '',
+            getDetectDateTime()
           ].join('\n'),
           color: ORANGE
         }]
@@ -666,6 +687,7 @@
     if (!DISCORD_WEBHOOK_URL) return;
 
     const ip = await getPublicIp();
+    const displayDate = getDisplayDate();
 
     fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -674,14 +696,14 @@
       body: JSON.stringify({
         username: SCRIPT_NAME,
         embeds: [{
-          title: `🟠${getDetectDateTime()}`,
+          title: getNotificationTitle('🟠', displayDate, getCurrentNotificationMealName(), getRestaurantName()),
           description: [
             'フリーズ：応答がありません。',
-            getRestaurantName(),
-            getDisplayDate(),
             'Pending：120秒超',
             `公開IP：${ip}`,
-            '60秒後に強制再読み込みします'
+            '60秒後に強制再読み込みします',
+            '',
+            getDetectDateTime()
           ].join('\n'),
           color: ORANGE
         }]
