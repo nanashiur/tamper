@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.37
+// @version      5.38
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -190,7 +190,9 @@
   function randomWaitMs(mode) {
     return mode === 'long'
       ? (Math.floor(Math.random() * 21) + 110) * 1000
-      : (Math.floor(Math.random() * 21) + 50) * 1000;
+      : mode === 'medium'
+        ? (Math.floor(Math.random() * 21) + 50) * 1000
+        : (Math.floor(Math.random() * 5) + 1) * 1000;
   }
   function isReceptionStatus(v) {
     return String(v || '').startsWith('◆受付終了');
@@ -221,7 +223,7 @@
     return researchNotifyMode !== 'off';
   }
   function normalizeAutoMode(v) {
-    return ['medium', 'long', 'off'].includes(v) ? v : 'long';
+    return ['short', 'medium', 'long', 'off'].includes(v) ? v : 'long';
   }
   function loadAutoMode(meal) {
     const v = localStorage.getItem(AUTO_MODE_PREFIX + meal);
@@ -1175,6 +1177,8 @@
   function autoModePanel(mode) {
     return mode === 'off'
       ? { label: 'OFF', name: 'OFF', color: '#000' }
+      : mode === 'short'
+        ? { label: '短', name: '短期', color: '#ff69b4', textColor: '#000' }
       : mode === 'medium'
         ? { label: '中', name: '中期', color: '#ff9800' }
         : { label: '長', name: '長期', color: '#1976d2' };
@@ -1190,7 +1194,7 @@
   function showPanelCounter(s, meal, value, color, title) {
     const mode = autoModePanel(s.mode);
     s.panel.style.background = mode.color;
-    s.panel.style.color = '#fff';
+    s.panel.style.color = mode.textColor || '#fff';
     const counterWidth = 45;
     s.statusCount.style.width = `${counterWidth}px`;
     s.panel.style.padding = `6px ${counterWidth + 2}px 6px 2px`;
@@ -1622,7 +1626,7 @@
       renderPanels();
       return;
     }
-    s.mode = s.mode === 'long' ? 'medium' : s.mode === 'medium' ? 'off' : 'long';
+    s.mode = s.mode === 'long' ? 'medium' : s.mode === 'medium' ? 'short' : s.mode === 'short' ? 'off' : 'long';
     localStorage.setItem(AUTO_MODE_PREFIX + meal, s.mode);
     clearTimer(s);
     if (autoActive(s) && !s.pending && !isMaintenance()) schedule(meal);
@@ -1714,7 +1718,7 @@
         s.panel.title = '9時調査管理中 / 通常自動読込停止';
         return;
       }
-      s.panel.title = `${meal} 自動読込：長期 → 中期 → OFF`;
+      s.panel.title = `${meal} 自動読込：長期 → 中期 → 短期 → OFF`;
       if (s.mode === 'off') {
         s.panel.style.background = '#000';
         s.panel.style.color = '#fff';
@@ -1722,15 +1726,10 @@
         return;
       }
       const sec = s.deadline ? ` ${Math.max(0, Math.ceil((s.deadline - now) / 1000))}` : '';
-      if (s.mode === 'medium') {
-        s.panel.style.background = '#ff9800';
-        s.panel.style.color = '#fff';
-        s.panel.textContent = `${meal}${sec}`;
-      } else {
-        s.panel.style.background = '#1976d2';
-        s.panel.style.color = '#fff';
-        s.panel.textContent = `${meal}${sec}`;
-      }
+      const mode = autoModePanel(s.mode);
+      s.panel.style.background = mode.color;
+      s.panel.style.color = mode.textColor || '#fff';
+      s.panel.textContent = `${meal}${sec}`;
     });
     if (analysisSendPanel) {
       analysisSendPanel.style.background = Date.now() < analysisFlashUntil ? '#d32f2f' : '#198754';
@@ -2845,5 +2844,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.37 起動`);
+  console.log(`[${NAME}] v5.38 起動`);
 })();
