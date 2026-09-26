@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.82
+// @version      1.84
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.82', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.84', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -23,6 +23,7 @@ let vacancySelectMode=0, vacancySelectButton=null, vacancySelectToken=0;
 let autoConfirmEnabled=false, autoConfirmButton=null, autoConfirmTimer=null, lastObservedCurrentSignature='';
 let notifyEnabled=false, notifyButton=null, webhookWarned=false;
 let recordButton=null, recordedLogs=[], lastLoggedRestaurantLabel='';
+let deviceId='';
 let currentRestaurantName='', currentReservationPrivilege=false, currentRoomPrivilege=false;
 let reservationNoticeActive=false, restaurantModalHandled=false, pageObserver=null, purchasePending=0;
 let confirmTimeGetUntil=0;
@@ -84,6 +85,26 @@ for(const name of ['log','info','warn','error','debug']){
 
 function csvCell(v){ return `"${String(v??'').replace(/"/g,'""')}"`; }
 
+// Use GPU and logical CPU count across Chrome profiles on the same computer.
+function detectDeviceId(){
+  let gpu='';
+  try{
+    const canvas=document.createElement('canvas');
+    const gl=canvas.getContext('webgl')||canvas.getContext('experimental-webgl');
+    if(gl){
+      const debug=gl.getExtension('WEBGL_debug_renderer_info');
+      gpu=debug ? `${gl.getParameter(debug.UNMASKED_VENDOR_WEBGL)}|${gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)}` : `${gl.getParameter(gl.VENDOR)}|${gl.getParameter(gl.RENDERER)}`;
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  }catch{}
+  const parts=[navigator.hardwareConcurrency||'',gpu];
+  const signature=parts.join('|');
+  let hash=2166136261;
+  for(let i=0;i<signature.length;i++) hash=Math.imul(hash^signature.charCodeAt(i),16777619);
+  return `HW-${(hash>>>0).toString(16).padStart(8,'0').toUpperCase()}`;
+}
+setTimeout(()=>{ deviceId=detectDeviceId(); },1000);
+
 function playExportSound(){
   try{
     const AC=window.AudioContext||window.webkitAudioContext;
@@ -107,7 +128,7 @@ function exportRecordedCsv(){
   lastLoggedRestaurantLabel='';
   playExportSound();
 
-  const rows=[['日時','レベル','ログ'],...logs];
+  const rows=[['日時','レベル','ログ'],[formatDateTimeMs(savedAt),'META',`端末ID: ${deviceId||detectDeviceId()}`],...logs];
   const csv='\uFEFF'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url;
