@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.86
+// @version      4.87
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -1237,10 +1237,10 @@
     right: '158px',
     zIndex: '2147483647',
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, 20px)',
-    gridTemplateRows: 'repeat(3, 20px)',
+    gridTemplateColumns: 'repeat(4, 24px)',
+    gridTemplateRows: 'repeat(3, 24px)',
     columnGap: '3px',
-    rowGap: '20px'
+    rowGap: '3px'
   });
 
   const navigationButtons = { meals: [], days: [] };
@@ -1251,8 +1251,8 @@
     button.textContent = label;
     button.title = title;
     Object.assign(button.style, {
-      width: '20px',
-      height: '20px',
+      width: '24px',
+      height: '24px',
       padding: '0',
       border: '1px solid #555',
       borderRadius: '3px',
@@ -1260,7 +1260,7 @@
       color: '#fff',
       fontSize: '11px',
       fontWeight: 'bold',
-      lineHeight: '18px',
+      lineHeight: '22px',
       textAlign: 'center',
       cursor: 'pointer',
       boxSizing: 'border-box'
