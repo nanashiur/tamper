@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.38
+// @version      5.39
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -88,6 +88,9 @@
   function nowText() {
     const d = new Date();
     return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+  }
+  function dateSelection() {
+    return localStorage.getItem(DATE_SELECT_KEY) || '';
   }
   function detectedAtText() {
     const d = new Date();
@@ -1002,12 +1005,12 @@
   }
   function scheduleMidnightReselect() {
     if (midnightReselectTimer !== null) return;
-    const selected = sessionStorage.getItem(DATE_SELECT_KEY);
+    const selected = dateSelection();
     if (!dateButtons.some((b) => b.dataset.value === selected)) return;
     if (!saveMidnightCarry()) return;
     midnightReselectTimer = setTimeout(() => {
       midnightReselectTimer = null;
-      if (sessionStorage.getItem(DATE_SELECT_KEY) !== selected) {
+      if (dateSelection() !== selected) {
         sessionStorage.removeItem(MIDNIGHT_CARRY_KEY);
         return;
       }
@@ -1178,7 +1181,7 @@
     return mode === 'off'
       ? { label: 'OFF', name: 'OFF', color: '#000' }
       : mode === 'short'
-        ? { label: '短', name: '短期', color: '#ff69b4', textColor: '#000' }
+        ? { label: '短', name: '短期', color: '#ff69b4' }
       : mode === 'medium'
         ? { label: '中', name: '中期', color: '#ff9800' }
         : { label: '長', name: '長期', color: '#1976d2' };
@@ -1367,11 +1370,11 @@
     renderPanels();
   }
   function selectDateShortcut(value) {
-    sessionStorage.setItem(DATE_SELECT_KEY, String(value));
+    localStorage.setItem(DATE_SELECT_KEY, String(value));
     renderDateSelection();
   }
   function renderDateSelection() {
-    const selected = sessionStorage.getItem(DATE_SELECT_KEY) || '';
+    const selected = dateSelection();
     dateButtons.forEach((b) => {
       b.style.background = b.dataset.value === selected ? '#d32f2f' : '#0b1f3a';
       b.style.color = '#fff';
@@ -2844,5 +2847,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.38 起動`);
+  console.log(`[${NAME}] v5.39 起動`);
 })();
