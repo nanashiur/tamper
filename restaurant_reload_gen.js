@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.85
+// @version      4.86
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -983,6 +983,44 @@
     return p;
   }
 
+  const jstDateFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
+  });
+
+  function getJstUseDate(offset) {
+    const parts = Object.fromEntries(jstDateFormatter.formatToParts(new Date()).map(part => [part.type, part.value]));
+    const date = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + offset));
+    return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}`;
+  }
+
+  function saveNavigationErrorContext(url) {
+    const useDate = url.searchParams.get('useDate') || '';
+    const match = useDate.match(/^(\d{4})(\d{2})(\d{2})$/);
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    const displayDate = match
+      ? `${match[1]}年${Number(match[2])}月${Number(match[3])}日（${weekdays[new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay()]}）`
+      : getDisplayDate() || '不明';
+    const mealName = { '1': '朝食', '2': '昼食', '3': '夕食' }[url.searchParams.get('mealDivInform')] || 'すべて';
+
+    try {
+      sessionStorage.setItem(ERROR_CONTEXT_STORAGE_KEY, JSON.stringify({
+        restaurantName: getRestaurantName() || '特定できず',
+        displayDate,
+        mealName
+      }));
+    } catch (e) {
+      console.error('エラー通知用情報の保存失敗:', e);
+    }
+  }
+
+  function navigateRestaurantQuery(key, value) {
+    const url = new URL(location.href);
+    if (url.searchParams.get(key) === value) return;
+    url.searchParams.set(key, value);
+    saveNavigationErrorContext(url);
+    location.assign(url.toString());
+  }
+
   function updatePanels(isMaintenance = false) {
     if (isMaintenance) {
       panels.main.textContent = '休止';
@@ -1191,6 +1229,80 @@
     updatePanels();
   });
   panels.reserve.style.right = '84px';
+
+  const navigationGrid = document.createElement('div');
+  Object.assign(navigationGrid.style, {
+    position: 'fixed',
+    top: '17px',
+    right: '158px',
+    zIndex: '2147483647',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 20px)',
+    gridTemplateRows: 'repeat(3, 20px)',
+    columnGap: '3px',
+    rowGap: '20px'
+  });
+
+  const navigationButtons = { meals: [], days: [] };
+
+  function addNavigationButton(label, title, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.title = title;
+    Object.assign(button.style, {
+      width: '20px',
+      height: '20px',
+      padding: '0',
+      border: '1px solid #555',
+      borderRadius: '3px',
+      background: '#000',
+      color: '#fff',
+      fontSize: '11px',
+      fontWeight: 'bold',
+      lineHeight: '18px',
+      textAlign: 'center',
+      cursor: 'pointer',
+      boxSizing: 'border-box'
+    });
+    button.onclick = onClick;
+    navigationGrid.appendChild(button);
+    return button;
+  }
+
+  [['全', ''], ['朝', '1'], ['昼', '2'], ['夕', '3']].forEach(([label, value]) => {
+    const button = addNavigationButton(label, `食事区分：${label}`, () => navigateRestaurantQuery('mealDivInform', value));
+    navigationButtons.meals.push({ button, value });
+  });
+
+  for (let day = 0; day <= 7; day++) {
+    const button = addNavigationButton(String(day), `D${day}：日本時間の今日から${day}日後`, () => navigateRestaurantQuery('useDate', getJstUseDate(day)));
+    navigationButtons.days.push({ button, day });
+  }
+
+  function updateNavigationButtonSelection() {
+    const url = new URL(location.href);
+    const meal = url.searchParams.get('mealDivInform') || '';
+    const useDate = url.searchParams.get('useDate') || '';
+
+    navigationButtons.meals.forEach(({ button, value }) => {
+      const selected = meal === value;
+      button.style.borderColor = selected ? '#ffc107' : '#555';
+      button.style.color = selected ? '#ffc107' : '#fff';
+      button.setAttribute('aria-pressed', String(selected));
+    });
+
+    navigationButtons.days.forEach(({ button, day }) => {
+      const selected = useDate === getJstUseDate(day);
+      button.style.borderColor = selected ? '#ffc107' : '#555';
+      button.style.color = selected ? '#ffc107' : '#fff';
+      button.setAttribute('aria-pressed', String(selected));
+    });
+  }
+
+  document.body.appendChild(navigationGrid);
+  updateNavigationButtonSelection();
+  setInterval(updateNavigationButtonSelection, 60000);
 
   function openAllTimeSlots() {
     let delay = 0;
