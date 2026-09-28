@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.87
+// @version      4.88
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -1342,14 +1342,28 @@
 
   let debounceTimer;
 
+  function getSectionExclusionTimes(section) {
+    const times = [...section.querySelectorAll('tr')]
+      .map(row => row.querySelector('th')?.innerText.trim())
+      .filter(time => /^\d{1,2}:\d{2}$/.test(time));
+    const headingHour = section.querySelector('h1')?.textContent.match(/(\d{1,2}):\d{2}/)?.[1];
+    if (headingHour !== undefined) {
+      const hour = times.find(time => Number(time.split(':')[0]) === Number(headingHour))?.split(':')[0] || headingHour;
+      for (let minute = 0; minute < 60; minute += 10) {
+        times.push(`${hour}:${String(minute).padStart(2, '0')}`);
+      }
+    }
+    return [...new Set(times)];
+  }
+
   function updateSectionExclusionSwitch(section) {
     const master = section.querySelector('.ex-section-switch');
     if (!master) return;
 
-    const switches = [...section.querySelectorAll('.ex-slot-switch')];
-    const checkedCount = switches.filter(checkbox => checkbox.checked).length;
-    master.checked = checkedCount === switches.length;
-    master.indeterminate = checkedCount > 0 && checkedCount < switches.length;
+    const times = getSectionExclusionTimes(section);
+    const checkedCount = times.filter(time => !state.excludedTimes.includes(time)).length;
+    master.checked = checkedCount === times.length;
+    master.indeterminate = checkedCount > 0 && checkedCount < times.length;
   }
 
   function addSectionExclusionSwitch(section) {
@@ -1365,9 +1379,7 @@
     checkbox.onclick = event => event.stopPropagation();
     checkbox.onchange = event => {
       event.stopPropagation();
-      const times = [...new Set([...section.querySelectorAll('tr')]
-        .map(row => row.querySelector('th')?.innerText.trim())
-        .filter(time => /^\d{1,2}:\d{2}$/.test(time)))];
+      const times = getSectionExclusionTimes(section);
 
       for (const time of times) {
         if (event.target.checked) {
