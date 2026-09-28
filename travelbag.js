@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.86
+// @version      1.87
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.86', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.87', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -123,6 +123,8 @@ function playExportSound(){
 }
 
 function exportRecordedCsv(keepBuffer=false){
+  const saveType=keepBuffer===true?'自動確定保存':'手動保存';
+  console.log(`%c${formatTimeMs()} ${saveType}`,`background:${keepBuffer===true?'#d32f2f':'#f06292'};color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px`);
   const logs=[...recordedLogs], savedAt=new Date(), restaurant=sanitizeFilePart(lastLoggedRestaurantLabel);
   if(keepBuffer!==true){
     recordedLogs=[];
@@ -130,7 +132,7 @@ function exportRecordedCsv(keepBuffer=false){
   }
   playExportSound();
 
-  const rows=[['日時','レベル','ログ'],[formatDateTimeMs(savedAt),'META',`端末ID: ${deviceId||detectDeviceId()}`],...logs];
+  const rows=[['日時','レベル','ログ'],[formatDateTimeMs(savedAt),'META',`端末ID: ${deviceId||detectDeviceId()}`],[formatDateTimeMs(savedAt),'META',`保存種別: ${saveType}`],...logs];
   const csv='\uFEFF'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url;
@@ -334,7 +336,6 @@ function scheduleAutoConfirm(info){
       updateAutoConfirmButton();
 
       console.log(formatTimeMs(),'自動確定:',now.time,now.commodityCD,now.openNumKey);
-      console.log(`%c${formatTimeMs()} 自動保存`,'background:#6a1b9a;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px');
       try{ exportRecordedCsv(true); }catch(e){ console.warn(formatTimeMs(),'自動保存失敗',e); }
       btn.click();
     },0);
@@ -1427,8 +1428,8 @@ function fireStockReload(isFirstAuto=false){
   if(!$a) return;
 
   console.log(
-    formatTimeMs(),
-    '在庫状況リロード'
+    `%c${formatTimeMs()} 在庫状況リロード`,
+    'background:#198754;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px'
   );
 
   if(isFirstAuto){
