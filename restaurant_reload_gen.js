@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.89
+// @version      4.90
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -557,7 +557,7 @@
     } catch (e) {
       console.error('Sレア検知履歴の保存失敗:', e);
     }
-    if (!detected.length) return;
+    if (!detected.length || state.notifyMode === 'OFF') return;
     detected.sort((a, b) => a.localeCompare(b));
     try {
       saveSpecialVacancyCsv(mealName, detected, new Date());
@@ -1372,15 +1372,15 @@
 
     navigationButtons.meals.forEach(({ button, value }) => {
       const selected = meal === value;
-      button.style.borderColor = selected ? '#ffc107' : '#555';
-      button.style.color = selected ? '#ffc107' : '#fff';
+      button.style.borderColor = selected ? '#ff0000' : '#555';
+      button.style.color = selected ? '#ff0000' : '#fff';
       button.setAttribute('aria-pressed', String(selected));
     });
 
     navigationButtons.days.forEach(({ button, day }) => {
       const selected = useDate === getJstUseDate(day);
-      button.style.borderColor = selected ? '#ffc107' : '#555';
-      button.style.color = selected ? '#ffc107' : '#fff';
+      button.style.borderColor = selected ? '#ff0000' : '#555';
+      button.style.color = selected ? '#ff0000' : '#fff';
       button.setAttribute('aria-pressed', String(selected));
     });
   }
