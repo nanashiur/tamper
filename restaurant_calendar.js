@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.44
+// @version      5.45
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -529,12 +529,8 @@
     });
     return lines.join('\n');
   }
-  function buildAm9DiscordSummary(state, endAt, csvOk) {
-    const lines = [
-      `期間：${analysisDateTime(state.startAt || endAt)} ～ ${analysisDateTime(endAt)}`,
-      `調査期間：${snapshotRangesText(latestAnySnapshots)}`,
-      ''
-    ];
+  function buildAm9DiscordSummary(state, endAt) {
+    const lines = [`記録時間：${normalRecordTime(state, endAt)}`];
     const meals = [...new Set([...MEALS.filter((m) => state.knownMeals.has(m)), ...state.knownMeals])];
     if (!meals.length) lines.push('記録なし');
     meals.forEach((meal) => {
@@ -547,7 +543,6 @@
       const errors = state.errors.filter((e) => e.meal === meal).length;
       lines.push(`${meal}　1周目 ${p1} / 2周目 ${p2} / エラー ${errors}`);
     });
-    lines.push('', `CSV：${csvOk ? '保存済み' : '保存失敗'}`);
     return lines.join('\n');
   }
   function sendSummaryLog(title, description, color) {
@@ -841,7 +836,7 @@
     if (!state?.active) return false;
     const csvOk = downloadNormalCsv(state, mode, endAt);
     const discordOk = sendSummaryLog(
-      `📊${state.restaurant || restaurantName()}（${snapshotRangesText(latestAnySnapshots)}）`,
+      buildSystemTitle('📊', snapshotRangesText(latestAnySnapshots), state.restaurant || restaurantName()),
       buildNormalDiscordSummary(state, mode, endAt),
       PURPLE
     );
@@ -853,8 +848,8 @@
     const state = am9LogState,
       csvOk = downloadAm9Csv(state, state.endAt);
     const discordOk = sendSummaryLog(
-      `9️⃣ AM9状態ログ\n${state.restaurant || restaurantName()}`,
-      buildAm9DiscordSummary(state, state.endAt, csvOk),
+      buildSystemTitle('9️⃣', snapshotRangesText(latestAnySnapshots), state.restaurant || restaurantName()),
+      buildAm9DiscordSummary(state, state.endAt),
       PURPLE
     );
     const ok = discordOk || csvOk;
@@ -1432,7 +1427,7 @@
   }
   function withReservationLead(description, date) {
     const label = reservationLeadLabel(date);
-    return `${description}\n${detectedAtText()}${label ? `　${label}` : ''}`;
+    return [description, label, detectedAtText()].filter(Boolean).join('\n');
   }
 
   function savePreviousAuto() {
@@ -2351,10 +2346,10 @@
     return [`${icon}${fmtDateJa(date)}【${meal}】`, restaurantName()].join('\n');
   }
   function buildResearchTitle(icon, current, meal) {
-    return [
-      `${icon}調査期間：${fmtResearchRange(current.weekStart, current.weekEnd)}【${meal}】`,
-      restaurantName()
-    ].join('\n');
+    return buildSystemTitle(icon, `${analysisDate(current.weekStart)}-${analysisDate(current.weekEnd)}`);
+  }
+  function buildSystemTitle(icon, range, name = restaurantName()) {
+    return `${icon}${range}\n${name}`;
   }
   function buildErrorTitle(icon, meal, fallback = '') {
     const block = blocks.get(meal),
@@ -2365,8 +2360,8 @@
       last = lastKnownRanges.get(meal) || latestAnySnapshots.get(meal),
       start = dates[0] || last?.weekStart,
       end = dates[dates.length - 1] || last?.weekEnd,
-      range = start && end ? fmtResearchRange(start, end) : fallback || '未取得';
-    return [`${icon}対象期間：${range}【${meal}】`, restaurantName()].join('\n');
+      range = start && end ? `${analysisDate(start)}-${analysisDate(end)}` : fallback || '未取得';
+    return buildSystemTitle(icon, range);
   }
   function buildTimeOnlyDescription(changes, label = '') {
     const times = sortChanges(changes).map((c) => `${c.time}${label ? `　${label}` : ''}`),
@@ -2405,12 +2400,13 @@
   }
   function buildVacancyFilteredDescription(changes) {
     return sortChanges(changes)
-      .map((c) => {
-        const v = c.vacancy;
-        if (!v || v.count <= 1) return `${c.time}　🔴空席`;
-        return `${c.time}　🔴空席（🔄再出現 ${v.count}回目・満席化から${formatGap(v.gapMs)}）`;
-      })
+      .map((c) => `${c.time}　🔴空席${vacancyRepeatText(c.vacancy)}`)
       .join('\n');
+  }
+  function vacancyRepeatText(vacancy) {
+    if (!vacancy || vacancy.count <= 1) return '';
+    const gap = vacancy.gapMs !== null && vacancy.gapMs !== undefined ? `・${formatGap(vacancy.gapMs)}` : '';
+    return `（🔄${vacancy.count}回目${gap}）`;
   }
   function commodityForMeal(meal) {
     return blocks.get(meal)?.commodity || '';
@@ -2483,21 +2479,17 @@
       .map((c) => {
         const status = c.to === '満席' ? '満席' : '空席',
           label = category === 'special' ? `⭐️Sレア${status}`
-            : category === 'believe' ? `💫ビリーヴ時間帯${status === '満席' ? ' 満席' : ''}` : `🟡レア${status}`;
+            : category === 'believe' ? `💫ビリーヴ${status === '満席' ? ' 満席' : ''}` : `🟡レア${status}`;
         const range = believeRange(c.date),
           suspended =
             believeSuspended(c.date) &&
             c.meal === '夕食' &&
             (category === 'believe' || (category === 'special' && timeInRange(c.time, range[0], range[1]))),
-          text = suspended
-            ? `${label} （❌️休止）`
-            : label;
-        const vacancy = c.vacancy,
-          repeat = status === '空席' && vacancy?.count > 1
-            ? `（🔄再出現 ${vacancy.count}回目${vacancy.gapMs !== null && vacancy.gapMs !== undefined
-              ? `・満席化から${formatGap(vacancy.gapMs)}` : ''}）`
-            : '';
-        return `${c.time}　${text}${c.type === 'added' ? '（新規枠）' : ''}${repeat}`;
+          addedLabel = category === 'special' ? '⭐️Sレア' : category === 'believe' ? '💫ビリーヴ' : '🟡レア',
+          text = c.type === 'added' ? `🔵新規（${addedLabel}）` : label,
+          suspension = suspended ? ' （❌️休止）' : '',
+          repeat = status === '空席' ? vacancyRepeatText(c.vacancy) : '';
+        return `${c.time}　${text}${suspension}${repeat}`;
       })
       .join('\n');
   }
@@ -2563,7 +2555,7 @@
         icon = added ? `${categoryIcon}🔵` : g.changes[0].to === '満席' ? `${categoryIcon}⚫️` : categoryIcon,
         content = buildCategoryDescription(g.changes, category),
         description = research
-          ? `AM9時調査 ${research.pass}周目\n変化日：${fmtDateShortJa(g.date)}\n${content}`
+          ? `AM9時調査 ${research.pass}周目【${g.meal}】\n変化日：${fmtDateShortJa(g.date)}\n${content}`
           : content;
       if (added) channels.push('04');
       if (!includeCommon && !channels.length) return;
@@ -2624,7 +2616,7 @@
       groupDateMeal(changes.filter((c) => c.type === 'changed' && c.to === '空席' && !taken.has(c))).forEach((g) =>
         postDiscord(
           buildTitle('🔴', g.date, g.meal),
-          withReservationLead(buildTimeOnlyDescription(g.changes, '🔴空席'), g.date),
+          withReservationLead(buildVacancyFilteredDescription(g.changes), g.date),
           RED
         )
       );
@@ -2658,7 +2650,7 @@
   function sendResearchResult(meal, current, changes, pass) {
     syncNotifyDay();
     sendCategoryFullDiscord(changes, { current, pass });
-    const prefix = `AM9時調査 ${pass}周目`;
+    const prefix = `AM9時調査 ${pass}周目【${meal}】`;
     if (!changes.length) {
       if (notifyState.mode !== 'off')
         postDiscord(buildResearchTitle('⚪️', current, meal), `${prefix}\n差分なし\n${detectedAtText()}`, GRAY);
@@ -2707,7 +2699,7 @@
       postDiscord(
         buildResearchTitle('🔴', current, g.meal),
         withReservationLead(
-          `${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildTimeOnlyDescription(g.changes, '🔴空席')}`,
+          `${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildVacancyFilteredDescription(g.changes)}`,
           g.date
         ),
         RED
@@ -2747,7 +2739,7 @@
     const message = `AM9調査の1周目が遅延開始しました。\n開始時刻：${analysisDateTime(now)}\n9:00からの遅延：${Math.floor(delaySec / 60)}分${delaySec % 60}秒\n遅延の原因は未特定です。`;
     console.warn(`[${NAME}] ${message}`);
     try {
-      postDiscord([`🟠${nowText()}`, restaurantName(), '【AM9遅延開始】'].join('\n'), message, ORANGE);
+      postDiscord(buildSystemTitle('🟠', snapshotRangesText(latestAnySnapshots)), message, ORANGE);
     } catch (e) {
       console.error(`[${NAME}] AM9遅延通知失敗`, e);
     }
@@ -2781,7 +2773,7 @@
     }
     postDiscord(
       buildErrorTitle('🟠', meal),
-      [`読込エラー：${error}`, `公開IP：${ip}`, detectedAtText()].join('\n'),
+      [`${meal}　読込エラー（${compactErrorText(error)}）`, errorDetectedAtText(ip)].join('\n'),
       ORANGE
     );
   }
@@ -2799,7 +2791,7 @@
             : '';
     postDiscord(
       buildErrorTitle('🟠', meal),
-      [`AM9時調査 ${label}`, `読込エラー：${error}`, `公開IP：${ip}`, detectedAtText()].join('\n'),
+      [`${meal}　AM9 ${label}　読込エラー（${compactErrorText(error)}）`, errorDetectedAtText(ip)].join('\n'),
       ORANGE
     );
   }
@@ -2808,15 +2800,18 @@
     postCriticalDiscord(
       buildErrorTitle('🔶', meal, range),
       [
-        `エラーが${MAX_ERRORS}回連続しました。`,
-        '安全のため自動読込を停止しました。',
-        `最後のエラー：${lastError}`,
-        `公開IP：${ip}`,
-        detectedAtText()
+        `${meal}　エラー${MAX_ERRORS}回（${compactErrorText(lastError)}）　強制停止`,
+        errorDetectedAtText(ip)
       ].join('\n'),
       ORANGE,
       ['05']
     );
+  }
+  function compactErrorText(error) {
+    return String(error).replace(/\bHTTP\s+(\d{3})\b/g, 'HTTP$1');
+  }
+  function errorDetectedAtText(ip) {
+    return `${detectedAtText()}（IP：${ip}）`;
   }
   function snapshotText() {
     if (!snapshots.size) return 'スナップショットなし';
@@ -2871,5 +2866,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.44 起動`);
+  console.log(`[${NAME}] v5.45 起動`);
 })();
