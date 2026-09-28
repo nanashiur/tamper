@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.84
+// @version      1.85
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.84', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.85', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -122,10 +122,12 @@ function playExportSound(){
   }catch{}
 }
 
-function exportRecordedCsv(){
-  const logs=recordedLogs, savedAt=new Date(), restaurant=sanitizeFilePart(lastLoggedRestaurantLabel);
-  recordedLogs=[];
-  lastLoggedRestaurantLabel='';
+function exportRecordedCsv(keepBuffer=false){
+  const logs=[...recordedLogs], savedAt=new Date(), restaurant=sanitizeFilePart(lastLoggedRestaurantLabel);
+  if(keepBuffer!==true){
+    recordedLogs=[];
+    lastLoggedRestaurantLabel='';
+  }
   playExportSound();
 
   const rows=[['日時','レベル','ログ'],[formatDateTimeMs(savedAt),'META',`端末ID: ${deviceId||detectDeviceId()}`],...logs];
@@ -165,7 +167,7 @@ function loadPriorityTimes(){
     if(raw) return normalizePriorityTimes(JSON.parse(raw));
     const legacy=normalizePriority(localStorage.getItem(LEGACY_KEY));
     if(legacy) return [legacy,'','','',''];
-  }catch(e){ console.warn('[TDR TravelBag] 優先時間読込失敗',e); }
+  }catch(e){ console.warn(formatTimeMs(),'優先時間読込失敗',e); }
   return ['','','','',''];
 }
 
@@ -183,7 +185,7 @@ function savePriorityTimes(){
   try{
     localStorage.setItem(PRIORITY_KEY,JSON.stringify(getPriorityTimes()));
     localStorage.removeItem(LEGACY_KEY);
-  }catch(e){ console.warn('[TDR TravelBag] 優先時間保存失敗',e); }
+  }catch(e){ console.warn(formatTimeMs(),'優先時間保存失敗',e); }
 }
 
 function getPriorities(){
@@ -269,7 +271,7 @@ function updateNotifyButton(){
 function getPhoneNumber(){
   const phone=window.TDR_WEBHOOKS?.phone;
   if(typeof phone==='string'&&phone.trim()) return phone.trim();
-  console.warn('[TDR TravelBag] 電話番号を取得できないため090を使用します');
+  console.warn(formatTimeMs(),'電話番号を取得できないため090を使用します');
   return '090';
 }
 
@@ -294,9 +296,7 @@ function getSelectedTimeInfo(){
 }
 
 function skipAutoConfirm(stage){
-  console.log(`[TDR TravelBag] 自動確定: purchase系通信中（${stage}）→ スキップ`);
-  console.log('%c[TDR TravelBag] 自動保存','background:#6a1b9a;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px');
-  exportRecordedCsv();
+  console.log(formatTimeMs(),`自動確定: purchase系通信中（${stage}）→ スキップ`);
 }
 
 function scheduleAutoConfirm(info){
@@ -318,7 +318,7 @@ function scheduleAutoConfirm(info){
 
       const now=getSelectedTimeInfo(), btn=document.getElementById('confirmBtn');
       if(!now||now.signature!==sig) return;
-      if(!btn) return console.warn('[TDR TravelBag] 自動確定: confirmBtn が見つかりません');
+      if(!btn) return console.warn(formatTimeMs(),'自動確定: confirmBtn が見つかりません');
 
       autoEnabled=false;
       clearTimeout(fireTimer);
@@ -328,8 +328,14 @@ function scheduleAutoConfirm(info){
       stopCountdown();
       updateAutoButtonBg();
       pending.size?updatePending():updateCountdown();
+      autoConfirmEnabled=false;
+      clearTimeout(autoConfirmTimer);
+      autoConfirmTimer=null;
+      updateAutoConfirmButton();
 
-      console.log(formatTimeMs(),'[TDR TravelBag] 自動確定:',now.time,now.commodityCD,now.openNumKey);
+      console.log(formatTimeMs(),'自動確定:',now.time,now.commodityCD,now.openNumKey);
+      console.log(`%c${formatTimeMs()} 自動保存`,'background:#6a1b9a;color:#fff;font-weight:bold;padding:2px 6px;border-radius:3px');
+      try{ exportRecordedCsv(true); }catch(e){ console.warn(formatTimeMs(),'自動保存失敗',e); }
       btn.click();
     },0);
   },0);
@@ -432,7 +438,7 @@ function closeOverlapReservationModal(){
 
   const img=modal.querySelector('img[alt="確認しました"]');
 
-  console.log('[TDR TravelBag] 重複警告を自動クローズ');
+  console.log(formatTimeMs(),'重複警告を自動クローズ');
   (img.closest('a,button')||img).click();
 
   return true;
@@ -468,7 +474,7 @@ function setupNoticeModal(modal){
       return;
     }
 
-    console.log('[TDR TravelBag] ポップアップ自動処理: 同意ON → 次へ');
+    console.log(formatTimeMs(),'ポップアップ自動処理: 同意ON → 次へ');
     btn.click();
 
     setTimeout(()=>{
@@ -537,7 +543,7 @@ function installPageObserver(){
   processTravelBagModals();
   checkAutoConfirmSelection();
 
-  console.log('[TDR TravelBag] ページ状態監視 ON');
+  console.log(formatTimeMs(),'ページ状態監視 ON');
 }
 
 installPageObserver();
@@ -652,12 +658,12 @@ function scheduleAutoReloadJudge(seq,stage,attempt=0){
     current.judgeTimer=null;
 
     if(isFlyingDom()){
-      if(current.stage<3){
+      if(current.stage<4){
         const nextStage=current.stage+1;
 
         console.log(
-          `[TDR TravelBag] フライング判定 → 第${nextStage}読込:`,
-          formatTimeMs()
+          formatTimeMs(),
+          `フライング判定 → 第${nextStage}読込`
         );
 
         current.stage=nextStage;
@@ -675,8 +681,8 @@ function scheduleAutoReloadJudge(seq,stage,attempt=0){
         $a.trigger('change');
       }else{
         console.warn(
-          '[TDR TravelBag] 第3読込後もフライング:',
-          formatTimeMs()
+          formatTimeMs(),
+          '第4読込後もフライング'
         );
 
         clearAutoReloadWatch();
@@ -691,7 +697,7 @@ function scheduleAutoReloadJudge(seq,stage,attempt=0){
     }
 
     console.log(
-      '[TDR TravelBag] フライング判定保留: timeGetなし・開始前DOMなし'
+      formatTimeMs(),'フライング判定保留: timeGetなし・開始前DOMなし'
     );
 
     clearAutoReloadWatch();
@@ -894,7 +900,7 @@ function sendStockDiffNotification(payload,groups){
   if(typeof webhook!=='string'||!webhook.trim()){
     if(!webhookWarned){
       webhookWarned=true;
-      console.warn('[TDR TravelBag] restaurant Webhook が見つかりません');
+      console.warn(formatTimeMs(),'restaurant Webhook が見つかりません');
     }
 
     return;
@@ -932,7 +938,7 @@ function sendStockDiffNotification(payload,groups){
       }]
     })
   }).catch(e=>{
-    console.warn('[TDR TravelBag] 差分通知送信失敗',e);
+    console.warn(formatTimeMs(),'差分通知送信失敗',e);
   });
 }
 
@@ -1001,7 +1007,7 @@ function printTimeGet(source,url,response,body,confirmTimeGet=false){
   try{
     data=parseResponse(response);
   }catch(e){
-    console.warn('[TB timeGet] JSON解析失敗',{
+    console.warn(formatTimeMs(),'JSON解析失敗',{
       source,
       url:absUrl(url),
       response
@@ -1010,7 +1016,7 @@ function printTimeGet(source,url,response,body,confirmTimeGet=false){
   }
 
   if(!Array.isArray(data)){
-    console.warn('[TB timeGet] 配列ではありません',{
+    console.warn(formatTimeMs(),'配列ではありません',{
       source,
       url:absUrl(url),
       data
@@ -1146,7 +1152,7 @@ function clickVacancy(candidates){
         const p=matchingPriority(target.time);
 
         console.log(
-          formatTimeMs(),'[TDR TravelBag] 時間選択:',
+          formatTimeMs(),'時間選択:',
           target.time,
           p
             ?`【第${p.index+1}希望 ${p.display}】`
@@ -1174,14 +1180,14 @@ function scheduleVacancySelect(data){
     :[];
 
   if(!vacancies.length){
-    console.log('[TDR TravelBag] 時間選択: 空席なし');
+    console.log(formatTimeMs(),'時間選択: 空席なし');
     return;
   }
 
   const candidates=getVacancyCandidates(data);
 
   if(vacancySelectMode===1&&!candidates.length){
-    console.log('[TDR TravelBag] 時間選択: 希望条件一致なし → 選択なし');
+    console.log(formatTimeMs(),'時間選択: 希望条件一致なし → 選択なし');
     return;
   }
 
@@ -1199,7 +1205,7 @@ function scheduleVacancySelect(data){
       setTimeout(run,20);
     }else{
       console.warn(
-        '[TDR TravelBag] 時間選択: 対象DOMを確認できませんでした',
+        formatTimeMs(),'時間選択: 対象DOMを確認できませんでした',
         candidates
       );
     }
@@ -1274,7 +1280,7 @@ window.fetch=function(input,init){
         })
         .catch(e=>{
           console.warn(
-            '[TB timeGet] fetch response read failed',
+            formatTimeMs(),'fetch response read failed',
             e
           );
         })
@@ -1282,7 +1288,7 @@ window.fetch=function(input,init){
           endPending(id);
         })
     ).catch(e=>{
-      console.warn('[TB timeGet] fetch failed',e);
+      console.warn(formatTimeMs(),'fetch failed',e);
       endPending(id);
     });
   }
@@ -1406,7 +1412,7 @@ const isEditPage=()=>location.pathname.startsWith('/online/travelbag/edit/');
 
 function adultNum(){
   if(!window.jQuery){
-    console.warn('[TDR TravelBag] jQuery が見つかりません');
+    console.warn(formatTimeMs(),'jQuery が見つかりません');
     return null;
   }
 
@@ -1421,8 +1427,8 @@ function fireStockReload(isFirstAuto=false){
   if(!$a) return;
 
   console.log(
-    '[TDR TravelBag] 在庫状況リロード:',
-    formatTimeMs()
+    formatTimeMs(),
+    '在庫状況リロード'
   );
 
   if(isFirstAuto){
@@ -1726,7 +1732,7 @@ function createPanel(){
     c?c.signature:'';
 
   console.log(
-    `[TDR TravelBag] v${VERSION} パネル起動`
+    formatTimeMs(),`v${VERSION} パネル起動`
   );
 }
 
@@ -1741,6 +1747,6 @@ if(document.readyState==='loading'){
 }
 
 console.log(
-  `[TDR TravelBag] v${VERSION} 通信監視起動`
+  formatTimeMs(),`v${VERSION} 通信監視起動`
 );
 })();
