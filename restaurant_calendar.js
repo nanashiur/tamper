@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.39
+// @version      5.40
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -31,7 +31,7 @@
     AUTO_PREFIX = 'tdr_weekly_restaurant_auto_',
     OLD_AUTO_KEY = 'tdr_weekly_restaurant_auto';
   const NOTIFY_KEY = 'tdr_weekly_restaurant_notify_v3',
-    RESEARCH_NOTIFY_KEY = 'tdr_weekly_restaurant_research_notify_v1',
+    RESEARCH_NOTIFY_KEY = 'tdr_weekly_restaurant_research_delivery_v2',
     DATE_SELECT_KEY = 'tdr_weekly_restaurant_date_select_v1';
   const RESEARCH_KEY = 'tdr_weekly_restaurant_9am_mode_v3',
     RESEARCH_PREV_AUTO_KEY = 'tdr_weekly_restaurant_9am_prev_auto_v4',
@@ -215,15 +215,12 @@
 
   function loadResearchNotifyMode() {
     const v = localStorage.getItem(RESEARCH_NOTIFY_KEY),
-      mode = v === 'off' || v === '0' ? 'off' : 'long';
+      mode = v === 'both' ? 'both' : 'research';
     localStorage.setItem(RESEARCH_NOTIFY_KEY, mode);
     return mode;
   }
   function researchNotifyLabel(mode = researchNotifyMode) {
-    return mode === 'long' ? 'ON' : 'OFF';
-  }
-  function researchNotifyEnabled() {
-    return researchNotifyMode !== 'off';
+    return mode === 'both' ? '調査＋通知' : '調査用のみ';
   }
   function normalizeAutoMode(v) {
     return ['short', 'medium', 'long', 'off'].includes(v) ? v : 'long';
@@ -563,21 +560,7 @@
     return lines.join('\n');
   }
   function sendSummaryLog(title, description, color) {
-    const webhook = discordWebhook('research');
-    if (!webhook) {
-      console.warn(`[${NAME}] 解析ログ送信先 restaurantResearch 未設定`);
-      return false;
-    }
-    fetch(webhook, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      keepalive: true,
-      body: JSON.stringify({
-        username: NAME,
-        embeds: [{ title: title.slice(0, 256), description: description.slice(0, 4000), color }]
-      })
-    }).catch((e) => console.error(`[${NAME}] ログ送信失敗`, e));
-    return true;
+    return postDiscord(title, description, color);
   }
 
   function csvCell(v) {
@@ -935,14 +918,13 @@
       // 境界と同じ時間内に取得した最新状態を、前後のログへ残す。
       if (hourSnapshotAt(now) === endAt) captureHourlySnapshot(now);
       const boundary = old.hourlySnapshots.find((s) => s.at === endAt);
-      const outputEnabled = researchNotifyEnabled();
-      if (outputEnabled && !sendNormalLogSnapshot(old, '自動', endAt, true)) return;
+      if (!sendNormalLogSnapshot(old, '自動', endAt, true)) return;
       normalLogState = createNormalLogState(now);
       if (boundary)
         normalLogState.hourlySnapshots.push({ at: boundary.at, states: cloneFullSnapshotMap(boundary.states) });
       seedNormalMeals();
       const end = new Date(endAt);
-      if (outputEnabled && end.getHours() === 0 && sameLocalDate(end, new Date(now))) scheduleMidnightReselect();
+      if (end.getHours() === 0 && sameLocalDate(end, new Date(now))) scheduleMidnightReselect();
       return;
     }
     if (!normalLogState.active && p.active) {
@@ -1294,6 +1276,9 @@
       notifyPanel.onclick = toggleNotify;
       researchNotifyPanel = document.createElement('div');
       compactButtonStyle(researchNotifyPanel, 31);
+      researchNotifyPanel.style.fontSize = '10px';
+      researchNotifyPanel.style.whiteSpace = 'pre-line';
+      researchNotifyPanel.style.lineHeight = '12px';
       researchNotifyPanel.onclick = toggleResearchNotify;
       researchPanel = document.createElement('div');
       compactButtonStyle(researchPanel, 29);
@@ -1648,7 +1633,7 @@
     renderPanels();
   }
   function toggleResearchNotify() {
-    researchNotifyMode = researchNotifyMode === 'long' ? 'off' : 'long';
+    researchNotifyMode = researchNotifyMode === 'research' ? 'both' : 'research';
     localStorage.setItem(RESEARCH_NOTIFY_KEY, researchNotifyMode);
     syncNormalLogMode();
     console.log(`[${NAME}] 調査通知：${researchNotifyLabel()}`);
@@ -1758,16 +1743,16 @@
       }
     }
     if (researchNotifyPanel) {
-      if (researchNotifyMode === 'long') {
+      if (researchNotifyMode === 'research') {
         researchNotifyPanel.style.background = '#f8bbd0';
         researchNotifyPanel.style.color = '#000';
-        researchNotifyPanel.textContent = '🔬';
-        researchNotifyPanel.title = '調査ON：毎正時に自動出力（4:00・5:00を除く）';
+        researchNotifyPanel.textContent = '調査用';
+        researchNotifyPanel.title = '調査用のみ / 毎正時に自動出力（4:00・5:00を除く）';
       } else {
         researchNotifyPanel.style.background = '#000';
         researchNotifyPanel.style.color = '#fff';
-        researchNotifyPanel.textContent = '🔬';
-        researchNotifyPanel.title = '調査通知・自動差分ログ OFF';
+        researchNotifyPanel.textContent = '調査\n＋通知';
+        researchNotifyPanel.title = '調査＋通知 / 調査チャンネルとレストラン通知用へ送信';
       }
     }
     if (researchPanel) {
@@ -2464,6 +2449,9 @@
   }
   function vacancyCategory(c) {
     if (!((c.type === 'changed' && c.to === '空席') || (c.type === 'added' && c.to === '空席'))) return null;
+    return slotCategory(c);
+  }
+  function slotCategory(c) {
     const name = restaurantName(),
       commodity = commodityForMeal(c.meal),
       days = reservationLeadDays(c.date),
@@ -2500,74 +2488,105 @@
     return null;
   }
   function buildCategoryDescription(changes, category) {
-    const label = category === 'special' ? '⭐️Sレア空席' : category === 'believe' ? '💫ビリーヴ時間帯' : '🟡レア空席';
     return sortChanges(changes)
       .map((c) => {
+        const status = c.to === '満席' ? '満席' : '空席',
+          label = category === 'special' ? `⭐️Sレア${status}`
+            : category === 'believe' ? `💫ビリーヴ時間帯${status === '満席' ? ' 満席' : ''}` : `🟡レア${status}`;
         const range = believeRange(c.date),
           suspended =
             believeSuspended(c.date) &&
             c.meal === '夕食' &&
             (category === 'believe' || (category === 'special' && timeInRange(c.time, range[0], range[1]))),
           text = suspended
-            ? category === 'believe'
-              ? '💫ビリーヴ時間帯 （❌️休止）'
-              : `${label} （❌️休止）`
+            ? `${label} （❌️休止）`
             : label;
         return `${c.time}　${text}${c.type === 'added' ? '（新規枠）' : ''}`;
       })
       .join('\n');
   }
-  function useResearchChannel() {
-    return researchNotifyEnabled();
+  function restaurantResearchCode() {
+    const name = restaurantName(),
+      restaurants = [
+        ['BVL', 'ベッラヴィスタ'], ['OCE', 'オチェーアノ'], ['SRG', 'シルクロード'],
+        ['EPG', 'エンパイア'], ['HPL', 'ハイピリオン'], ['CHM', 'シェフ・ミッキー'],
+        ['TIC', 'チックタック'], ['CAN', 'カンナ'], ['DML', 'ドリーマーズ'], ['SWG', 'シャーウッド']
+      ];
+    return restaurants.find(([, label]) => name.includes(label))?.[0] || '';
   }
-  function discordWebhook(target) {
-    return target === 'research' ? window.TDR_WEBHOOKS?.restaurantResearch : window.TDR_WEBHOOKS?.restaurant;
+  function researchWebhook(suffix) {
+    const config = window.TDR_WEBHOOKS;
+    return config?.[`restaurant_research_${suffix}`] || (suffix === '00' ? config?.restaurantResearch : '');
   }
-  function postDiscord(title, description, color, target = 'auto') {
-    const actual = target === 'auto' ? (useResearchChannel() ? 'research' : 'normal') : target,
-      webhook = discordWebhook(actual);
-    if (!webhook) {
-      console.warn(`[${NAME}] Discord通知先未設定：${actual === 'research' ? 'restaurantResearch' : 'restaurant'}`);
-      return;
+  function discordDestinations(channels = [], includeCommon = true) {
+    const destinations = channels.map(researchWebhook);
+    if (includeCommon) {
+      destinations.push(researchWebhook('00'));
+      const code = restaurantResearchCode();
+      if (code) destinations.push(researchWebhook(code));
+      if (researchNotifyMode === 'both') destinations.push(window.TDR_WEBHOOKS?.restaurant);
     }
-    fetch(webhook, {
+    return [...new Set(destinations.filter(Boolean))];
+  }
+  function postDiscord(title, description, color, channels = [], includeCommon = true) {
+    const destinations = discordDestinations(channels, includeCommon);
+    if (!destinations.length) {
+      console.warn(`[${NAME}] Discord通知先未設定`);
+      return false;
+    }
+    const body = JSON.stringify({
+      username: NAME,
+      embeds: [{ title: title.slice(0, 256), description: description.slice(0, 4000), color }]
+    });
+    destinations.forEach((webhook) => fetch(webhook, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       keepalive: true,
-      body: JSON.stringify({
-        username: NAME,
-        embeds: [{ title: title.slice(0, 256), description: description.slice(0, 4000), color }]
-      })
-    }).catch((e) => console.error(`[${NAME}] Discord通知失敗`, e));
+      body
+    }).catch((e) => console.error(`[${NAME}] Discord通知失敗`, e)));
+    return true;
   }
-  function postCriticalDiscord(title, description, color) {
-    postDiscord(title, description, color, 'normal');
-    if (useResearchChannel() && discordWebhook('research') !== discordWebhook('normal'))
-      postDiscord(title, description, color, 'research');
+  function postCriticalDiscord(title, description, color, channels = []) {
+    return postDiscord(title, description, color, channels);
   }
   function postDeletedDiscord(title, description, date) {
     const key = normalizeYmd(date);
     if (key && key < ymd()) {
-      if (notifyState.mode === 'all') postDiscord(title, description, BLUE);
-    } else postCriticalDiscord(title, description, BLUE);
+      postDiscord(title, description, BLUE, ['04'], notifyState.mode === 'all');
+    } else postCriticalDiscord(title, description, BLUE, ['04']);
   }
-  function sendCategoryDiscord(changes, category, research = null) {
-    const categoryIcon = category === 'special' ? '⭐️' : category === 'believe' ? '💫' : '🟡';
+  function sendCategoryDiscord(changes, category, research = null, includeCommon = true) {
+    const categoryIcon = category === 'special' ? '⭐️' : category === 'believe' ? '💫' : '🟡',
+      channel = category === 'special' ? '01' : category === 'believe' ? '03' : '02';
     groupDateMeal(changes).forEach((g) => {
-      const icon = g.changes.some((c) => c.type === 'added') ? `${categoryIcon}🔵` : categoryIcon,
+      const added = g.changes.some((c) => c.type === 'added'),
+        icon = added ? `${categoryIcon}🔵` : g.changes[0].to === '満席' ? `${categoryIcon}⚫️` : categoryIcon,
         content = buildCategoryDescription(g.changes, category),
         description = research
           ? `AM9時調査 ${research.pass}周目\n変化日：${fmtDateShortJa(g.date)}\n${content}`
           : content;
-      postCriticalDiscord(
+      postDiscord(
         research ? buildResearchTitle(icon, research.current, g.meal) : buildTitle(icon, g.date, g.meal),
         withReservationLead(description, g.date),
-        YELLOW
+        YELLOW,
+        added ? [channel, '04'] : [channel],
+        includeCommon
       );
+    });
+  }
+  function sendCategoryFullDiscord(changes, research = null) {
+    const categories = { special: [], believe: [], rare: [] };
+    changes.filter((c) => c.type === 'changed' && c.to === '満席').forEach((c) => {
+      const category = slotCategory(c);
+      if (category) categories[category].push(c);
+    });
+    Object.entries(categories).forEach(([category, entries]) => {
+      if (entries.length) sendCategoryDiscord(entries, category, research, false);
     });
   }
   function sendChangesDiscord(changes) {
     syncNotifyDay();
+    sendCategoryFullDiscord(changes);
     const categorized = { special: [], believe: [], rare: [] },
       taken = new Set();
     changes.forEach((c) => {
@@ -2586,7 +2605,8 @@
       postCriticalDiscord(
         buildTitle('🔵', g.date, g.meal),
         withReservationLead(buildAddedDescription(g.changes), g.date),
-        BLUE
+        BLUE,
+        ['04']
       )
     );
     groupDateMeal(deleted).forEach((g) =>
@@ -2634,6 +2654,7 @@
   }
   function sendResearchResult(meal, current, changes, pass) {
     syncNotifyDay();
+    sendCategoryFullDiscord(changes, { current, pass });
     const prefix = `AM9時調査 ${pass}周目`;
     if (!changes.length) {
       if (notifyState.mode !== 'off')
@@ -2664,7 +2685,8 @@
           `${prefix}\n変化日：${fmtDateShortJa(g.date)}\n${buildAddedDescription(g.changes)}`,
           g.date
         ),
-        BLUE
+        BLUE,
+        ['04']
       )
     );
     groupDateMeal(deleted).forEach((g) =>
@@ -2754,12 +2776,10 @@
       if (errorNotifyHistory.get(key) === now) errorNotifyHistory.delete(key);
       return;
     }
-    const target = useResearchChannel() ? 'research' : 'normal';
     postDiscord(
       buildErrorTitle('🟠', meal),
       [`読込エラー：${error}`, `公開IP：${ip}`, detectedAtText()].join('\n'),
-      ORANGE,
-      target
+      ORANGE
     );
   }
   async function sendResearchErrorDiscord(meal, phase, error) {
@@ -2791,7 +2811,8 @@
         `公開IP：${ip}`,
         detectedAtText()
       ].join('\n'),
-      ORANGE
+      ORANGE,
+      ['05']
     );
   }
   function snapshotText() {
@@ -2847,5 +2868,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.39 起動`);
+  console.log(`[${NAME}] v5.40 起動`);
 })();
