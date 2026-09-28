@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.41
+// @version      5.42
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -2560,7 +2560,7 @@
       channel = category === 'special' ? '01' : category === 'believe' ? '03' : '02';
     groupDateMeal(changes).forEach((g) => {
       const added = g.changes.some((c) => c.type === 'added'),
-        color = g.changes.some((c) => c.type === 'changed' && c.to === '空席') ? BLACK : YELLOW,
+        color = g.changes.some((c) => c.type === 'changed' && c.to === '満席') ? BLACK : YELLOW,
         icon = added ? `${categoryIcon}🔵` : g.changes[0].to === '満席' ? `${categoryIcon}⚫️` : categoryIcon,
         content = buildCategoryDescription(g.changes, category),
         description = research
@@ -2869,5 +2869,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.41 起動`);
+  console.log(`[${NAME}] v5.42 起動`);
 })();
