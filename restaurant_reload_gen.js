@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.88
+// @version      4.89
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -484,7 +484,91 @@
     }).catch(console.error);
   }
 
+  function specialReservationDate() {
+    const raw = document.querySelector('#reservationOfDateHid')?.textContent.trim() || '';
+    return /^\d{8}$/.test(raw) ? raw : new URL(location.href).searchParams.get('useDate') || '';
+  }
+
+  function isSpecialVacancy(mealName, time) {
+    const code = new URL(location.href).searchParams.get('nameCd');
+    if (code === 'RBVL0') {
+      return mealName === '朝食' || (mealName === '夕食' && ['18:50', '19:00', '19:10'].includes(time));
+    }
+    if (code !== 'ROCE1' || mealName !== '夕食') return false;
+    const date = specialReservationDate();
+    if (!/^\d{8}$/.test(date) || date < '20260915') return false;
+    const range = date <= '20260930' ? ['17:50', '19:50']
+      : date <= '20261004' ? ['17:40', '19:40'] : ['17:30', '19:30'];
+    const match = String(time).match(/^(\d{1,2}):(\d{2})$/);
+    const normalized = match ? `${match[1].padStart(2, '0')}:${match[2]}` : '';
+    return normalized >= range[0] && normalized <= range[1];
+  }
+
+  function saveSpecialVacancyCsv(mealName, times, detectedAt) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(detectedAt).map(part => [part.type, part.value]));
+    const stamp = `${parts.year}${parts.month}${parts.day}_${parts.hour}${parts.minute}${parts.second}`;
+    const detected = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+    const code = new URL(location.href).searchParams.get('nameCd');
+    const restaurant = code === 'ROCE1' ? 'オチェーアノ／コース' : 'ベッラヴィスタ・ラウンジ';
+    const date = specialReservationDate().replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
+    const rows = [['検知日時', 'レストラン', '利用日', '食事区分', '空席時間'],
+      ...times.map(time => [detected, restaurant, date, mealName, time])];
+    const csv = '\uFEFF' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n') + '\r\n';
+    const blobUrl = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `${stamp}_${restaurant.replace(/[\\/:*?"<>|／]/g, '・')}_Sレア.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  }
+
+  function processSpecialVacancies(mealName, currentSlots) {
+    const date = specialReservationDate();
+    if (!/^\d{8}$/.test(date)) return;
+    const storageKey = 'restaurantSpecialVacancyStatesV1';
+    let history = {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) history = saved;
+    } catch (e) {
+      console.error('Sレア検知履歴の読込失敗:', e);
+    }
+    const code = new URL(location.href).searchParams.get('nameCd');
+    const detected = [];
+    Object.entries(currentSlots).forEach(([time, status]) => {
+      if (!isSpecialVacancy(mealName, time) || !['空席', '満席'].includes(status)) return;
+      const key = `${code}|${date}|${mealName}|${time}`;
+      if (status === '空席' && history[key] !== '空席' && !state.excludedTimes.includes(time)) detected.push(time);
+      history[key] = status;
+    });
+    // 過去の利用日だけを整理し、再読込後も空席継続中の重複保存を防ぐ。
+    const today = getJstUseDate(0);
+    Object.keys(history).forEach(key => {
+      if (key.split('|')[1] < today) delete history[key];
+    });
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(history));
+    } catch (e) {
+      console.error('Sレア検知履歴の保存失敗:', e);
+    }
+    if (!detected.length) return;
+    detected.sort((a, b) => a.localeCompare(b));
+    try {
+      saveSpecialVacancyCsv(mealName, detected, new Date());
+    } catch (e) {
+      console.error('SレアCSVの保存失敗:', e);
+    }
+    sendSnapshotDiscord('⭐️', mealName, detected.map(time => `${time}　⭐️Sレア空席`), 0xFFD700, 'VACANCY');
+  }
+
   function compareAndNotifySnapshot(mealName, currentSlots) {
+    processSpecialVacancies(mealName, currentSlots);
     const key = snapshotKey(mealName);
     const previous = state.snapshots.get(key);
 
@@ -539,9 +623,10 @@
     saveSnapshotMap();
 
     const filterChecked = list => list.filter(x => !state.excludedTimes.includes(x.time));
-    const visibleAdded = filterChecked(added);
+    const visibleAdded = filterChecked(added).filter(x => !(x.to === '空席' && isSpecialVacancy(mealName, x.time)));
     const visibleDeleted = filterChecked(deleted);
-    const visibleVacancy = state.notifyMode === 'ALL' ? vacancy : filterChecked(vacancy);
+    const visibleVacancy = (state.notifyMode === 'ALL' ? vacancy : filterChecked(vacancy))
+      .filter(x => !isSpecialVacancy(mealName, x.time));
     const visibleFull = full;
     const visibleOtherStatus = otherStatus;
 
