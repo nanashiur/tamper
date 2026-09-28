@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.43
+// @version      5.44
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -2492,7 +2492,12 @@
           text = suspended
             ? `${label} （❌️休止）`
             : label;
-        return `${c.time}　${text}${c.type === 'added' ? '（新規枠）' : ''}`;
+        const vacancy = c.vacancy,
+          repeat = status === '空席' && vacancy?.count > 1
+            ? `（🔄再出現 ${vacancy.count}回目${vacancy.gapMs !== null && vacancy.gapMs !== undefined
+              ? `・満席化から${formatGap(vacancy.gapMs)}` : ''}）`
+            : '';
+        return `${c.time}　${text}${c.type === 'added' ? '（新規枠）' : ''}${repeat}`;
       })
       .join('\n');
   }
@@ -2551,22 +2556,28 @@
       channel = category === 'special' ? '01' : category === 'believe' ? '03' : '02';
     groupDateMeal(changes).forEach((g) => {
       const added = g.changes.some((c) => c.type === 'added'),
+        categoryEnabled = notifyState.mode === 'all' ||
+          (notifyState.mode === 'vacancy' && g.changes.some((c) => c.to === '空席')),
+        channels = categoryEnabled ? [channel] : [],
         color = g.changes.some((c) => c.type === 'changed' && c.to === '満席') ? BLACK : YELLOW,
         icon = added ? `${categoryIcon}🔵` : g.changes[0].to === '満席' ? `${categoryIcon}⚫️` : categoryIcon,
         content = buildCategoryDescription(g.changes, category),
         description = research
           ? `AM9時調査 ${research.pass}周目\n変化日：${fmtDateShortJa(g.date)}\n${content}`
           : content;
+      if (added) channels.push('04');
+      if (!includeCommon && !channels.length) return;
       postDiscord(
         research ? buildResearchTitle(icon, research.current, g.meal) : buildTitle(icon, g.date, g.meal),
         withReservationLead(description, g.date),
         color,
-        added ? [channel, '04'] : [channel],
+        channels,
         includeCommon
       );
     });
   }
   function sendCategoryFullDiscord(changes, research = null) {
+    if (notifyState.mode !== 'all') return;
     const categories = { special: [], believe: [], rare: [] };
     changes.filter((c) => c.type === 'changed' && c.to === '満席').forEach((c) => {
       const category = slotCategory(c);
@@ -2860,5 +2871,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.42 起動`);
+  console.log(`[${NAME}] v5.44 起動`);
 })();
