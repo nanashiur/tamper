@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.42
+// @version      5.43
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -518,24 +518,15 @@
     return lines;
   }
 
-  function buildNormalDiscordSummary(state, mode, endAt, csvOk) {
-    const lines = [
-      `出力：${mode}`,
-      `ログ型：${researchNotifyLabel(state.mode)}`,
-      `記録時間：${normalRecordTime(state, endAt)}`,
-      `調査期間：${snapshotRangesText(latestAnySnapshots)}`,
-      ''
-    ];
+  function buildNormalDiscordSummary(state, mode, endAt) {
+    const lines = [`${mode}出力：${normalRecordTime(state, endAt)}`];
     const meals = [...new Set([...MEALS.filter((m) => state.knownMeals.has(m)), ...state.knownMeals])];
     if (!meals.length) lines.push('記録なし');
     meals.forEach((meal) => {
       const m = state.meals[meal] || { success: 0, errors: 0, ranges: new Set() };
       const counts = eventCounts(state.events.filter((e) => e.meal === meal));
       lines.push(`${meal}　読込 ${m.success} / 変化 ${counts.market} / エラー ${m.errors}`);
-      if (counts.reception || counts.receptionInternal)
-        lines.push(`　受付終了化 ${counts.reception} / 状態変化 ${counts.receptionInternal}`);
     });
-    lines.push('', `CSV：${csvOk ? '保存済み' : '保存失敗'}`);
     return lines.join('\n');
   }
   function buildAm9DiscordSummary(state, endAt, csvOk) {
@@ -850,8 +841,8 @@
     if (!state?.active) return false;
     const csvOk = downloadNormalCsv(state, mode, endAt);
     const discordOk = sendSummaryLog(
-      `📊 通常在庫差分ログ\n${state.restaurant || restaurantName()}`,
-      buildNormalDiscordSummary(state, mode, endAt, csvOk),
+      `📊${state.restaurant || restaurantName()}（${snapshotRangesText(latestAnySnapshots)}）`,
+      buildNormalDiscordSummary(state, mode, endAt),
       PURPLE
     );
     return requireCsv ? csvOk : discordOk || csvOk;
