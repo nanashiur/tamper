@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.92
+// @version      4.93
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -240,7 +240,7 @@
     exactTimer: null,
     f5WaitSec: createF5WaitSec(),
     f5TargetAt: 0,
-    f5LastCheckedAt: Date.now(),
+    f5LastCheckedAt: new Date().getTime(),
     f5ReloadStarted: false,
     lastClickedMealName: '',
     commodityMealMap: {},
@@ -1201,7 +1201,17 @@
     return overlap;
   }
 
-  function syncF5Clock(now = Date.now()) {
+  function syncF5Clock(now = new Date().getTime()) {
+    // ページの日付ライブラリが Date.now() を日付オブジェクトに変えていても数値で計算する。
+    now = Number(now);
+    if (!Number.isFinite(now)) return false;
+    if (!Number.isFinite(state.f5LastCheckedAt) || !Number.isFinite(state.f5TargetAt) ||
+        !Number.isFinite(state.f5WaitSec)) {
+      state.f5WaitSec = createF5WaitSec();
+      state.f5LastCheckedAt = now;
+      state.f5TargetAt = now + state.f5WaitSec * 1000;
+      return false;
+    }
     if (!state.f5TargetAt) state.f5TargetAt = state.f5LastCheckedAt + state.f5WaitSec * 1000;
     const elapsed = now - state.f5LastCheckedAt;
     // OFF中とメンテナンス中は、従来どおり残り時間を保持する。
@@ -1209,16 +1219,17 @@
     else state.f5TargetAt += f5MaintenanceOverlap(state.f5LastCheckedAt, now);
     state.f5LastCheckedAt = now;
     state.f5WaitSec = Math.max(0, Math.ceil((state.f5TargetAt - now) / 1000));
+    return true;
   }
 
   function checkF5Reload() {
-    syncF5Clock();
+    if (!syncF5Clock()) return false;
     if (!state.autoF5 || state.f5ReloadStarted || state.errorReloadScheduled ||
         state.freezeReloadScheduled || isMaintenanceNow()) return false;
     if (state.searchStatus !== 'OFF' && state.isSearchPending &&
         Date.now() - state.lastSearchStartTime > FREEZE_TIMEOUT_MS) return false;
     updatePanels();
-    if (state.f5WaitSec > 0) return false;
+    if (!Number.isFinite(state.f5WaitSec) || state.f5WaitSec > 0) return false;
     state.f5ReloadStarted = true;
     location.reload();
     return true;
