@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.91
+// @version      4.92
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -239,6 +239,9 @@
     exactTargetAt: 0,
     exactTimer: null,
     f5WaitSec: createF5WaitSec(),
+    f5TargetAt: 0,
+    f5LastCheckedAt: Date.now(),
+    f5ReloadStarted: false,
     lastClickedMealName: '',
     commodityMealMap: {},
     autoReserveLockUntil: 0,
@@ -1183,6 +1186,44 @@
     return secTotal >= 10795 && secTotal <= 18005;
   }
 
+  function f5MaintenanceOverlap(from, to) {
+    let overlap = 0;
+    const day = new Date(from);
+    day.setHours(0, 0, 0, 0);
+    while (day.getTime() < to) {
+      const start = new Date(day);
+      const end = new Date(day);
+      start.setHours(2, 59, 55, 0);
+      end.setHours(5, 0, 6, 0);
+      overlap += Math.max(0, Math.min(to, end.getTime()) - Math.max(from, start.getTime()));
+      day.setDate(day.getDate() + 1);
+    }
+    return overlap;
+  }
+
+  function syncF5Clock(now = Date.now()) {
+    if (!state.f5TargetAt) state.f5TargetAt = state.f5LastCheckedAt + state.f5WaitSec * 1000;
+    const elapsed = now - state.f5LastCheckedAt;
+    // OFF中とメンテナンス中は、従来どおり残り時間を保持する。
+    if (!state.autoF5 || elapsed < 0) state.f5TargetAt += elapsed;
+    else state.f5TargetAt += f5MaintenanceOverlap(state.f5LastCheckedAt, now);
+    state.f5LastCheckedAt = now;
+    state.f5WaitSec = Math.max(0, Math.ceil((state.f5TargetAt - now) / 1000));
+  }
+
+  function checkF5Reload() {
+    syncF5Clock();
+    if (!state.autoF5 || state.f5ReloadStarted || state.errorReloadScheduled ||
+        state.freezeReloadScheduled || isMaintenanceNow()) return false;
+    if (state.searchStatus !== 'OFF' && state.isSearchPending &&
+        Date.now() - state.lastSearchStartTime > FREEZE_TIMEOUT_MS) return false;
+    updatePanels();
+    if (state.f5WaitSec > 0) return false;
+    state.f5ReloadStarted = true;
+    location.reload();
+    return true;
+  }
+
   function scheduleExactSearch() {
     clearExactSearchTimer();
     if (state.searchStatus !== 'T') return;
@@ -1294,6 +1335,7 @@
   });
 
   panels.f5 = createPanel(10, '#333', () => {
+    syncF5Clock();
     state.autoF5 = !state.autoF5;
     localStorage.setItem('autoF520min', state.autoF5 ? '1' : '0');
     updatePanels();
@@ -1717,8 +1759,13 @@
     setTimeout(openAllTimeSlots, 1000);
   }
 
+  document.addEventListener('visibilitychange', checkF5Reload);
+  window.addEventListener('focus', checkF5Reload);
+  window.addEventListener('pageshow', checkF5Reload);
+
   setInterval(() => {
     const now = Date.now();
+    syncF5Clock(now);
     const d = new Date();
     const secTotal =
       d.getHours() * 3600 +
@@ -1747,15 +1794,7 @@
       return;
     }
 
-    if (state.autoF5) {
-      state.f5WaitSec--;
-      updatePanels();
-
-      if (state.f5WaitSec <= 0) {
-        location.reload();
-        return;
-      }
-    }
+    if (checkF5Reload()) return;
 
     if (state.searchStatus === 'T') {
       updatePanels();
