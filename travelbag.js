@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.87
+// @version      1.88
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.87', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.88', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -27,6 +27,7 @@ let deviceId='';
 let currentRestaurantName='', currentReservationPrivilege=false, currentRoomPrivilege=false;
 let reservationNoticeActive=false, restaurantModalHandled=false, pageObserver=null, purchasePending=0;
 let confirmTimeGetUntil=0;
+let soldOutModal=null;
 
 const stockSnapshots=new Map();
 const HOURS=['11','12','13','14','15','16','17','18','19','20','21'];
@@ -487,7 +488,17 @@ function setupNoticeModal(modal){
   return true;
 }
 
+function logSoldOutModal(){
+  const modal=getVisibleModals().find(m=>m.id==='modalDialog'&&
+    m.querySelector('img.js-error-close[alt="確認しました"]')&&
+    normalizeModalText(m.querySelector('.boxModal15 p')?.textContent).includes('ご指定の商品は売り切れとなりました'))||null;
+  if(modal===soldOutModal) return;
+  soldOutModal=modal;
+  if(modal) console.log(`%c${formatTimeMs()} ${normalizeModalText(modal.querySelector('.boxModal15 p').textContent)}`,'background:#444;color:#ff5252;font-weight:bold;padding:2px 6px;border-radius:3px');
+}
+
 function processTravelBagModals(){
+  logSoldOutModal();
   const notice=findModalByTitle('ご予約の際のご注意',true);
 
   if(notice){
@@ -1456,7 +1467,7 @@ function scheduleNextFire(forceNextMinute=false){
 
   const now=new Date();
   const next=new Date(now);
-  const randomMs=700+Math.floor(Math.random()*101);
+  const randomMs=600+Math.floor(Math.random()*201);
 
   if(forceNextMinute){
     next.setMinutes(next.getMinutes()+1);
