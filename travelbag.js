@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.89
+// @version      1.90
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.89', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.90', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -494,7 +494,7 @@ function logSoldOutModal(){
     normalizeModalText(m.querySelector('.boxModal15 p')?.textContent).includes('ご指定の商品は売り切れとなりました'))||null;
   if(modal===soldOutModal) return;
   soldOutModal=modal;
-  if(modal) console.log(`%c${formatTimeMs()} ${normalizeModalText(modal.querySelector('.boxModal15 p').textContent)}`,'background:#444;color:#ff5252;font-weight:bold;padding:2px 6px;border-radius:3px');
+  if(modal) console.log(`%c${formatTimeMs()} 売り切れ`,'background:#808080;color:#ff5252;font-weight:bold;padding:2px 6px;border-radius:3px');
 }
 
 function processTravelBagModals(){
