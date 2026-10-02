@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.94
+// @version      4.95
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -1135,9 +1135,7 @@
         S: '#e83e8c'
       };
 
-      if (state.isSearchPending) {
-        panels.main.textContent = '読込中';
-      } else if (state.searchStatus === 'OFF') {
+      if (state.searchStatus === 'OFF') {
         panels.main.textContent = 'OFF';
       } else if (state.searchStatus === 'T') {
         panels.main.textContent = state.exactTargetAt
@@ -1147,7 +1145,9 @@
         panels.main.textContent = state.waitSec;
       }
 
-      panels.main.style.background = state.isSearchPending ? '#800080' : colors[state.searchStatus];
+      panels.main.style.background = state.isSearchPending
+        ? `linear-gradient(to right, ${colors[state.searchStatus]} 0%, ${colors[state.searchStatus]} 20%, #800080 20%, #800080 100%)`
+        : colors[state.searchStatus];
     }
 
     if (!state.autoF5) {
@@ -1166,12 +1166,12 @@
     panels.reserve.textContent = '👆️';
 
     if (state.notifyMode === 'VACANCY') {
-      panels.notify.style.background = 'pink';
+      panels.notify.style.background = '#ffc107';
       panels.notify.style.color = '#000';
       panels.notify.textContent = '🔔';
     } else if (state.notifyMode === 'ALL') {
-      panels.notify.style.background = '#ffc107';
-      panels.notify.style.color = '#000';
+      panels.notify.style.background = '#dc3545';
+      panels.notify.style.color = '#fff';
       panels.notify.textContent = '📢';
     } else {
       panels.notify.style.background = '#333';
@@ -1180,7 +1180,7 @@
     }
 
     if (panels.reset) {
-      panels.reset.textContent = 'リセット';
+      panels.reset.textContent = '🧹';
       panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#000';
     }
   }
@@ -1821,25 +1821,22 @@
     if (checkF5Reload()) return;
 
     if (state.searchStatus === 'T') {
-      updatePanels();
-
-      if (state.isSearchPending) return;
-
       if (!state.exactTargetAt || !state.exactTimer) {
         scheduleExactSearch();
       }
-
+      updatePanels();
       return;
     }
 
     if (state.isSearchPending) {
+      if (state.searchStatus !== 'OFF') state.waitSec = Math.max(0, state.waitSec - 1);
       updatePanels();
       return;
     }
 
     if (state.searchStatus === 'OFF') return;
 
-    state.waitSec--;
+    state.waitSec = Math.max(0, state.waitSec - 1);
     updatePanels();
 
     if (state.waitSec <= 0) {
