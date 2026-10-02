@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.95
+// @version      4.96
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -189,6 +189,9 @@
   }
 
   if (!document.querySelector('#reservationOfDateHid')) return;
+
+  // スクロールバーがない時も同じ幅の余白を確保し、右寄せパネルの横位置を保つ。
+  document.documentElement.style.setProperty('scrollbar-gutter', 'stable', 'important');
 
   function loadNotifyMode() {
     const saved = localStorage.getItem('notifyMode');
