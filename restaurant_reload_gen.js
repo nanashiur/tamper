@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.93
+// @version      4.94
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -531,7 +531,7 @@
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
   }
 
-  function processSpecialVacancies(mealName, currentSlots) {
+  function processSpecialVacancies(mealName, currentSlots, addedTimes = []) {
     const date = specialReservationDate();
     if (!/^\d{8}$/.test(date)) return;
     const storageKey = 'restaurantSpecialVacancyStatesV1';
@@ -567,13 +567,16 @@
     } catch (e) {
       console.error('SレアCSVの保存失敗:', e);
     }
-    sendSnapshotDiscord('⭐️', mealName, detected.map(time => `${time}　⭐️Sレア空席`), 0xFFD700, 'VACANCY');
+    const notificationTimes = detected.filter(time => !addedTimes.includes(time));
+    sendSnapshotDiscord('⭐️', mealName, notificationTimes.map(time => `${time}　⭐️Sレア空席`), 0xFFD700, 'VACANCY');
   }
 
   function compareAndNotifySnapshot(mealName, currentSlots) {
-    processSpecialVacancies(mealName, currentSlots);
     const key = snapshotKey(mealName);
     const previous = state.snapshots.get(key);
+    const addedTimes = previous ? Object.keys(currentSlots).filter(time =>
+      !Object.prototype.hasOwnProperty.call(previous, time)) : [];
+    processSpecialVacancies(mealName, currentSlots, addedTimes);
 
     if (!previous) {
       state.snapshots.set(key, { ...currentSlots });
@@ -626,12 +629,22 @@
     saveSnapshotMap();
 
     const filterChecked = list => list.filter(x => !state.excludedTimes.includes(x.time));
-    const visibleAdded = filterChecked(added).filter(x => !(x.to === '空席' && isSpecialVacancy(mealName, x.time)));
-    const visibleDeleted = filterChecked(deleted);
+    const specialAdded = added.filter(x => x.to === '空席' && isSpecialVacancy(mealName, x.time));
+    const visibleAdded = added.filter(x => !specialAdded.includes(x));
+    const visibleDeleted = deleted;
     const visibleVacancy = (state.notifyMode === 'ALL' ? vacancy : filterChecked(vacancy))
       .filter(x => !isSpecialVacancy(mealName, x.time));
     const visibleFull = full;
     const visibleOtherStatus = otherStatus;
+
+    if (specialAdded.length) {
+      sendSnapshotDiscord(
+        '⭐️🔵',
+        mealName,
+        specialAdded.sort((a, b) => a.time.localeCompare(b.time)).map(x => `${x.time}　⭐️Sレア空席（新規枠）`),
+        0xFFD700
+      );
+    }
 
     if (visibleAdded.length) {
       sendSnapshotDiscord(
