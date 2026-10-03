@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📱レストラン一般再検索
-// @version      4.96
+// @version      4.97
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -910,9 +910,12 @@
     state.ajaxBatchMeals = new Set();
     state.isSearchPending = false;
     saveErrorNotificationContext();
-    updatePanels();
 
-    if (!statuses.length) return;
+    if (!statuses.length) {
+      resetWaitSec();
+      updatePanels();
+      return;
+    }
 
     const hasSuccess = statuses.includes(200);
     const errorStatuses = statuses.filter(status => status !== 200);
@@ -924,6 +927,8 @@
       return;
     }
 
+    resetWaitSec();
+    updatePanels();
     processSnapshotBatch(batchSlots, batchMeals);
   }
 
@@ -1144,6 +1149,8 @@
         panels.main.textContent = state.exactTargetAt
           ? Math.max(0, Math.ceil((state.exactTargetAt - Date.now()) / 1000))
           : 0;
+      } else if (state.isSearchPending) {
+        panels.main.textContent = Math.max(0, Math.floor((new Date().getTime() - state.lastSearchStartTime) / 1000));
       } else {
         panels.main.textContent = state.waitSec;
       }
@@ -1832,7 +1839,6 @@
     }
 
     if (state.isSearchPending) {
-      if (state.searchStatus !== 'OFF') state.waitSec = Math.max(0, state.waitSec - 1);
       updatePanels();
       return;
     }
