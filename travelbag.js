@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳トラベルバッグ
-// @version      1.94
+// @version      1.95
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.94', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.95', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -670,7 +670,7 @@ function scheduleAutoReloadJudge(seq,stage,attempt=0){
     current.judgeTimer=null;
 
     if(isFlyingDom()){
-      if(current.stage<4){
+      if(current.stage<3){
         const nextStage=current.stage+1;
 
         console.log(
@@ -694,7 +694,7 @@ function scheduleAutoReloadJudge(seq,stage,attempt=0){
       }else{
         console.warn(
           formatTimeMs(),
-          '第4読込後もフライング'
+          '第3読込後もフライング'
         );
 
         clearAutoReloadWatch();
@@ -1467,7 +1467,7 @@ function scheduleNextFire(forceNextMinute=false){
 
   const now=new Date();
   const next=new Date(now);
-  const randomMs=820+Math.floor(Math.random()*71);
+  const randomMs=830+Math.floor(Math.random()*61);
 
   if(forceNextMinute){
     next.setMinutes(next.getMinutes()+1);
