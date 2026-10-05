@@ -1,8 +1,10 @@
 // ==UserScript==
 // @name         📋️🏨🍴予約履歴カウンター
-// @version      2.00
+// @version      2.01
 // @match        https://reserve.tokyodisneyresort.jp/order/list/*
 // @match        https://reserve.tokyodisneyresort.jp/orderhistory/list/*
+// @match        https://reserve.tokyodisneyresort.jp/sp/order/list/*
+// @match        https://reserve.tokyodisneyresort.jp/sp/orderhistory/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/main/orderhistory.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/main/orderhistory.js
 // @run-at       document-start
@@ -14,6 +16,7 @@
 
   const PANEL_ID = '__tdr_order_count_panel';
   const STORAGE_PREFIX = '__tdr_order_count_v2_';
+  const IS_SP = location.pathname.startsWith('/sp/');
 
   function cleanText(element) {
     return (element?.textContent || '')
@@ -46,23 +49,46 @@
     ].join('_');
   }
 
+  function getReservationRows(root = document) {
+    const elements = root.querySelectorAll(
+      IS_SP
+        ? '.list-reserve-contents .reserve-contents > ul > li > h1.title'
+        : '.area-page-transition table.module-table tr:not(.heading)'
+    );
+
+    return [...elements].map(element =>
+      IS_SP ? element.parentElement : element
+    );
+  }
+
+  function getUseDate(row) {
+    if (!IS_SP) {
+      return cleanText(row.querySelector('td:last-child'));
+    }
+
+    const dateRow = [...row.querySelectorAll('table.module-table tr')]
+      .find(item =>
+        cleanText(item.querySelector('th')) === 'ご利用開始日'
+      );
+
+    return cleanText(dateRow?.querySelector('td'));
+  }
+
   function countCurrentPage() {
     let hotel = 0;
     let restaurant = 0;
     const fingerprint = [];
 
-    document
-      .querySelectorAll(
-        '.area-page-transition ' +
-        'table.module-table tr:not(.heading)'
-      )
+    getReservationRows()
       .forEach(row => {
         const isUsed = [...row.querySelectorAll('.status')]
           .some(status =>
             cleanText(status).includes('ご利用済み')
           );
 
-        const section = row.closest('.section-module');
+        const section = row.closest(
+          IS_SP ? '.reserve-contents' : '.section-module'
+        );
 
         const receiptNo = cleanText(
           section?.querySelector('.reserve-number')
@@ -77,7 +103,7 @@
         fingerprint.push([
           receiptNo,
           type,
-          cleanText(row.querySelector('td:last-child')),
+          getUseDate(row),
           getProductName(row),
           isUsed ? 'used' : 'active'
         ].join('|'));
@@ -101,7 +127,7 @@
   }
 
   function getProductName(row) {
-    const cell = row.querySelector('th');
+    const cell = row.querySelector(IS_SP ? ':scope > h1.title' : 'th');
 
     if (!cell) return '';
 
@@ -120,7 +146,9 @@
 
     document
       .querySelectorAll(
-        '.area-page-transition > .section-module'
+        IS_SP
+          ? '.list-reserve-contents .reserve-contents'
+          : '.area-page-transition > .section-module'
       )
       .forEach(section => {
         const receiptText = cleanText(
@@ -131,10 +159,7 @@
 
         if (!receiptNo) return;
 
-        section
-          .querySelectorAll(
-            'table.module-table tr:not(.heading)'
-          )
+        getReservationRows(section)
           .forEach(row => {
             const isUsed = [...row.querySelectorAll('.status')]
               .some(status =>
@@ -145,9 +170,7 @@
 
             const base = {
               受付番号: receiptNo,
-              利用日: cleanText(
-                row.querySelector('td:last-child')
-              )
+              利用日: getUseDate(row)
             };
 
             if (row.querySelector('.ico-hotel-bl')) {
@@ -310,7 +333,7 @@
     }
 
     const list = document.querySelector(
-      '.area-page-transition'
+      IS_SP ? '.list-reserve-contents' : '.area-page-transition'
     );
 
     if (!list) {
@@ -475,5 +498,10 @@
     }, 120000);
   }
 
-  start();
+  // スマホ版は商品情報が予約一覧の外枠より後に解析されるため待つ。
+  if (IS_SP && document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
 })();
