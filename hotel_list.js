@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.91
+// @version      1.92
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.91';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.92';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -78,12 +78,12 @@
     'HOFSHSBA0001N'
   ]);
   const API_AUTO_MODES = {
-    manual: { label: '👆️', name: '手動', background: '#111', color: '#fff' },
+    manual: { label: 'OFF', name: 'OFF', background: '#111', color: '#fff' },
     short: { label: '🏃‍♀️', name: '短期', background: '#f06292', color: '#111' },
     medium: { label: '🏃', name: '中期', background: '#ff9800', color: '#111' },
     long: { label: '🚶', name: '長期', background: '#1976d2', color: '#fff' }
   };
-  const API_MODE_ORDER = ['manual', 'short', 'medium', 'long'];
+  const API_MODE_ORDER = ['long', 'medium', 'short', 'manual'];
   const API_KIND = {
     current: {
       offset: 0,
@@ -125,7 +125,7 @@
   let popupElem = null;
   const apiButtonPanels = { current: null, next: null };
   const apiModePanels = { current: null, next: null };
-  const apiAutoMode = { current: 'manual', next: 'manual' };
+  const apiAutoMode = { current: 'long', next: 'long' };
   const apiAutoTimer = { current: 0, next: 0 };
   const discordQueue = [];
   const internalLogs = [];
@@ -430,7 +430,7 @@
     document.getElementById(IDS.oldAuto)?.remove();
     Object.keys(API_KIND).forEach(kind => {
       const saved = storage.get(API_KIND[kind].storageKey);
-      apiAutoMode[kind] = API_AUTO_MODES[saved] ? saved : 'manual';
+      apiAutoMode[kind] = API_AUTO_MODES[saved] ? saved : 'long';
     });
     notifyEnabled = storage.get(KEYS.notify) === '1';
     rareFilterEnabled = storage.get(KEYS.rare) === '1';
@@ -858,7 +858,7 @@
       return { ok: false, status: 0, backoffMs: BURST_ERROR_RETRY_MS, stopAuto: false };
     }
     if (count >= 30) {
-      const msg = `完全ブロックの可能性が高いため、当日API・翌日APIを手動モードに変更して停止します。${customMsg ? `\n${customMsg}` : ''}`;
+      const msg = `完全ブロックの可能性が高いため、当日API・翌日APIをOFFに変更して停止します。${customMsg ? `\n${customMsg}` : ''}`;
       showPopup(`🛑${toCircled(count)} ${getClockStr()}`, bgRed);
       sendApiErrorDiscord(errStatus, targetInfoStr, msg, count);
       return { ok: false, status: 0, backoffMs: 0, stopAuto: true };
@@ -1549,5 +1549,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.91');
+  internalLog('official DOM-order logger ready / rare room filter / v1.92');
 })();
