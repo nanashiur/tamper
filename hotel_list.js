@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.92
+// @version      1.93
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.92';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.93';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -125,7 +125,7 @@
   let popupElem = null;
   const apiButtonPanels = { current: null, next: null };
   const apiModePanels = { current: null, next: null };
-  const apiAutoMode = { current: 'long', next: 'long' };
+  const apiAutoMode = { current: 'manual', next: 'manual' };
   const apiAutoTimer = { current: 0, next: 0 };
   const discordQueue = [];
   const internalLogs = [];
@@ -430,7 +430,7 @@
     document.getElementById(IDS.oldAuto)?.remove();
     Object.keys(API_KIND).forEach(kind => {
       const saved = storage.get(API_KIND[kind].storageKey);
-      apiAutoMode[kind] = API_AUTO_MODES[saved] ? saved : 'long';
+      apiAutoMode[kind] = API_AUTO_MODES[saved] ? saved : 'manual';
     });
     notifyEnabled = storage.get(KEYS.notify) === '1';
     rareFilterEnabled = storage.get(KEYS.rare) === '1';
@@ -1549,5 +1549,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.92');
+  internalLog('official DOM-order logger ready / rare room filter / v1.93');
 })();
