@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.90
+// @version      1.91
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.90';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.91';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -79,10 +79,11 @@
   ]);
   const API_AUTO_MODES = {
     manual: { label: '👆️', name: '手動', background: '#111', color: '#fff' },
-    short: { label: '🏃‍♀️', name: '短期', background: '#ff9800', color: '#111' },
+    short: { label: '🏃‍♀️', name: '短期', background: '#f06292', color: '#111' },
+    medium: { label: '🏃', name: '中期', background: '#ff9800', color: '#111' },
     long: { label: '🚶', name: '長期', background: '#1976d2', color: '#fff' }
   };
-  const API_MODE_ORDER = ['manual', 'short', 'long'];
+  const API_MODE_ORDER = ['manual', 'short', 'medium', 'long'];
   const API_KIND = {
     current: {
       offset: 0,
@@ -249,7 +250,10 @@
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
   function randomLongDelayMs() {
-    return randomInt(9 * 60 * 1000, 11 * 60 * 1000);
+    return randomInt(160 * 1000, 200 * 1000);
+  }
+  function randomMediumDelayMs() {
+    return randomInt(50 * 1000, 70 * 1000);
   }
   function ymdAddDays(ymd, days) {
     if (!/^\d{8}$/.test(String(ymd || ''))) return '';
@@ -738,6 +742,7 @@
   function getApiRunMode(reason) {
     const text = String(reason || '');
     if (text.includes('短期')) return 'short';
+    if (text.includes('中期')) return 'medium';
     if (text.includes('長期')) return 'long';
     return 'manual';
   }
@@ -756,7 +761,9 @@
       ? Math.max(0, Number(option.backoffMs))
       : apiAutoMode[kind] === 'short'
         ? 0
-        : randomLongDelayMs();
+        : apiAutoMode[kind] === 'medium'
+          ? randomMediumDelayMs()
+          : randomLongDelayMs();
     const modeName = API_AUTO_MODES[apiAutoMode[kind]]?.name || apiAutoMode[kind];
     internalLog(`${cfg.label} 自動API: ${modeName} / ${Math.round(delayMs / 1000)}秒後`);
     apiAutoTimer[kind] = win.setTimeout(() => {
@@ -1380,9 +1387,6 @@
       ? console.group.bind(console)
       : console.groupCollapsed.bind(console);
     groupFn(title);
-    console.info(`対象: ${sourceName}`);
-    console.info(`フィルター: ${filterLabel}`);
-    console.info(`useDate: ${useDateText}`);
     if (diffResult.status === 'changed') {
       diffResult.changes.forEach(change => {
         const base = change.now || change.old;
@@ -1545,5 +1549,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.90');
+  internalLog('official DOM-order logger ready / rare room filter / v1.91');
 })();
