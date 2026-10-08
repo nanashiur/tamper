@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.93
+// @version      1.94
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.93';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.94';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -90,9 +90,9 @@
       label: '当日API',
       buttonText: '当',
       top: '28px',
-      right: '62px',
+      right: '86px',
       modeTop: '0px',
-      modeRight: '62px',
+      modeRight: '86px',
       buttonBackground: '#00838f',
       buttonBorder: '#006064',
       modeId: IDS.currentMode,
@@ -119,7 +119,7 @@
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
-  const PANEL = { right: '28px', currentRight: '62px', notifyRight: '96px', rareRight: '130px', minWidth: '28px', height: '26px', top1: '0px', top2: '28px' };
+  const PANEL = { right: '28px', currentRight: '86px', notifyRight: '144px', rareRight: '202px', minWidth: '44px', height: '26px', top1: '0px', top2: '28px' };
   let notifyPanel = null;
   let rarePanel = null;
   let popupElem = null;
@@ -134,6 +134,7 @@
   let apiBusy = false;
   let apiBusyKind = '';
   let apiBusyStartAt = 0;
+  const passiveApiLoads = { current: new Set(), next: new Set() };
   let activeUseDateOverride = '';
   let activeSourceLabel = '';
   let customApiPriorityUntil = 0;
@@ -241,10 +242,24 @@
   function isRareRoomRow(row) {
     return RARE_ROOM_CODES.has(normalize(row?.roomCd || '').toUpperCase());
   }
-  function getApiBusyElapsedText() {
-    if (!apiBusyStartAt) return '01';
-    const elapsed = Math.ceil(Math.max(0, nowMs() - apiBusyStartAt) / 1000);
-    return pad(Math.min(99, Math.max(1, elapsed)), 2);
+  function getApiBusyElapsedText(kind) {
+    const starts = [...passiveApiLoads[kind]].map(load => load.startedAt);
+    if (apiBusy && apiBusyKind === kind) starts.push(apiBusyStartAt);
+    if (!starts.length) return '';
+    const elapsed = Math.ceil(Math.max(0, nowMs() - Math.min(...starts)) / 1000);
+    return pad(Math.max(1, elapsed), 2) + '秒';
+  }
+  function beginPassiveApiLoading(useDate) {
+    const baseYmd = getUrlUseDateYmd();
+    const kind = baseYmd && Object.keys(API_KIND).find(key => ymdAddDays(baseYmd, API_KIND[key].offset) === useDate);
+    if (!kind) return () => {};
+    const load = { startedAt: nowMs() };
+    passiveApiLoads[kind].add(load);
+    updateApiButtonPanel(kind);
+    return () => {
+      passiveApiLoads[kind].delete(load);
+      updateApiButtonPanel(kind);
+    };
   }
   function randomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -598,7 +613,7 @@
       borderColor: cfg.buttonBorder,
       opacity: '1'
     });
-    panel.textContent = isThisBusy ? getApiBusyElapsedText() : cfg.buttonText;
+    panel.textContent = getApiBusyElapsedText(kind) || cfg.buttonText;
   }
   function toggleRareFilter() {
     rareFilterEnabled = !rareFilterEnabled;
@@ -1041,7 +1056,10 @@
     win.XMLHttpRequest.prototype.send = function (...rest) {
       const url = this._tdrDaySearchUrl || '';
       const bodyYmd = getRequestBodyUseDate(rest[0]);
+      let finishLoading = () => {};
       if (ENDPOINT.test(url)) {
+        finishLoading = beginPassiveApiLoading(bodyYmd || getUrlUseDateYmd());
+        this.addEventListener('loadend', finishLoading, { once: true });
         this.addEventListener('load', () => handleJSON(this.responseText, {
           sourceLabel: '',
           apiReceivedAt: tStrMs(),
@@ -1050,7 +1068,13 @@
           apiMode: ''
         }));
       }
-      return oSend.apply(this, rest);
+      try {
+        return oSend.apply(this, rest);
+      } catch (e) {
+        this.removeEventListener('loadend', finishLoading);
+        finishLoading();
+        throw e;
+      }
     };
   }
   function guardFetch() {
@@ -1069,15 +1093,25 @@
           delete cleanInit.__tdrStockApi;
           callArgs = [req, cleanInit];
         }
-        const p = Reflect.apply(t, th, callArgs);
-        if (ENDPOINT.test(url) && !customStockApi) {
+        const passiveStockApi = ENDPOINT.test(url) && !customStockApi;
+        const finishLoading = passiveStockApi
+          ? beginPassiveApiLoading(bodyYmd || getUrlUseDateYmd())
+          : () => {};
+        let p;
+        try {
+          p = Reflect.apply(t, th, callArgs);
+        } catch (e) {
+          finishLoading();
+          throw e;
+        }
+        if (passiveStockApi) {
           p.then(r => r.clone().text().then(txt => handleJSON(txt, {
             sourceLabel: '',
             apiReceivedAt: tStrMs(),
             useDateOverride: bodyYmd || getUrlUseDateYmd(),
             passiveApi: true,
             apiMode: ''
-          }))).catch(() => {});
+          }))).catch(() => {}).finally(finishLoading);
         }
         return p;
       }
@@ -1549,5 +1583,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.93');
+  internalLog('official DOM-order logger ready / rare room filter / v1.94');
 })();
