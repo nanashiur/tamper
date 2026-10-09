@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.94
+// @version      1.95
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.94';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.95';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -79,9 +79,9 @@
   ]);
   const API_AUTO_MODES = {
     manual: { label: 'OFF', name: 'OFF', background: '#111', color: '#fff' },
-    short: { label: '🏃‍♀️', name: '短期', background: '#f06292', color: '#111' },
-    medium: { label: '🏃', name: '中期', background: '#ff9800', color: '#111' },
-    long: { label: '🚶', name: '長期', background: '#1976d2', color: '#fff' }
+    short: { label: '短期', name: '短期', background: '#f06292', color: '#111' },
+    medium: { label: '中期', name: '中期', background: '#ff9800', color: '#111' },
+    long: { label: '長期', name: '長期', background: '#1976d2', color: '#fff' }
   };
   const API_MODE_ORDER = ['long', 'medium', 'short', 'manual'];
   const API_KIND = {
@@ -127,6 +127,9 @@
   const apiModePanels = { current: null, next: null };
   const apiAutoMode = { current: 'manual', next: 'manual' };
   const apiAutoTimer = { current: 0, next: 0 };
+  const apiAutoNextAt = { current: 0, next: 0 };
+  const apiAutoNotBefore = { current: 0, next: 0 };
+  const apiAutoDeferred = { current: null, next: null };
   const discordQueue = [];
   const internalLogs = [];
   let notifyEnabled = false;
@@ -246,8 +249,19 @@
     const starts = [...passiveApiLoads[kind]].map(load => load.startedAt);
     if (apiBusy && apiBusyKind === kind) starts.push(apiBusyStartAt);
     if (!starts.length) return '';
-    const elapsed = Math.ceil(Math.max(0, nowMs() - Math.min(...starts)) / 1000);
-    return pad(Math.max(1, elapsed), 2) + '秒';
+    return Math.max(0, Math.floor((nowMs() - Math.min(...starts)) / 1000)) + '秒';
+  }
+  function hasApiLoading(kind) {
+    if (!kind) return Object.keys(API_KIND).some(key => hasApiLoading(key));
+    return (apiBusy && apiBusyKind === kind) || passiveApiLoads[kind].size > 0;
+  }
+  function resumeDeferredApiAuto() {
+    if (hasApiLoading()) return;
+    Object.keys(API_KIND).forEach(kind => {
+      const option = apiAutoDeferred[kind];
+      if (option) scheduleApiAuto(kind, option);
+      updateApiModePanel(kind);
+    });
   }
   function beginPassiveApiLoading(useDate) {
     const baseYmd = getUrlUseDateYmd();
@@ -255,10 +269,13 @@
     if (!kind) return () => {};
     const load = { startedAt: nowMs() };
     passiveApiLoads[kind].add(load);
-    updateApiButtonPanel(kind);
+    clearApiAutoTimer(kind);
+    apiAutoDeferred[kind] = apiAutoMode[kind] === 'manual' ? null : {};
+    updateApiModePanel(kind);
     return () => {
       passiveApiLoads[kind].delete(load);
-      updateApiButtonPanel(kind);
+      resumeDeferredApiAuto();
+      updateApiModePanel(kind);
     };
   }
   function randomInt(min, max) {
@@ -386,7 +403,7 @@
     const currentMs = nowMs();
     if (!currentMs) return '';
     const ageMs = currentMs - savedAt;
-    return ageMs > SNAPSHOT_MAX_AGE_MS ? `1時間超過 ${Math.floor(ageMs / 1000)}秒` : '';
+    return ageMs > SNAPSHOT_MAX_AGE_MS ? `3600秒超過 ${Math.floor(ageMs / 1000)}秒` : '';
   }
   function getPastStayReason(data) {
     const ymd = data?.useDate || extractYmdFromScope(data?.scope);
@@ -464,9 +481,12 @@
     updateApiModePanel(kind);
     internalLog(`${API_KIND[kind].label} 自動モード: ${API_AUTO_MODES[apiAutoMode[kind]].name}`);
     clearApiAutoTimer(kind);
+    apiAutoDeferred[kind] = null;
+    apiAutoNotBefore[kind] = 0;
     if (apiAutoMode[kind] !== 'manual') {
-      scheduleApiAuto(kind, { immediate: apiAutoMode[kind] === 'short', reason: 'modeChange' });
+      scheduleApiAuto(kind, { reason: 'modeChange' });
     }
+    updateApiModePanel(kind);
   }
   function stopAllApiAuto(reason = '') {
     console.warn(`自動API停止: ${reason || 'エラー多発'}`);
@@ -573,9 +593,9 @@
   function updateNotifyPanel() {
     if (!notifyPanel) return;
     Object.assign(notifyPanel.style, notifyEnabled ? {
-      background: '#2e7d32',
-      color: '#fff',
-      borderColor: '#1b5e20',
+      background: '#ffc107',
+      color: '#111',
+      borderColor: '#ffb300',
       opacity: '1'
     } : {
       background: '#111',
@@ -589,31 +609,31 @@
     const panel = apiModePanels[kind];
     if (!panel) return;
     const mode = API_AUTO_MODES[apiAutoMode[kind]] || API_AUTO_MODES.manual;
+    const elapsed = getApiBusyElapsedText(kind);
     Object.assign(panel.style, {
-      background: mode.background,
-      color: mode.color,
+      background: elapsed
+        ? `linear-gradient(to right, ${mode.background} 0%, ${mode.background} 20%, #800080 20%, #800080 100%)`
+        : mode.background,
+      color: elapsed ? '#fff' : mode.color,
       borderColor: 'rgba(255,255,255,.75)',
       opacity: '1'
     });
-    panel.textContent = mode.label;
+    panel.title = mode.name;
+    panel.textContent = elapsed || (apiAutoMode[kind] === 'manual'
+      ? 'OFF'
+      : Math.max(0, Math.ceil((apiAutoNextAt[kind] - nowMs()) / 1000)) + '秒');
   }
   function updateApiButtonPanel(kind) {
     const panel = apiButtonPanels[kind];
     const cfg = API_KIND[kind];
     if (!panel || !cfg) return;
-    const isThisBusy = apiBusy && apiBusyKind === kind;
-    Object.assign(panel.style, apiBusy ? {
-      background: isThisBusy ? '#d50000' : '#7f1d1d',
-      color: '#fff',
-      borderColor: isThisBusy ? '#ff5252' : '#991b1b',
-      opacity: '1'
-    } : {
+    Object.assign(panel.style, {
       background: cfg.buttonBackground,
       color: '#fff',
       borderColor: cfg.buttonBorder,
       opacity: '1'
     });
-    panel.textContent = getApiBusyElapsedText(kind) || cfg.buttonText;
+    panel.textContent = cfg.buttonText;
   }
   function toggleRareFilter() {
     rareFilterEnabled = !rareFilterEnabled;
@@ -750,9 +770,9 @@
     return body;
   }
   function clearApiAutoTimer(kind) {
-    if (!apiAutoTimer[kind]) return;
-    win.clearTimeout(apiAutoTimer[kind]);
+    if (apiAutoTimer[kind]) win.clearTimeout(apiAutoTimer[kind]);
     apiAutoTimer[kind] = 0;
+    apiAutoNextAt[kind] = 0;
   }
   function getApiRunMode(reason) {
     const text = String(reason || '');
@@ -765,39 +785,55 @@
     const cfg = API_KIND[kind];
     if (!cfg) return;
     clearApiAutoTimer(kind);
-    if (apiAutoMode[kind] === 'manual') return;
+    apiAutoDeferred[kind] = null;
+    if (apiAutoMode[kind] === 'manual') {
+      apiAutoNotBefore[kind] = 0;
+      updateApiModePanel(kind);
+      return;
+    }
+    if (Number(option.backoffMs) > 0 && Number.isFinite(Number(option.backoffMs))) {
+      apiAutoNotBefore[kind] = nowMs() + Number(option.backoffMs);
+    }
+    if (hasApiLoading()) {
+      apiAutoDeferred[kind] = { reason: option.reason, ready: option.ready };
+      updateApiModePanel(kind);
+      return;
+    }
     const maintenanceDelay = getMaintenanceDelayMs();
     if (maintenanceDelay > 0) {
       internalLog(`${cfg.label} メンテナンス時間帯のため待機: ${Math.round(maintenanceDelay / 1000)}秒`);
+      apiAutoNextAt[kind] = nowMs() + maintenanceDelay;
       apiAutoTimer[kind] = win.setTimeout(() => scheduleApiAuto(kind, { reason: 'maintenanceRetry' }), maintenanceDelay);
+      updateApiModePanel(kind);
       return;
     }
-    const delayMs = option.backoffMs && Number.isFinite(Number(option.backoffMs))
-      ? Math.max(0, Number(option.backoffMs))
-      : apiAutoMode[kind] === 'short'
+    const delayMs = apiAutoNotBefore[kind] > nowMs()
+      ? apiAutoNotBefore[kind] - nowMs()
+      : option.ready || apiAutoMode[kind] === 'short'
         ? 0
         : apiAutoMode[kind] === 'medium'
           ? randomMediumDelayMs()
           : randomLongDelayMs();
     const modeName = API_AUTO_MODES[apiAutoMode[kind]]?.name || apiAutoMode[kind];
     internalLog(`${cfg.label} 自動API: ${modeName} / ${Math.round(delayMs / 1000)}秒後`);
+    apiAutoNextAt[kind] = nowMs() + delayMs;
     apiAutoTimer[kind] = win.setTimeout(() => {
       apiAutoTimer[kind] = 0;
+      apiAutoNextAt[kind] = 0;
+      if (hasApiLoading()) {
+        apiAutoDeferred[kind] = { ready: true };
+        updateApiModePanel(kind);
+        return;
+      }
       runStockApiOnce(kind, `自動${modeName}`);
     }, delayMs);
+    updateApiModePanel(kind);
   }
   function startInitialApiAuto() {
     const start = () => {
       Object.keys(API_KIND).forEach(kind => {
         if (apiAutoMode[kind] === 'manual') return;
-        if (apiAutoMode[kind] === 'short') {
-          apiAutoTimer[kind] = win.setTimeout(() => {
-            apiAutoTimer[kind] = 0;
-            runStockApiOnce(kind, '自動短期');
-          }, 1000);
-        } else {
-          scheduleApiAuto(kind, { reason: 'initialLong' });
-        }
+        scheduleApiAuto(kind, { backoffMs: apiAutoMode[kind] === 'short' ? 1000 : 0, reason: 'initial' });
       });
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
@@ -879,13 +915,13 @@
       return { ok: false, status: 0, backoffMs: 0, stopAuto: true };
     }
     if (count === 25) {
-      const msg = `30分間のロングクールダウンに入ります。${customMsg ? `\n${customMsg}` : ''}`;
+      const msg = `1800秒のロングクールダウンに入ります。${customMsg ? `\n${customMsg}` : ''}`;
       showPopup(`🚫${toCircled(count)} ${getClockStr()}`, bgRed);
       sendApiErrorDiscord(errStatus, targetInfoStr, msg, count);
       return { ok: false, status: 0, backoffMs: LONG_COOLDOWN_MS, stopAuto: false };
     }
     if ([10, 15, 20].includes(count)) {
-      const msg = `10分後に現在のモードで自動再開します。${customMsg ? `\n${customMsg}` : ''}`;
+      const msg = `600秒後に現在のモードで自動再開します。${customMsg ? `\n${customMsg}` : ''}`;
       showPopup(`🚫${toCircled(count)} ${getClockStr()}`, bgRed);
       sendApiErrorDiscord(errStatus, targetInfoStr, msg, count);
       return { ok: false, status: 0, backoffMs: NORMAL_COOLDOWN_MS, stopAuto: false };
@@ -919,17 +955,18 @@
   async function runStockApiOnce(kind, reason = '手動') {
     const cfg = API_KIND[kind];
     if (!cfg) return false;
-    if (apiBusy) {
+    if (hasApiLoading()) {
       internalLog(`${cfg.label}: 通信中のためスキップ / ${reason}`);
-      if (apiAutoMode[kind] !== 'manual') scheduleApiAuto(kind, { backoffMs: BURST_ERROR_RETRY_MS, reason: 'busyRetry' });
+      if (apiAutoMode[kind] !== 'manual') scheduleApiAuto(kind, { ready: true, reason: 'busyRetry' });
       return false;
     }
     clearApiAutoTimer(kind);
+    apiAutoDeferred[kind] = null;
     customApiPriorityUntil = nowMs() + 15000;
     apiBusy = true;
     apiBusyKind = kind;
     apiBusyStartAt = nowMs();
-    Object.keys(API_KIND).forEach(updateApiButtonPanel);
+    updateApiModePanel(kind);
     let result = { ok: false, status: 0, backoffMs: 0, stopAuto: false };
     try {
       result = await requestStockApiCore(kind, reason);
@@ -939,11 +976,16 @@
       apiBusy = false;
       apiBusyKind = '';
       apiBusyStartAt = 0;
-      Object.keys(API_KIND).forEach(updateApiButtonPanel);
+      updateApiModePanel(kind);
+      apiAutoDeferred[kind] = null;
       if (result.stopAuto) {
         stopAllApiAuto(`${cfg.label} エラー多発`);
-      } else if (apiAutoMode[kind] !== 'manual') {
-        scheduleApiAuto(kind, { backoffMs: result.backoffMs || 0, reason });
+      } else {
+        resumeDeferredApiAuto();
+        if (result.ok) apiAutoNotBefore[kind] = 0;
+        if (apiAutoMode[kind] !== 'manual') {
+          scheduleApiAuto(kind, { backoffMs: result.backoffMs || 0, reason });
+        }
       }
     }
   }
@@ -1007,7 +1049,7 @@
         );
       }
       handleApiSuccess(sourceLabel);
-      handleJSON(txt, {
+      await handleJSON(txt, {
         useDateOverride: targetYmd,
         sourceLabel,
         apiReceivedAt,
@@ -1057,21 +1099,25 @@
       const url = this._tdrDaySearchUrl || '';
       const bodyYmd = getRequestBodyUseDate(rest[0]);
       let finishLoading = () => {};
+      let processing = Promise.resolve();
+      const onLoadEnd = () => processing.finally(finishLoading);
       if (ENDPOINT.test(url)) {
         finishLoading = beginPassiveApiLoading(bodyYmd || getUrlUseDateYmd());
-        this.addEventListener('loadend', finishLoading, { once: true });
-        this.addEventListener('load', () => handleJSON(this.responseText, {
-          sourceLabel: '',
-          apiReceivedAt: tStrMs(),
-          useDateOverride: bodyYmd || getUrlUseDateYmd(),
-          passiveApi: true,
-          apiMode: ''
-        }));
+        this.addEventListener('loadend', onLoadEnd, { once: true });
+        this.addEventListener('load', () => {
+          processing = Promise.resolve(handleJSON(this.responseText, {
+            sourceLabel: '',
+            apiReceivedAt: tStrMs(),
+            useDateOverride: bodyYmd || getUrlUseDateYmd(),
+            passiveApi: true,
+            apiMode: ''
+          }));
+        }, { once: true });
       }
       try {
         return oSend.apply(this, rest);
       } catch (e) {
-        this.removeEventListener('loadend', finishLoading);
+        this.removeEventListener('loadend', onLoadEnd);
         finishLoading();
         throw e;
       }
@@ -1166,10 +1212,16 @@
           }
         }
       }
-      win.setTimeout(() => renderRows(rows, {
-        ...context,
-        apiReceivedAt: context.apiReceivedAt || tStrMs()
-      }), DOM_WAIT_MS);
+      return new Promise(resolve => win.setTimeout(() => {
+        try {
+          renderRows(rows, {
+            ...context,
+            apiReceivedAt: context.apiReceivedAt || tStrMs()
+          });
+        } finally {
+          resolve();
+        }
+      }, DOM_WAIT_MS));
     } catch {}
   }
   function getDiscordWebhookUrl() {
@@ -1258,7 +1310,7 @@
     }
     const raw = storage.get(key);
     if (!raw) {
-      console.info(`前回スナップショットなし: useDate=${currentUseDate} / ${key}`);
+      internalLog(`前回スナップショットなし: useDate=${currentUseDate} / ${key}`);
       return null;
     }
     try {
@@ -1277,7 +1329,7 @@
       const reason = getCurrentSnapshotDropReason(data);
       if (reason) {
         storage.remove(key);
-        console.info(`現在スナップショット破棄: ${reason} / ${key}`);
+        internalLog(`現在スナップショット破棄: ${reason} / ${key}`);
         return null;
       }
       const items = Array.isArray(data?.items) ? data.items : [];
@@ -1291,7 +1343,7 @@
       items.forEach(item => {
         if (item?.key) map.set(item.key, item);
       });
-      console.info(`前回スナップショット読込: ${map.size}件 / useDate=${currentUseDate} / ${key}`);
+      internalLog(`前回スナップショット読込: ${map.size}件 / useDate=${currentUseDate} / ${key}`);
       return map;
     } catch {
       storage.remove(key);
@@ -1315,7 +1367,7 @@
       scope: getSnapshotScope(),
       items
     }));
-    if (ok) console.info(`スナップショット保存: ${items.length}件 / useDate=${useDate} / savedAt=${savedAt} / ${key}`);
+    if (ok) internalLog(`スナップショット保存: ${items.length}件 / useDate=${useDate} / savedAt=${savedAt} / ${key}`);
   }
   function diffSnapshots(prev, curr) {
     const changes = [];
@@ -1412,7 +1464,7 @@
     if (notifyEnabled) sendDiscordDiff(changes);
     return { status: 'changed', message: `在庫差分あり: ${changes.length}件`, changes, changedKeys };
   }
-  function logDiffSummary(diffResult, sourceName, useDateText, filterLabel) {
+  function logDiffSummary(diffResult, sourceName, useDateText, filterLabel, option = {}) {
     if (!diffResult) return;
     const title = diffResult.status === 'changed'
       ? `在庫差分 / ${diffResult.changes.length}件`
@@ -1420,7 +1472,7 @@
     const groupFn = diffResult.status === 'changed'
       ? console.group.bind(console)
       : console.groupCollapsed.bind(console);
-    groupFn(title);
+    groupFn(option.compact ? `${option.apiReceivedAt} / ${useDateText} / ${filterLabel} / ${title}` : title);
     if (diffResult.status === 'changed') {
       diffResult.changes.forEach(change => {
         const base = change.now || change.old;
@@ -1428,11 +1480,11 @@
         const line = `${statusTransitionTextShort(change)}　${base?.roomName || ''}`;
         console.log(`%c${line}`, style);
       });
-      if (!notifyEnabled) {
+      if (!notifyEnabled && !option.compact) {
         console.info('Discord通知OFFのため送信しません');
       }
     } else if (diffResult.status === 'none') {
-      console.info('在庫差分なし');
+      if (!option.compact) console.info('在庫差分なし');
     } else if (diffResult.status === 'baseline') {
       console.info(diffResult.message);
     } else if (diffResult.status === 'skipped') {
@@ -1480,14 +1532,22 @@
       const sourceName = activeSourceLabel || '通常API';
       const useDateText = getUseDateText();
       const filterLabel = getFilterLabel();
-      const displayMode = getVacancyDisplayMode();
-      const originalCount = inputRows.length;
+      const autoRead = context.customApi && ['long', 'medium', 'short'].includes(context.apiMode);
       const domOrder = buildOfficialDomOrder();
       const allRows = inputRows.slice();
       applyDomInfo(allRows, domOrder);
       sortRows(allRows);
       const targetRows = rareFilterEnabled ? allRows.filter(isRareRoomRow) : allRows.slice();
       const allowEmptySnapshot = rareFilterEnabled && allRows.length > 0;
+      if (autoRead) {
+        const diffResult = handleNotifyDiff(targetRows, { allowEmptySnapshot });
+        if (diffResult.status === 'changed' || diffResult.status === 'none') {
+          logDiffSummary(diffResult, sourceName, useDateText, filterLabel, { compact: true, apiReceivedAt });
+        } else if (diffResult.status === 'skipped') {
+          console.warn(diffResult.message);
+        }
+        return;
+      }
       console.groupCollapsed(
         `%c${apiReceivedAt}`,
         'background:#111;color:#fff;font-weight:900;font-size:13px;padding:1px 6px;border-radius:3px;line-height:1.1;'
@@ -1495,35 +1555,25 @@
       console.info(`対象: ${sourceName}`);
       console.info(`useDate: ${useDateText}`);
       console.info(`フィルター: ${filterLabel}`);
-      console.info(`表示モード: ${displayMode === 'emptyOnly' ? '空室のみ' : 'すべて'}`);
+      console.info('表示モード: 全客室・全ステータス');
       console.info(`DOM読込: bed=${domOrder.countCommodity} / room=${domOrder.countRoomName}`);
       if (rareFilterEnabled) {
         console.info(`レア部屋フィルターON: 対象${targetRows.length}件 / 全${allRows.length}件 / rule=${getRareRuleHash()}`);
       } else {
         console.info(`レア部屋フィルターOFF: 全件対象 ${targetRows.length}件`);
       }
-      if (displayMode === 'emptyOnly') {
-        console.warn(`空室のみ表示を検知。DOM順ズレ防止のため saleStatus=0 のみ出力します。対象${targetRows.length}件 → 空室のみ表示 / API全${originalCount}件`);
-      } else {
-        console.info('すべて表示のため、対象ステータスをすべて出力します');
-      }
       const diffResult = handleNotifyDiff(targetRows, { allowEmptySnapshot });
       const changedRowKeys = diffResult.changedKeys || new Set();
-      const rows = displayMode === 'emptyOnly'
-        ? targetRows.filter(r => isStatus(r.saleStatus, 0))
-        : targetRows.slice();
+      const rows = allRows.slice();
       console.info(`ログ集計: 表示${rows.length}件 / 対象${targetRows.length}件 / 全${allRows.length}件`);
       flushInternalLogs();
       console.groupEnd();
-      const isShortMode = context.customApi && context.apiMode === 'short';
-      const roomGroupFn = isShortMode && typeof console.groupCollapsed === 'function'
-        ? console.groupCollapsed.bind(console)
-        : console.group.bind(console);
+      const roomGroupFn = console.group.bind(console);
       const dateTitleStyle = sourceName === '翌日API'
         ? 'background:#6a1b9a;color:#fff;font-weight:900;padding:1px 6px;border-radius:3px;line-height:1.1;'
         : 'color:inherit;font-weight:700;';
       roomGroupFn(
-        `%c${useDateText}%c / ${filterLabel} / 表示${rows.length}件`,
+        `%c${useDateText}%c / 全客室 / 表示${rows.length}件`,
         dateTitleStyle,
         'color:inherit;font-weight:normal;'
       );
@@ -1583,5 +1633,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.94');
+  internalLog('official DOM-order logger ready / rare room filter / v1.95');
 })();
