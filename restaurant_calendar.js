@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.45
+// @version      5.47
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -19,7 +19,8 @@
     IP_TIMEOUT = 5000,
     MAX_ERRORS = 5,
     VACANCY_RENOTIFY_MS = 3600000,
-    FORCE_INCIDENT_MS = 600000;
+    FORCE_INCIDENT_MS = 600000,
+    FORCE_STOP_RELOAD_MS = 3600000;
   const RED = 0xff0000,
     BLACK = 0x000001,
     BLUE = 0x3498db,
@@ -76,6 +77,8 @@
   let normalLogState = createNormalLogState(Date.now()),
     am9LogState = createAm9LogState();
   let forceStopIncident = { startedAt: 0, marketChanged: false, am9EmergencyHandled: false };
+  let forceStopReloadAt = 0,
+    forceStopReloadTimer = null;
   let lastHourlySnapshotKey = hourSnapshotKey(Date.now());
   let researchDelayNotifiedDate = '';
   const MIDNIGHT_CARRY_KEY = 'tdr_weekly_restaurant_midnight_carry_v1';
@@ -1160,6 +1163,8 @@
       s.panel.style.padding = '6px 2px';
       s.panel.style.fontSize = '13px';
       s.panel.style.textAlign = 'center';
+      s.panel.style.whiteSpace = 'normal';
+      s.panel.style.lineHeight = 'normal';
     }
   }
   function showPanelCounter(s, meal, value, color, title) {
@@ -1588,6 +1593,7 @@
     const s = getState(meal);
     if (s.forcedStopError) {
       s.forcedStopError = false;
+      if (![...mealStates.values()].some((state) => state.forcedStopError)) clearForceStopReload();
       s.consecutiveErrors = 0;
       s.error403 = false;
       s.pendingError = false;
@@ -1657,10 +1663,16 @@
         s.manual.style.opacity = maintenance || s.pending ? '0.6' : '1';
       }
       if (s.forcedStopError) {
+        const seconds = Math.max(0, Math.ceil((forceStopReloadAt - Date.now()) / 1000)),
+          remaining = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
         s.panel.style.background = '#ff0000';
         s.panel.style.color = '#fff';
-        s.panel.textContent = `${meal} STOP`;
-        s.panel.title = `エラー${MAX_ERRORS}回連続 / 自動読込強制停止 / クリックで再開`;
+        s.panel.style.padding = '2px';
+        s.panel.style.fontSize = '12px';
+        s.panel.style.whiteSpace = 'pre-line';
+        s.panel.style.lineHeight = '13px';
+        s.panel.textContent = `${meal} STOP\n${remaining}`;
+        s.panel.title = `エラー${MAX_ERRORS}回連続 / 再読込まで${remaining} / クリックで再開`;
         return;
       }
       if (maintenance) {
@@ -1819,11 +1831,29 @@
     const last = lastKnownRanges.get(meal);
     return last ? `${shortMD(last.weekStart)}～${shortMD(last.weekEnd)}` : '取得失敗';
   }
+  function clearForceStopReload() {
+    if (forceStopReloadTimer !== null) clearTimeout(forceStopReloadTimer);
+    forceStopReloadTimer = null;
+    forceStopReloadAt = 0;
+  }
+  function checkForceStopReload() {
+    if (!forceStopReloadAt || Date.now() < forceStopReloadAt) return;
+    clearForceStopReload();
+    console.warn(`[${NAME}] 強制停止から60分経過 / ページ再読込`);
+    window.location.reload();
+  }
+  function scheduleForceStopReload() {
+    if (forceStopReloadAt) return;
+    forceStopReloadAt = Date.now() + FORCE_STOP_RELOAD_MS;
+    forceStopReloadTimer = setTimeout(checkForceStopReload, FORCE_STOP_RELOAD_MS);
+    console.log(`[${NAME}] 強制停止から60分後にページを再読込します`);
+  }
   function forceStopError(meal, lastError) {
     const s = getState(meal);
     if (s.forcedStopError) return;
     s.forcedStopError = true;
     clearTimer(s);
+    scheduleForceStopReload();
     console.warn(`[${NAME}] ${meal} エラー${MAX_ERRORS}回連続 / 自動読込強制停止`);
     if (beginForceStopIncident()) {
       console.log(`[${NAME}] 同一ブロック事故の初回STOP / 緊急通知・ログ保存実行`);
@@ -2860,11 +2890,15 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();
+  document.addEventListener('visibilitychange', checkForceStopReload);
+  window.addEventListener('focus', checkForceStopReload);
+  window.addEventListener('pageshow', checkForceStopReload);
   setInterval(() => {
+    checkForceStopReload();
     maintenanceTick();
     researchTick();
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.45 起動`);
+  console.log(`[${NAME}] v5.47 起動`);
 })();
