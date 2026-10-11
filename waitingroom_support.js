@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         ⏳️待合室時刻表示
-// @version      1.07
+// @name         ⏳️待合室サポート
+// @version      1.08
 // @match        https://reserve-q.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_support.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_support.js
