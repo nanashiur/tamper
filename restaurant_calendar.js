@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.49
+// @version      5.50
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -1664,8 +1664,10 @@
         s.manual.style.opacity = maintenance || s.pending ? '0.6' : '1';
       }
       if (s.forcedStopError) {
-        const seconds = Math.max(0, Math.ceil((forceStopReloadAt - Date.now()) / 1000)),
-          remaining = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+        const seconds = Number.isFinite(forceStopReloadAt) && forceStopReloadAt > 0
+            ? Math.max(0, Math.ceil((forceStopReloadAt - new Date().getTime()) / 1000))
+            : null,
+          remaining = seconds === null ? '--:--' : `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
         s.panel.style.background = '#ff0000';
         s.panel.style.color = '#fff';
         s.panel.style.padding = '2px';
@@ -1839,10 +1841,17 @@
     forceStopReloadMeal = '';
   }
   function checkForceStopReload() {
-    if (!forceStopReloadAt || Date.now() < forceStopReloadAt) return;
+    if (forceStopReloadAt === 0) return;
+    if (!Number.isFinite(forceStopReloadAt) || forceStopReloadAt < 0) {
+      console.error(`[${NAME}] 自動再読込の期限が不正 / 再読込を中止`);
+      clearForceStopReload();
+      return;
+    }
+    const now = new Date().getTime();
+    if (!Number.isFinite(now) || now < forceStopReloadAt) return;
     const stoppedAt = forceStopReloadAt - FORCE_STOP_RELOAD_MS,
       meal = forceStopReloadMeal,
-      reloadedAt = Date.now();
+      reloadedAt = now;
     clearForceStopReload();
     console.warn(`[${NAME}] 強制停止から60分経過 / ページ再読込`);
     try {
@@ -1864,9 +1873,16 @@
     }
   }
   function scheduleForceStopReload(meal) {
-    if (forceStopReloadAt) return;
+    if (Number.isFinite(forceStopReloadAt) && forceStopReloadAt > 0) return;
+    clearForceStopReload();
+    // サイトのdate.jsはDate.now()をDateオブジェクトを返す関数に変更する。
+    const now = new Date().getTime();
+    if (!Number.isFinite(now)) {
+      console.error(`[${NAME}] 現在時刻が不正 / 自動再読込を予約できません`);
+      return;
+    }
     forceStopReloadMeal = meal;
-    forceStopReloadAt = Date.now() + FORCE_STOP_RELOAD_MS;
+    forceStopReloadAt = now + FORCE_STOP_RELOAD_MS;
     forceStopReloadTimer = setTimeout(checkForceStopReload, FORCE_STOP_RELOAD_MS);
     console.log(`[${NAME}] 強制停止から60分後にページを再読込します`);
   }
@@ -2922,5 +2938,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.49 起動`);
+  console.log(`[${NAME}] v5.50 起動`);
 })();
