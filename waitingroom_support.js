@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ⏳️待合室時刻表示
-// @version      1.06
+// @version      1.07
 // @match        https://reserve-q.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_support.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_support.js
@@ -10,6 +10,69 @@
 // @noframes
 // ==/UserScript==
 
+// 確認画面の「すすむ」だけを自動クリックする独立処理。
+(function () {
+  'use strict';
+
+  const key = '__tdrWaitingroomAutoConfirm_v1';
+  if (window[key]) return;
+  window[key] = true;
+
+  let currentModal = null;
+  let clicked = false;
+  let scheduled = false;
+
+  function isDisplayed(element) {
+    if (!element || !element.isConnected || !element.getClientRects().length) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse';
+  }
+
+  function checkConfirmDialog() {
+    const modal = document.getElementById('divConfirmRedirectModal');
+    if (modal !== currentModal) {
+      currentModal = modal;
+      clicked = false;
+    }
+    if (!isDisplayed(modal) || modal.getAttribute('aria-hidden') === 'true') {
+      clicked = false;
+      return;
+    }
+
+    const button = modal.querySelector('button#buttonConfirmRedirect');
+    if (clicked || !isDisplayed(button) || button.matches(':disabled')
+      || button.getAttribute('aria-disabled') === 'true' || button.closest('[inert]')) return;
+
+    // ボタンの処理によるDOM変化より先に記録し、同じ表示への連打を防ぐ。
+    clicked = true;
+    button.click();
+  }
+
+  function scheduleCheck() {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      checkConfirmDialog();
+    });
+  }
+
+  const observer = new MutationObserver(scheduleCheck);
+  observer.observe(document, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['id', 'style', 'class', 'hidden', 'disabled', 'aria-hidden', 'aria-disabled', 'inert'],
+  });
+  // 背景タブでも判定する。復帰時とCSSだけでの表示変化も補完する。
+  window.setInterval(checkConfirmDialog, 1000);
+  document.addEventListener('visibilitychange', scheduleCheck);
+  window.addEventListener('pageshow', scheduleCheck);
+  window.addEventListener('focus', scheduleCheck);
+  checkConfirmDialog();
+})();
+
+// 以下はベースの時刻表示コードを変更せず維持する。
 (function (d) {
   if (d.getElementById('expectedServiceTimeActual') || !d.querySelector('span#MainPart_lbExpectedServiceTime')) {
     return;
