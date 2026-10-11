@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         📋️🏨🍴予約履歴カウンター
-// @version      2.02
+// @name         🔍️予約履歴カウンター
+// @version      2.03
 // @match        https://reserve.tokyodisneyresort.jp/order/list/*
 // @match        https://reserve.tokyodisneyresort.jp/orderhistory/list/*
 // @match        https://reserve.tokyodisneyresort.jp/sp/order/list/*
