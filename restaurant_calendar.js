@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🍴💻️レストラン週間モニター
-// @version      5.48
+// @name         🍴📅レストラン週間モニター
+// @version      5.49
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -13,7 +13,7 @@
   if (window.__tdr_weekly_restaurant_monitor) return;
   window.__tdr_weekly_restaurant_monitor = true;
 
-  const NAME = '🍴💻️レストラン週間モニター';
+  const NAME = '🍴📅レストラン週間モニター';
   const UI_TICK = 1000,
     PENDING_ERROR_MS = 300000,
     IP_TIMEOUT = 5000,
@@ -98,7 +98,7 @@
   }
   function detectedAtText(at = Date.now()) {
     const d = new Date(at);
-    return `${String(d.getFullYear()).slice(-2)}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+    return `${String(d.getFullYear()).slice(-2)}年${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日 ${String(d.getHours()).padStart(2, '0')}時${String(d.getMinutes()).padStart(2, '0')}分${String(d.getSeconds()).padStart(2, '0')}秒`;
   }
   function clockHM() {
     const d = new Date();
@@ -2922,5 +2922,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.48 起動`);
+  console.log(`[${NAME}] v5.49 起動`);
 })();
