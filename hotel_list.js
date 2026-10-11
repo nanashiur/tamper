@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.99
+// @version      2.00
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.99';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.00';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -32,6 +32,7 @@
   const HOTEL_ORDER = ['FSH', 'TDH', 'DAH', 'DHM', 'TSH', 'DCH'];
   const IDS = {
     notify: '__datetime_stock_monitor_notify_panel',
+    acquire: '__datetime_stock_monitor_acquire_panel',
     rare: '__datetime_stock_monitor_rare_filter_panel',
     current: '__datetime_stock_monitor_currentday_panel',
     currentMode: '__datetime_stock_monitor_currentday_mode_panel',
@@ -121,6 +122,14 @@
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
   const PANEL = { right: '28px', currentRight: '86px', notifyRight: '144px', rareRight: '202px', minWidth: '44px', height: '26px', top1: '0px', top2: '28px' };
   let notifyPanel = null;
+  let acquirePanel = null;
+  // Acquisition is deliberately OFF on every page load; never restore it from storage.
+  let acquireEnabled = false;
+  let acquireEpoch = 0;
+  let acquireRequestNo = 0;
+  let latestAcquireResponse = 0;
+  let acquireCycle = null;
+  let acquireErrorCount = 0;
   let rarePanel = null;
   let popupElem = null;
   const apiButtonPanels = { current: null, next: null };
@@ -579,6 +588,9 @@
     document.getElementById(IDS.oldAuto)?.remove();
     if (!rarePanel || !document.body.contains(rarePanel)) rarePanel = makePanel(IDS.rare, PANEL.top1, toggleRareFilter, PANEL.rareRight);
     if (!notifyPanel || !document.body.contains(notifyPanel)) notifyPanel = makePanel(IDS.notify, PANEL.top1, toggleNotify, PANEL.notifyRight);
+    if (!acquirePanel || !document.body.contains(acquirePanel)) {
+      acquirePanel = makePanel(IDS.acquire, PANEL.top2, toggleAcquire, PANEL.notifyRight);
+    }
     Object.keys(API_KIND).forEach(kind => {
       const cfg = API_KIND[kind];
       if (!apiModePanels[kind] || !document.body.contains(apiModePanels[kind])) {
@@ -590,6 +602,7 @@
     });
     updateRarePanel();
     updateNotifyPanel();
+    updateAcquirePanel();
     Object.keys(API_KIND).forEach(kind => {
       updateApiModePanel(kind);
       updateApiButtonPanel(kind);
@@ -613,9 +626,9 @@
   function updateNotifyPanel() {
     if (!notifyPanel) return;
     Object.assign(notifyPanel.style, notifyEnabled ? {
-      background: notifyMode === 'research' ? '#ff9800' : '#ffc107',
+      background: notifyMode === 'research' ? '#2e7d32' : '#ffc107',
       color: '#fff',
-      borderColor: notifyMode === 'research' ? '#f57c00' : '#ffb300',
+      borderColor: notifyMode === 'research' ? '#1b5e20' : '#ffb300',
       opacity: '1'
     } : {
       background: '#111',
@@ -655,6 +668,165 @@
       opacity: '1'
     });
     panel.textContent = cfg.buttonText;
+  }
+  function updateAcquirePanel() {
+    if (!acquirePanel) return;
+    Object.assign(acquirePanel.style, {
+      background: acquireEnabled ? '#d50000' : '#111',
+      color: '#fff', borderColor: acquireEnabled ? '#b71c1c' : '#666', opacity: '1'
+    });
+    acquirePanel.textContent = '👍️';
+    acquirePanel.title = acquireEnabled ? '自動取得ON（最新APIの空室を取得）' : '自動取得OFF';
+  }
+  function toggleAcquire() {
+    // An unfinished booking request must not be replaced by another room.
+    if (!acquireEnabled && acquireCycle) {
+      internalLog('自動取得: 前回の予約通信が未完了のためONにできません', 'warn');
+      return;
+    }
+    acquireEnabled = !acquireEnabled;
+    acquireEpoch++;
+    acquireErrorCount = 0;
+    updateAcquirePanel();
+    internalLog('自動取得: ' + (acquireEnabled ? 'ON / 次のAPI応答を待機' : 'OFF'));
+  }
+  function stopAcquire(reason) {
+    acquireEnabled = false;
+    acquireEpoch++;
+    updateAcquirePanel();
+    internalLog('自動取得停止: ' + reason, 'warn');
+  }
+  function captureAcquireApiContext() {
+    return acquireEnabled ? {
+      acquireEpoch,
+      acquireRequestNo: ++acquireRequestNo,
+      acquirePageUrl: location.href,
+      acquireCodes: getCommodityCodesFromDom().sort().join(',')
+    } : {};
+  }
+  function validAcquireDate(raw) {
+    if (!/^\d{8}$/.test(raw)) return false;
+    const d = new Date(Date.UTC(+raw.slice(0, 4), +raw.slice(4, 6) - 1, +raw.slice(6, 8)));
+    return d.toISOString().slice(0, 10).replace(/-/g, '') === raw;
+  }
+  function tryAutoAcquire(rows, context) {
+    if (!acquireEnabled || acquireCycle || getMaintenanceDelayMs() > 0 ||
+        context.acquireEpoch !== acquireEpoch || !context.acquireRequestNo ||
+        context.acquireRequestNo !== latestAcquireResponse ||
+        context.acquirePageUrl !== location.href) return;
+    const codes = getCommodityCodesFromDom().sort();
+    if (context.acquireCodes !== codes.join(',')) return;
+    const row = rows.find(r => String(r.saleStatus) === '0' &&
+      /^HO[A-Z0-9]{10,}$/.test(r.apiCommodityCd) && codes.includes(r.apiCommodityCd) &&
+      validAcquireDate(r.priceUseDate) && r.priceUseDate === context.useDateOverride &&
+      /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(r.priceFrameID));
+    if (!row) return;
+    const button = document.querySelector('.js-reserve.button.next');
+    if (!button) {
+      internalLog('自動取得: 予約ボタンがないため次のAPI応答を待機', 'warn');
+      return;
+    }
+    const cycle = {
+      commodityCd: row.apiCommodityCd, useDate: row.priceUseDate,
+      priceFrameID: row.priceFrameID, roomName: row.roomName, roomPriceTotal: row.roomPriceTotal,
+      pageUrl: location.href,
+      noticeSent: false, reserveSent: false, watchdog: 0
+    };
+    acquireCycle = cycle;
+    cycle.watchdog = win.setTimeout(() => {
+      if (acquireCycle === cycle) stopAcquire('予約処理が60秒以内に完了しませんでした');
+      // Keep the lock: an unknown result must not cause another booking attempt.
+    }, 60000);
+    internalLog('自動取得: ' + cycle.commodityCd + ' / ' + cycle.useDate + ' / ' + cycle.priceFrameID);
+    const disabled = button.disabled;
+    const hadDisabledClass = button.classList.contains('is-disabled');
+    try {
+      button.disabled = false;
+      button.classList.remove('is-disabled');
+      button.click();
+      sendAcquireClickedNotification(cycle);
+    } catch {
+      stopAcquire('予約ボタンの操作に失敗しました');
+    } finally {
+      button.disabled = disabled;
+      if (hadDisabledClass) button.classList.add('is-disabled');
+    }
+  }
+  function sendAcquireClickedNotification(cycle) {
+    // Reservation-button notifications always go to hotel, even when normal notifications are OFF.
+    const webhookUrl = getDiscordWebhookUrl('hotel');
+    if (!webhookUrl) {
+      internalLog('自動予約押下通知: ホテル通知のWebhookが未設定です', 'warn');
+      return;
+    }
+    const price = Number(cycle.roomPriceTotal);
+    const priceText = Number.isFinite(price) && price > 0 ? '　' + price.toLocaleString('ja-JP') + '円' : '';
+    const payload = {
+      username: SCRIPT_NAME,
+      embeds: [{
+        title: '🟪' + notificationUseDateText(cycle.useDate) + '\n' + cycle.roomName,
+        description: '自動予約ボタン押下\n' + tStrForNotification() + priceText + ' [' + cycle.priceFrameID + ']',
+        color: 0x800080
+      }],
+      allowed_mentions: { parse: [] }
+    };
+    try {
+      win.fetch(webhookUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload), keepalive: true
+      }).then(res => {
+        internalLog('自動予約押下通知: HTTP ' + res.status, res.ok ? 'info' : 'warn');
+      }).catch(() => internalLog('自動予約押下通知: 通信エラー', 'warn'));
+    } catch {
+      internalLog('自動予約押下通知: 送信できませんでした', 'warn');
+    }
+  }
+  function acquirePostKind(url, method) {
+    if (String(method || '').toUpperCase() !== 'POST') return '';
+    try {
+      const u = new URL(url, location.href);
+      if (u.origin !== location.origin) return '';
+      if (/\/hotel\/reserve\/?$/.test(u.pathname)) return 'reserve';
+      if (/\/common\/notice\/?$/.test(u.pathname)) return 'notice';
+    } catch {}
+    return '';
+  }
+  function rewriteAcquireBody(body, kind, cycle) {
+    let params;
+    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+    if (isForm) {
+      params = new FormData();
+      for (const [key, value] of body.entries()) params.append(key, value);
+    } else if (typeof body === 'string' || body instanceof URLSearchParams) {
+      params = new URLSearchParams(body);
+    } else {
+      throw new Error('Unsupported reservation body');
+    }
+    params.set('commodityCD', cycle.commodityCd);
+    if (kind === 'reserve') {
+      params.set('searchHotelCD', cycle.commodityCd.slice(2, 5));
+      params.set('roomLetterCD', cycle.commodityCd.slice(5, 8));
+      params.set('roomMaterialCD', cycle.commodityCd.slice(2, 12));
+      params.set('useDate', cycle.useDate);
+      params.set('hotelPriceFrameID', cycle.priceFrameID);
+    } else {
+      params.set('date', cycle.useDate);
+    }
+    return isForm ? params : params.toString();
+  }
+  function finishAcquireRequest(cycle, kind, status) {
+    if (acquireCycle !== cycle) return;
+    if (kind === 'notice' && status === 200) return; // Wait for the following reserve POST.
+    win.clearTimeout(cycle.watchdog);
+    acquireCycle = null;
+    acquireEpoch++; // A retry requires an API request started after this result.
+    if (status === 403 && acquireEnabled && ++acquireErrorCount < 9) {
+      internalLog('自動取得: HTTP 403 / ' + acquireErrorCount + '回 / 次のAPI応答を待機', 'warn');
+      return;
+    }
+    stopAcquire(kind === 'reserve' && status === 200
+      ? '予約送信への応答を受信（HTTP 200）'
+      : 'HTTP ' + status + ' / エラー回数 ' + acquireErrorCount);
   }
   function toggleRareFilter() {
     rareFilterEnabled = !rareFilterEnabled;
@@ -1041,6 +1213,7 @@
     }
     const targetUrl = urlWithUseDate(targetYmd);
     const body = makeStockApiBody(targetYmd, commodityCodes);
+    const acquireContext = captureAcquireApiContext();
     internalLog(`${sourceLabel}発火: URL基準=${baseYmd} / target=${targetYmd} / commodity=${commodityCodes.length} / ${reason}`);
     try {
       const res = await win.fetch(API_URL, {
@@ -1073,6 +1246,7 @@
       }
       handleApiSuccess(sourceLabel);
       await handleJSON(txt, {
+        ...acquireContext,
         useDateOverride: targetYmd,
         sourceLabel,
         apiReceivedAt,
@@ -1116,10 +1290,29 @@
     const oSend = win.XMLHttpRequest.prototype.send;
     win.XMLHttpRequest.prototype.open = function (m, url, ...rest) {
       this._tdrDaySearchUrl = String(url || '');
+      this._tdrDaySearchMethod = m;
       return oOpen.call(this, m, url, ...rest);
     };
     win.XMLHttpRequest.prototype.send = function (...rest) {
       const url = this._tdrDaySearchUrl || '';
+      const kind = acquirePostKind(url, this._tdrDaySearchMethod);
+      const cycle = kind && acquireCycle;
+      if (cycle) {
+        if (!acquireEnabled || cycle.pageUrl !== location.href || cycle[kind + 'Sent'] ||
+            (kind === 'notice' && cycle.reserveSent)) {
+          stopAcquire('停止中または重複した予約送信を中止しました');
+          throw new Error('Auto acquisition request cancelled');
+        }
+        try {
+          rest[0] = rewriteAcquireBody(rest[0], kind, cycle);
+        } catch (e) {
+          stopAcquire('予約送信形式を確認できないため中止しました');
+          throw e;
+        }
+        cycle[kind + 'Sent'] = true;
+        this.addEventListener('loadend', () => finishAcquireRequest(cycle, kind, this.status), { once: true });
+      }
+      const acquireContext = ENDPOINT.test(url) ? captureAcquireApiContext() : {};
       const bodyYmd = getRequestBodyUseDate(rest[0]);
       let finishLoading = () => {};
       let processing = Promise.resolve();
@@ -1128,7 +1321,9 @@
         finishLoading = beginPassiveApiLoading(bodyYmd || getUrlUseDateYmd());
         this.addEventListener('loadend', onLoadEnd, { once: true });
         this.addEventListener('load', () => {
+          if (this.status < 200 || this.status >= 300) return;
           processing = Promise.resolve(handleJSON(this.responseText, {
+            ...acquireContext,
             sourceLabel: '',
             apiReceivedAt: tStrMs(),
             useDateOverride: bodyYmd || getUrlUseDateYmd(),
@@ -1141,6 +1336,7 @@
         return oSend.apply(this, rest);
       } catch (e) {
         this.removeEventListener('loadend', onLoadEnd);
+        if (cycle) finishAcquireRequest(cycle, kind, 0);
         finishLoading();
         throw e;
       }
@@ -1163,6 +1359,7 @@
           callArgs = [req, cleanInit];
         }
         const passiveStockApi = ENDPOINT.test(url) && !customStockApi;
+        const acquireContext = passiveStockApi ? captureAcquireApiContext() : {};
         const finishLoading = passiveStockApi
           ? beginPassiveApiLoading(bodyYmd || getUrlUseDateYmd())
           : () => {};
@@ -1174,13 +1371,14 @@
           throw e;
         }
         if (passiveStockApi) {
-          p.then(r => r.clone().text().then(txt => handleJSON(txt, {
+          p.then(r => r.ok ? r.clone().text().then(txt => handleJSON(txt, {
+            ...acquireContext,
             sourceLabel: '',
             apiReceivedAt: tStrMs(),
             useDateOverride: bodyYmd || getUrlUseDateYmd(),
             passiveApi: true,
             apiMode: ''
-          }))).catch(() => {}).finally(finishLoading);
+          })) : undefined).catch(() => {}).finally(finishLoading);
         }
         return p;
       }
@@ -1209,6 +1407,9 @@
     }
     try {
       const json = JSON.parse(txt);
+      if (context.acquireEpoch === acquireEpoch && context.acquireRequestNo) {
+        latestAcquireResponse = Math.max(latestAcquireResponse, context.acquireRequestNo);
+      }
       const rows = [];
       let seq = 0;
       for (const [groupKey, group] of Object.entries(json.ecRoomStockInfos || {})) {
@@ -1225,6 +1426,8 @@
               hotelOrder: hotelOrder >= 0 ? hotelOrder : 999,
               roomCd: current.commodityCd || current.roomCd || current.hotelRoomCd || roomCdKey || '',
               roomName,
+              apiCommodityCd: normalize(current.commodityCd || ''),
+              priceFrameID: normalize(current.priceFrameID || current.priceLevel || ''),
               priceUseDate: String(current.useDate || ''),
               roomPriceTotal: current.roomPriceTotal,
               saleStatus: current.saleStatus ?? '',
@@ -1574,6 +1777,7 @@
       const allRows = inputRows.slice();
       applyDomInfo(allRows, domOrder);
       sortRows(allRows);
+      tryAutoAcquire(allRows, context);
       const targetRows = rareFilterEnabled ? allRows.filter(isRareRoomRow) : allRows.slice();
       const allowEmptySnapshot = rareFilterEnabled && allRows.length > 0;
       if (autoRead) {
@@ -1670,5 +1874,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.99');
+  internalLog('official DOM-order logger ready / rare room filter / v2.00');
 })();
