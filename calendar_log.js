@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📅 客室指定在庫モニター
-// @version      5.28
+// @version      5.29
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -63,6 +63,20 @@
     const d = new Date();
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
   };
+
+  const tStrForNotification = () => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tokyo', year: '2-digit', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date()).map(p => [p.type, p.value]));
+    return `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}時${parts.minute}分${parts.second}秒`;
+  };
+
+  function notificationUseDateText(raw) {
+    if (!/^\d{8}$/.test(raw || '')) return '日付不明';
+    const date = new Date(Date.UTC(Number(raw.slice(0, 4)), Number(raw.slice(4, 6)) - 1, Number(raw.slice(6, 8))));
+    return `${raw.slice(0, 4)}年${raw.slice(4, 6)}月${raw.slice(6, 8)}日（${"日月火水木金土"[date.getUTCDay()]}）`;
+  }
 
   const getCalendarStartMonthOffset = () => {
     const now = new Date();
@@ -1042,6 +1056,7 @@
                   st,
                   rm,
                   dt,
+                  dtRaw,
                   changeTxt,
                   roomName,
                   totalPrice,
@@ -1064,15 +1079,15 @@
     loadedKeys.add(contextKey);
 
     if (pendingNotifications.length > 0) {
-      const currentIp = await getIP();
-
       for (const item of pendingNotifications) {
+        const price = Number(item.totalPrice);
+        const priceText = Number.isFinite(price) && price > 0 ? `　${price.toLocaleString('ja-JP')}円` : '';
         sendDiscord({
           username: SCRIPT_NAME,
           embeds: [{
-            title: `${TITLE_EMOJI[item.st] ?? ''} **${tStrSec()}**\n${item.dt} ${item.changeTxt}\n${item.roomName}`,
+            title: `${TITLE_EMOJI[item.st] ?? ''}${notificationUseDateText(item.dtRaw)}\n${item.roomName}`,
             color: DISCORD_COLOR[item.st] ?? 1,
-            description: `時刻: ${tStrMs()} (${currentIp}) ${item.totalPrice.toLocaleString()}円 [${item.priceRank}]`
+            description: `${item.changeTxt}\n${tStrForNotification()}${priceText}`
           }]
         });
       }
