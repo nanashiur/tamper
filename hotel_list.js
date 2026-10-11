@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.96
-// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
+// @version      1.98
+// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @run-at       document-start
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.96';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.98';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -1648,5 +1648,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.96');
+  internalLog('official DOM-order logger ready / rare room filter / v1.98');
 })();
