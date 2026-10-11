@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴💻️レストラン週間モニター
-// @version      5.47
+// @version      5.48
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -78,7 +78,8 @@
     am9LogState = createAm9LogState();
   let forceStopIncident = { startedAt: 0, marketChanged: false, am9EmergencyHandled: false };
   let forceStopReloadAt = 0,
-    forceStopReloadTimer = null;
+    forceStopReloadTimer = null,
+    forceStopReloadMeal = '';
   let lastHourlySnapshotKey = hourSnapshotKey(Date.now());
   let researchDelayNotifiedDate = '';
   const MIDNIGHT_CARRY_KEY = 'tdr_weekly_restaurant_midnight_carry_v1';
@@ -95,8 +96,8 @@
   function dateSelection() {
     return localStorage.getItem(DATE_SELECT_KEY) || '';
   }
-  function detectedAtText() {
-    const d = new Date();
+  function detectedAtText(at = Date.now()) {
+    const d = new Date(at);
     return `${String(d.getFullYear()).slice(-2)}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
   }
   function clockHM() {
@@ -1835,15 +1836,36 @@
     if (forceStopReloadTimer !== null) clearTimeout(forceStopReloadTimer);
     forceStopReloadTimer = null;
     forceStopReloadAt = 0;
+    forceStopReloadMeal = '';
   }
   function checkForceStopReload() {
     if (!forceStopReloadAt || Date.now() < forceStopReloadAt) return;
+    const stoppedAt = forceStopReloadAt - FORCE_STOP_RELOAD_MS,
+      meal = forceStopReloadMeal,
+      reloadedAt = Date.now();
     clearForceStopReload();
     console.warn(`[${NAME}] 強制停止から60分経過 / ページ再読込`);
-    window.location.reload();
+    try {
+      // 再読込の実行直前に送信を開始し、keepaliveでページ遷移後も送信を継続する。
+      postCriticalDiscord(
+        buildErrorTitle('🔄', meal),
+        [
+          `${meal}　強制停止後の自動再読込`,
+          `停止：${detectedAtText(stoppedAt)}`,
+          `再読込：${detectedAtText(reloadedAt)}`
+        ].join('\n'),
+        ORANGE,
+        ['05']
+      );
+    } catch (e) {
+      console.error(`[${NAME}] 自動再読込通知失敗`, e);
+    } finally {
+      window.location.reload();
+    }
   }
-  function scheduleForceStopReload() {
+  function scheduleForceStopReload(meal) {
     if (forceStopReloadAt) return;
+    forceStopReloadMeal = meal;
     forceStopReloadAt = Date.now() + FORCE_STOP_RELOAD_MS;
     forceStopReloadTimer = setTimeout(checkForceStopReload, FORCE_STOP_RELOAD_MS);
     console.log(`[${NAME}] 強制停止から60分後にページを再読込します`);
@@ -1853,7 +1875,7 @@
     if (s.forcedStopError) return;
     s.forcedStopError = true;
     clearTimer(s);
-    scheduleForceStopReload();
+    scheduleForceStopReload(meal);
     console.warn(`[${NAME}] ${meal} エラー${MAX_ERRORS}回連続 / 自動読込強制停止`);
     if (beginForceStopIncident()) {
       console.log(`[${NAME}] 同一ブロック事故の初回STOP / 緊急通知・ログ保存実行`);
@@ -2900,5 +2922,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.47 起動`);
+  console.log(`[${NAME}] v5.48 起動`);
 })();
