@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.98
+// @version      1.99
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,11 +15,11 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.98';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.99';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
-  const SNAPSHOT_SCHEMA = 'sp-url-useDate-only-v1.79';
+  const SNAPSHOT_SCHEMA = 'sp-search-scope-v1.99';
   const SNAPSHOT_MAX_AGE_MS = 60 * 60 * 1000;
   const DOM_WAIT_MS = 700;
   const BURST_ERROR_RETRY_MS = 1500;
@@ -132,6 +132,13 @@
   const apiAutoDeferred = { current: null, next: null };
   const discordQueue = [];
   const internalLogs = [];
+  const NOTIFY_MODES = {
+    off: { label: 'OFF', icon: '🔕', key: '' },
+    hotel: { label: 'ホテル通知', icon: '🔔', key: 'hotel' },
+    research: { label: 'ホテル調査', icon: '📊', key: 'hotel_research_00' }
+  };
+  const NOTIFY_MODE_ORDER = ['off', 'hotel', 'research'];
+  let notifyMode = 'off';
   let notifyEnabled = false;
   let rareFilterEnabled = false;
   let apiBusy = false;
@@ -424,6 +431,14 @@
       searchHotelCD: pageParam('searchHotelCD', ''),
       searchHotelName: pageParam('searchHotelName', ''),
       searchRoomName: pageParam('searchRoomName', ''),
+      keyword: pageParam('keyword', ''),
+      hotelRoomCd: pageParam('hotelRoomCd', ''),
+      searchHotelDiv: pageParam('searchHotelDiv', ''),
+      searchLayer: pageParam('searchLayer', ''),
+      hotelSearchDetail: pageParam('hotelSearchDetail', ''),
+      checkPointStr: pageParam('checkPointStr', ''),
+      childAgeBedInform: pageParam('childAgeBedInform', ''),
+      commodityCodes: getCommodityCodesFromDom().sort().join(','),
       rareFilter: rareFilterEnabled ? '1' : '0',
       rareRuleHash: rareFilterEnabled ? getRareRuleHash() : ''
     };
@@ -467,7 +482,9 @@
       const saved = storage.get(API_KIND[kind].storageKey);
       apiAutoMode[kind] = API_AUTO_MODES[saved] ? saved : 'manual';
     });
-    notifyEnabled = storage.get(KEYS.notify) === '1';
+    const savedNotify = storage.get(KEYS.notify);
+    notifyMode = NOTIFY_MODES[savedNotify] ? savedNotify : savedNotify === '1' ? 'hotel' : 'off';
+    notifyEnabled = notifyMode !== 'off';
     rareFilterEnabled = storage.get(KEYS.rare) === '1';
   }
   function saveApiAutoState(kind) {
@@ -596,9 +613,9 @@
   function updateNotifyPanel() {
     if (!notifyPanel) return;
     Object.assign(notifyPanel.style, notifyEnabled ? {
-      background: '#ffc107',
+      background: notifyMode === 'research' ? '#ff9800' : '#ffc107',
       color: '#fff',
-      borderColor: '#ffb300',
+      borderColor: notifyMode === 'research' ? '#f57c00' : '#ffb300',
       opacity: '1'
     } : {
       background: '#111',
@@ -606,7 +623,8 @@
       borderColor: '#666',
       opacity: '.9'
     });
-    notifyPanel.textContent = '🔔';
+    notifyPanel.textContent = NOTIFY_MODES[notifyMode].icon;
+    notifyPanel.title = `通知先: ${NOTIFY_MODES[notifyMode].label}`;
   }
   function updateApiModePanel(kind) {
     const panel = apiModePanels[kind];
@@ -645,10 +663,12 @@
     internalLog(`レア部屋フィルター: ${rareFilterEnabled ? 'ON' : 'OFF'} / ${getFilterLabel()}`);
   }
   function toggleNotify() {
-    notifyEnabled = !notifyEnabled;
-    storage.set(KEYS.notify, notifyEnabled ? '1' : '0');
+    notifyMode = NOTIFY_MODE_ORDER[(NOTIFY_MODE_ORDER.indexOf(notifyMode) + 1) % NOTIFY_MODE_ORDER.length];
+    notifyEnabled = notifyMode !== 'off';
+    storage.set(KEYS.notify, notifyMode);
+    discordQueue.length = 0;
     updateNotifyPanel();
-    internalLog(`Discord通知: ${notifyEnabled ? 'ON' : 'OFF'}`);
+    internalLog(`Discord通知: ${NOTIFY_MODES[notifyMode].label}`);
     logWebhookStatus(true);
   }
   function startPanelTicker() {
@@ -1229,26 +1249,29 @@
       }, DOM_WAIT_MS));
     } catch {}
   }
-  function getDiscordWebhookUrl() {
-    return win.TDR_WEBHOOKS?.hotel || window.TDR_WEBHOOKS?.hotel || '';
+  function getDiscordWebhookUrl(mode = notifyMode) {
+    const key = NOTIFY_MODES[mode]?.key;
+    return key ? win.TDR_WEBHOOKS?.[key] || window.TDR_WEBHOOKS?.[key] || '' : '';
   }
   function logWebhookStatus(force = false) {
     if (webhookStatusLogged && !force) return;
     const webhookUrl = getDiscordWebhookUrl();
     if (!webhookUrl && notifyEnabled) {
-      internalLog('Discord Webhook未読込: window.TDR_WEBHOOKS.hotel が見つかりません', 'warn');
+      internalLog(`Discord Webhook未読込: ${NOTIFY_MODES[notifyMode].label} の設定が見つかりません`, 'warn');
     }
     webhookStatusLogged = true;
   }
   function enqueueDiscord(payload) {
-    discordQueue.push(payload);
+    if (!notifyEnabled) return;
+    discordQueue.push({ payload, mode: notifyMode });
     processDiscordQueue();
   }
   async function processDiscordQueue() {
-    if (discordSending || !discordQueue.length) return;
-    const webhookUrl = getDiscordWebhookUrl();
+    if (discordSending || !notifyEnabled || !discordQueue.length) return;
+    const item = discordQueue[0];
+    const webhookUrl = getDiscordWebhookUrl(item.mode);
     if (!webhookUrl) {
-      internalLog('Discord Webhook未設定: window.TDR_WEBHOOKS.hotel を確認してください', 'warn');
+      internalLog(`Discord Webhook未設定: ${NOTIFY_MODES[item.mode].label} の設定を確認してください`, 'warn');
       win.setTimeout(processDiscordQueue, 3000);
       return;
     }
@@ -1257,7 +1280,7 @@
       const res = await win.fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(discordQueue[0])
+        body: JSON.stringify(item.payload)
       });
       if (res.status === 429) {
         let retryMs = 1500;
@@ -1272,10 +1295,10 @@
       }
       if (res.ok) internalLog('Discord通知送信完了');
       else internalLog(`Discord通知失敗: ${res.status}`, 'warn');
-      discordQueue.shift();
+      if (discordQueue[0] === item) discordQueue.shift();
     } catch (e) {
       internalLog(`Discord通知エラー: ${e?.message || e}`, 'warn');
-      discordQueue.shift();
+      if (discordQueue[0] === item) discordQueue.shift();
     }
     discordSending = false;
     win.setTimeout(processDiscordQueue, 300);
@@ -1385,9 +1408,6 @@
         changes.push({ type: 'change', old, now });
       }
     }
-    for (const [key, old] of prev.entries()) {
-      if (!curr.has(key)) changes.push({ type: 'remove', old, now: null });
-    }
     changes.sort((a, b) => {
       const ar = a.now || a.old;
       const br = b.now || b.old;
@@ -1463,7 +1483,8 @@
       return { status: 'baseline', message: '通知ベースライン保存。初回のため通知しません', changes: [], changedKeys: new Set() };
     }
     const changes = diffSnapshots(previousSnapshot, currentSnapshot);
-    saveStoredSnapshot(currentSnapshot);
+    // A partial response does not establish that omitted rooms were deleted.
+    saveStoredSnapshot(new Map([...previousSnapshot, ...currentSnapshot]));
     if (!changes.length) {
       return { status: 'none', message: '在庫差分なし', changes: [], changedKeys: new Set() };
     }
@@ -1508,6 +1529,7 @@
     return `${raw.slice(0, 4)}年${raw.slice(4, 6)}月${raw.slice(6, 8)}日（${"日月火水木金土"[date.getUTCDay()]}）`;
   }
   function sendDiscordChange(change) {
+    if (change.type === 'remove') return;
     const status = notifyStatusForChange(change);
     const base = change.now || change.old;
     const price = Number(change.now?.roomPriceTotal);
@@ -1648,5 +1670,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.98');
+  internalLog('official DOM-order logger ready / rare room filter / v1.99');
 })();
