@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         📋️🏨🍴予約履歴カウンター
-// @version      2.01
+// @version      2.02
 // @match        https://reserve.tokyodisneyresort.jp/order/list/*
 // @match        https://reserve.tokyodisneyresort.jp/orderhistory/list/*
 // @match        https://reserve.tokyodisneyresort.jp/sp/order/list/*
@@ -56,9 +56,24 @@
         : '.area-page-transition table.module-table tr:not(.heading)'
     );
 
-    return [...elements].map(element =>
-      IS_SP ? element.parentElement : element
-    );
+    return [...elements].map(element => {
+      if (!IS_SP) return element;
+
+      // 1つのliに複数商品が入るため、次の商品タイトルまでを切り出す。
+      // 複製だけを使い、サイトの予約一覧は変更しない。
+      const row = document.createElement('div');
+      const section = element.closest('.reserve-contents');
+      row.dataset.receiptNo = cleanText(
+        section?.querySelector('.reserve-number')
+      ).match(/\d+/)?.[0] || '';
+
+      for (let node = element; node; node = node.nextElementSibling) {
+        if (node !== element && node.matches('h1.title')) break;
+        row.appendChild(node.cloneNode(true));
+      }
+
+      return row;
+    });
   }
 
   function getUseDate(row) {
@@ -90,9 +105,11 @@
           IS_SP ? '.reserve-contents' : '.section-module'
         );
 
-        const receiptNo = cleanText(
-          section?.querySelector('.reserve-number')
-        ).match(/\d+/)?.[0] || '';
+        const receiptNo = IS_SP
+          ? row.dataset.receiptNo
+          : cleanText(
+            section?.querySelector('.reserve-number')
+          ).match(/\d+/)?.[0] || '';
 
         const type = row.querySelector('.ico-hotel-bl')
           ? 'hotel'
