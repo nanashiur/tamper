@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨11時予約
-// @version      2.57
+// @version      2.58
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -510,10 +510,6 @@
     reloadPanel.id = 'tdr-1030-reload-panel';
 
     Object.assign(reloadPanel.style, {
-      position: 'fixed',
-      top: '0',
-      right: '0',
-      zIndex: '2147483647',
       color: '#fff',
       padding: '4px 6px',
       fontSize: '10px',
@@ -522,7 +518,7 @@
       lineHeight: '1.1',
       textAlign: 'center',
       cursor: 'pointer',
-      borderRadius: '0 0 0 4px',
+      borderBottom: '1px solid rgba(255,255,255,0.2)',
       backdropFilter: 'blur(4px)',
       userSelect: 'none'
     });
@@ -792,10 +788,10 @@
     container.appendChild(fixedEl);
     container.appendChild(timerOnEl);
     container.appendChild(timerOffEl);
+    container.appendChild(reloadPanel);
     container.appendChild(clickEl);
 
     parent.appendChild(container);
-    parent.appendChild(reloadPanel);
 
     (function loop() {
       checkTenReload();
