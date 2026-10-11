@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      1.95
+// @version      1.96
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.95';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '1.96';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -79,8 +79,8 @@
   ]);
   const API_AUTO_MODES = {
     manual: { label: 'OFF', name: 'OFF', background: '#111', color: '#fff' },
-    short: { label: '短期', name: '短期', background: '#f06292', color: '#111' },
-    medium: { label: '中期', name: '中期', background: '#ff9800', color: '#111' },
+    short: { label: '短期', name: '短期', background: '#f06292', color: '#fff' },
+    medium: { label: '中期', name: '中期', background: '#ff9800', color: '#fff' },
     long: { label: '長期', name: '長期', background: '#1976d2', color: '#fff' }
   };
   const API_MODE_ORDER = ['long', 'medium', 'short', 'manual'];
@@ -209,9 +209,12 @@
     const d = new Date();
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}.${pad(d.getMilliseconds(), 3)}`;
   };
-  const tStrForTitle = () => {
-    const d = new Date();
-    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${d.toTimeString().slice(0, 8)}`;
+  const tStrForNotification = () => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tokyo', year: '2-digit', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date()).map(p => [p.type, p.value]));
+    return `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}時${parts.minute}分${parts.second}秒`;
   };
   const getClockStr = () => new Date().toTimeString().slice(0, 8);
   function internalLog(message, level = 'info') {
@@ -579,7 +582,7 @@
     if (!rarePanel) return;
     Object.assign(rarePanel.style, rareFilterEnabled ? {
       background: '#f9a825',
-      color: '#111',
+      color: '#fff',
       borderColor: '#f57f17',
       opacity: '1'
     } : {
@@ -594,7 +597,7 @@
     if (!notifyPanel) return;
     Object.assign(notifyPanel.style, notifyEnabled ? {
       background: '#ffc107',
-      color: '#111',
+      color: '#fff',
       borderColor: '#ffb300',
       opacity: '1'
     } : {
@@ -1202,6 +1205,8 @@
               hotelOrder: hotelOrder >= 0 ? hotelOrder : 999,
               roomCd: current.commodityCd || current.roomCd || current.hotelRoomCd || roomCdKey || '',
               roomName,
+              priceUseDate: String(current.useDate || ''),
+              roomPriceTotal: current.roomPriceTotal,
               saleStatus: current.saleStatus ?? '',
               remainStockNum: stockText(current.remainStockNum),
               domMatched: false,
@@ -1295,6 +1300,8 @@
         roomCd: r.roomCd || '',
         saleStatus: Number.isFinite(st) ? st : r.saleStatus,
         remainStockNum: String(r.remainStockNum ?? '0'),
+        roomPriceTotal: r.priceUseDate === useDate && Number.isFinite(Number(r.roomPriceTotal)) && Number(r.roomPriceTotal) > 0
+          ? Number(r.roomPriceTotal) : null,
         domOrder: Number.isFinite(Number(r.domOrder)) ? Number(r.domOrder) : 999999,
         seq: Number.isFinite(Number(r.seq)) ? Number(r.seq) : 999999
       });
@@ -1495,13 +1502,21 @@
   function sendDiscordDiff(changes) {
     changes.forEach(sendDiscordChange);
   }
+  function notificationUseDateText(raw) {
+    if (!/^\d{8}$/.test(raw || '')) return '日付不明';
+    const date = new Date(Date.UTC(Number(raw.slice(0, 4)), Number(raw.slice(4, 6)) - 1, Number(raw.slice(6, 8))));
+    return `${raw.slice(0, 4)}年${raw.slice(4, 6)}月${raw.slice(6, 8)}日（${"日月火水木金土"[date.getUTCDay()]}）`;
+  }
   function sendDiscordChange(change) {
     const status = notifyStatusForChange(change);
     const base = change.now || change.old;
+    const price = Number(change.now?.roomPriceTotal);
+    const priceText = Number.isFinite(price) && price > 0 ? `　${price.toLocaleString('ja-JP')}円` : '';
     enqueueDiscord({
       username: SCRIPT_NAME,
       embeds: [{
-        title: `${TITLE_EMOJI[status] || '🔔'} **${tStrForTitle()}**\n${getUseDateText()} ${statusTransitionText(change)}\n${base.roomName || ''}`,
+        title: `${TITLE_EMOJI[status] || '🔔'}${notificationUseDateText(base.useDate)}\n${base.roomName || ''}`,
+        description: `${statusTransitionText(change)}\n${tStrForNotification()}${priceText}`,
         color: DISCORD_COLOR[status] || DISCORD_COLOR.error
       }],
       allowed_mentions: { parse: [] }
@@ -1633,5 +1648,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v1.95');
+  internalLog('official DOM-order logger ready / rare room filter / v1.96');
 })();
