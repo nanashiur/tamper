@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🍴📱レストラン 時間帯別リロード
-// @version      1.00
+// @name         🍴📱SP版レストラン 時間変更
+// @version      1.01
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/restaurant/update/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_update.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_update.js
