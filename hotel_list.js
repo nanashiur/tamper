@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.01
+// @version      2.02
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.01';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.02';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -91,10 +91,7 @@
       offset: 0,
       label: '当日API',
       buttonText: '当',
-      top: '28px',
-      right: '86px',
-      modeTop: '0px',
-      modeRight: '86px',
+      column: '3',
       buttonBackground: '#00838f',
       buttonBorder: '#006064',
       modeId: IDS.currentMode,
@@ -105,10 +102,7 @@
       offset: 1,
       label: '翌日API',
       buttonText: '翌',
-      top: '28px',
-      right: '28px',
-      modeTop: '0px',
-      modeRight: '28px',
+      column: '4',
       buttonBackground: '#6a1b9a',
       buttonBorder: '#4a148c',
       modeId: IDS.nextMode,
@@ -121,7 +115,8 @@
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
-  const PANEL = { right: '28px', currentRight: '86px', notifyRight: '144px', rareRight: '202px', minWidth: '44px', height: '26px', top1: '0px', top2: '28px' };
+  const PANEL = { id: '__datetime_stock_monitor_panels', minWidth: '24px', height: '26px' };
+  let panelContainer = null;
   let notifyPanel = null;
   let acquirePanel = null;
   // Acquisition is deliberately OFF on every page load; never restore it from storage.
@@ -269,7 +264,7 @@
     const starts = [...passiveApiLoads[kind]].map(load => load.startedAt);
     if (apiBusy && apiBusyKind === kind) starts.push(apiBusyStartAt);
     if (!starts.length) return '';
-    return Math.max(0, Math.floor((nowMs() - Math.min(...starts)) / 1000)) + '秒';
+    return String(Math.max(0, Math.floor((nowMs() - Math.min(...starts)) / 1000)));
   }
   function hasApiLoading(kind) {
     if (!kind) return Object.keys(API_KIND).some(key => hasApiLoading(key));
@@ -396,11 +391,10 @@
   function getMaintenanceDelayMs() {
     const d = new Date();
     const h = d.getHours();
-    const m = d.getMinutes();
     if (h < 3 || h >= 5) return 0;
-    if (h === 4 && m === 59) return 1000;
-    if (h === 4 && m >= 55) return 10000;
-    return 600000;
+    const resumeAt = new Date(d.getTime());
+    resumeAt.setHours(5, 0, 0, 0);
+    return resumeAt.getTime() - d.getTime();
   }
   function isBurstTime() {
     const d = new Date();
@@ -522,31 +516,33 @@
     console.warn(`自動API停止: ${reason || 'エラー多発'}`);
     Object.keys(API_KIND).forEach(kind => setApiAutoMode(kind, 'manual'));
   }
-  function makePanel(id, top, onClick, right = PANEL.right) {
+  function makePanel(id, row, column, onClick) {
     document.getElementById(id)?.remove();
     const el = document.createElement('div');
     el.id = id;
     Object.assign(el.style, {
-      position: 'fixed',
-      top,
-      right,
-      zIndex: '2147483647',
+      gridRow: row,
+      gridColumn: column,
+      justifySelf: 'end',
+      boxSizing: 'border-box',
       minWidth: PANEL.minWidth,
       height: PANEL.height,
-      padding: '1px 3px',
+      padding: '0 2px',
       borderRadius: '5px',
       boxShadow: '0 2px 7px rgba(0,0,0,.35)',
       fontFamily: 'Arial, sans-serif',
       fontSize: '15px',
       fontWeight: 'bold',
-      lineHeight: PANEL.height,
+      lineHeight: '24px',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
       cursor: 'pointer',
       userSelect: 'none',
       textAlign: 'center',
       border: '1px solid rgba(255,255,255,.75)'
     });
     el.addEventListener('click', onClick);
-    document.body.appendChild(el);
+    panelContainer.appendChild(el);
     return el;
   }
   function showPopup(txt, bgColor, textColor = '#fff') {
@@ -585,20 +581,31 @@
   }
   function ensurePanels() {
     if (!document.body) return;
+    if (!panelContainer || !document.body.contains(panelContainer)) {
+      document.getElementById(PANEL.id)?.remove();
+      panelContainer = document.createElement('div');
+      panelContainer.id = PANEL.id;
+      Object.assign(panelContainer.style, {
+        position: 'fixed', top: '0px', right: '1px', zIndex: '2147483647',
+        display: 'grid', gridTemplateColumns: 'repeat(4, max-content)',
+        gridTemplateRows: 'repeat(2, 26px)', gap: '1px'
+      });
+      document.body.appendChild(panelContainer);
+    }
     document.getElementById(IDS.auto)?.remove();
     document.getElementById(IDS.oldAuto)?.remove();
-    if (!rarePanel || !document.body.contains(rarePanel)) rarePanel = makePanel(IDS.rare, PANEL.top1, toggleRareFilter, PANEL.rareRight);
-    if (!notifyPanel || !document.body.contains(notifyPanel)) notifyPanel = makePanel(IDS.notify, PANEL.top1, toggleNotify, PANEL.notifyRight);
+    if (!rarePanel || !document.body.contains(rarePanel)) rarePanel = makePanel(IDS.rare, '1', '1', toggleRareFilter);
+    if (!notifyPanel || !document.body.contains(notifyPanel)) notifyPanel = makePanel(IDS.notify, '1', '2', toggleNotify);
     if (!acquirePanel || !document.body.contains(acquirePanel)) {
-      acquirePanel = makePanel(IDS.acquire, PANEL.top2, toggleAcquire, PANEL.notifyRight);
+      acquirePanel = makePanel(IDS.acquire, '2', '2', toggleAcquire);
     }
     Object.keys(API_KIND).forEach(kind => {
       const cfg = API_KIND[kind];
       if (!apiModePanels[kind] || !document.body.contains(apiModePanels[kind])) {
-        apiModePanels[kind] = makePanel(cfg.modeId, cfg.modeTop, () => setApiAutoMode(kind, nextApiMode(kind)), cfg.modeRight);
+        apiModePanels[kind] = makePanel(cfg.modeId, '1', cfg.column, () => setApiAutoMode(kind, nextApiMode(kind)));
       }
       if (!apiButtonPanels[kind] || !document.body.contains(apiButtonPanels[kind])) {
-        apiButtonPanels[kind] = makePanel(cfg.buttonId, cfg.top, () => runStockApiOnce(kind, '手動ボタン'), cfg.right);
+        apiButtonPanels[kind] = makePanel(cfg.buttonId, '2', cfg.column, () => runStockApiOnce(kind, '手動ボタン'));
       }
     });
     updateRarePanel();
@@ -656,7 +663,7 @@
     panel.title = mode.name;
     panel.textContent = elapsed || (apiAutoMode[kind] === 'manual'
       ? 'OFF'
-      : Math.max(0, Math.ceil((apiAutoNextAt[kind] - nowMs()) / 1000)) + '秒');
+      : String(Math.max(0, Math.ceil((apiAutoNextAt[kind] - nowMs()) / 1000))));
   }
   function updateApiButtonPanel(kind) {
     const panel = apiButtonPanels[kind];
@@ -1005,7 +1012,10 @@
     if (maintenanceDelay > 0) {
       internalLog(`${cfg.label} メンテナンス時間帯のため待機: ${Math.round(maintenanceDelay / 1000)}秒`);
       apiAutoNextAt[kind] = nowMs() + maintenanceDelay;
-      apiAutoTimer[kind] = win.setTimeout(() => scheduleApiAuto(kind, { reason: 'maintenanceRetry' }), maintenanceDelay);
+      apiAutoTimer[kind] = win.setTimeout(() => {
+        apiAutoNotBefore[kind] = 0;
+        scheduleApiAuto(kind, { ready: true, reason: 'maintenanceEnd' });
+      }, maintenanceDelay);
       updateApiModePanel(kind);
       return;
     }
@@ -1881,5 +1891,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.01');
+  internalLog('official DOM-order logger ready / rare room filter / v2.02');
 })();
