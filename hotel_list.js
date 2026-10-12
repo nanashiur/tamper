@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.02
+// @version      2.03
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.02';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.03';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -25,8 +25,7 @@
   const AUTO_ACQUIRE_PRICE_LIMIT = 250000;
   const BURST_ERROR_RETRY_MS = 1500;
   const NORMAL_ERROR_RETRY_MS = 3000;
-  const NORMAL_COOLDOWN_MS = 10 * 60 * 1000;
-  const LONG_COOLDOWN_MS = 30 * 60 * 1000;
+  const NORMAL_COOLDOWN_MS = 20 * 60 * 1000;
   const SHOW_CATEGORY_HEADER = true;
   const ROOM_LOG_INDENT_CH = 6;
   const HIDDEN_STYLE = 'color:transparent;font-size:0;line-height:0';
@@ -115,7 +114,7 @@
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
-  const PANEL = { id: '__datetime_stock_monitor_panels', minWidth: '24px', height: '26px' };
+  const PANEL = { id: '__datetime_stock_monitor_panels', minWidth: '24px', apiWidth: '44px', height: '26px' };
   let panelContainer = null;
   let notifyPanel = null;
   let acquirePanel = null;
@@ -158,7 +157,8 @@
   let webhookStatusLogged = false;
   let discordSending = false;
   let consecutiveErrorCount = 0;
-  let fatalErrorCount = 0;
+  let lastApiSuccessTime = '';
+  let lastApiErrorTime = '';
   let cachedIP = 'unknown';
   let lastIPFetchTime = 0;
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -228,6 +228,7 @@
     }).formatToParts(new Date()).map(p => [p.type, p.value]));
     return `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}時${parts.minute}分${parts.second}秒`;
   };
+  const apiEventTime = () => tStrForNotification().split(' ')[1];
   const getClockStr = () => new Date().toTimeString().slice(0, 8);
   function internalLog(message, level = 'info') {
     internalLogs.push({
@@ -255,7 +256,7 @@
     return stableHash([...RARE_ROOM_CODES].sort().join('|'));
   }
   function getFilterLabel() {
-    return rareFilterEnabled ? 'レア客室' : '全客室';
+    return rareFilterEnabled ? 'レア' : '全室';
   }
   function isRareRoomRow(row) {
     return RARE_ROOM_CODES.has(normalize(row?.roomCd || '').toUpperCase());
@@ -525,7 +526,8 @@
       gridColumn: column,
       justifySelf: 'end',
       boxSizing: 'border-box',
-      minWidth: PANEL.minWidth,
+      minWidth: Number(column) >= 3 ? PANEL.apiWidth : PANEL.minWidth,
+      width: Number(column) >= 3 ? PANEL.apiWidth : 'auto',
       height: PANEL.height,
       padding: '0 2px',
       borderRadius: '5px',
@@ -1087,76 +1089,59 @@
     }
     return cachedIP;
   }
-  function shouldNotifyErrorCount(count) {
-    return [10, 15, 20, 25].includes(count) || count >= 30;
-  }
   function handleApiSuccess(sourceLabel = '') {
-    if (consecutiveErrorCount || fatalErrorCount) {
+    lastApiSuccessTime = apiEventTime();
+    if (consecutiveErrorCount) {
       internalLog(`${sourceLabel || 'API'} 成功: エラーカウントリセット`);
     }
     consecutiveErrorCount = 0;
-    fatalErrorCount = 0;
     showPopup(getClockStr(), 'rgba(0, 102, 204, 0.9)');
   }
   function handleApiError(errObj, targetYmd, sourceLabel, customMsg = '') {
     consecutiveErrorCount++;
+    lastApiErrorTime = apiEventTime();
     const count = consecutiveErrorCount;
     const errStatus = errObj?.status || errObj?.statusText || errObj?.name || 'Error';
-    const burst = isBurstTime();
-    const targetInfoStr = `${sourceLabel || 'API'} / useDate=${targetYmd || getActiveUseDateYmd() || '不明'}`;
-    const bgRed = 'rgba(204, 0, 0, 0.9)';
-    const bgYellow = 'rgba(255, 204, 0, 0.9)';
-    const txtBlack = '#000';
-    if (burst) {
-      if (count >= 30) {
-        const msg = `バーストタイム中ですが連続${count}回拒否されたため、安全のため自動停止します。${customMsg ? `\n${customMsg}` : ''}`;
-        showPopup(`🛑バーストブロック検知 ${getClockStr()}`, bgRed);
-        sendApiErrorDiscord(errStatus, targetInfoStr, msg, count);
-        return { ok: false, status: 0, backoffMs: 0, stopAuto: true };
-      }
-      if (shouldNotifyErrorCount(count)) {
-        sendApiErrorDiscord(errStatus, targetInfoStr, `バーストタイム突撃中 (${count}回目)。1.5秒後に再検索します。${customMsg ? `\n${customMsg}` : ''}`, count);
-      }
-      showPopup(`⚠️${toCircled(count)} ${getClockStr()}`, bgYellow, txtBlack);
-      return { ok: false, status: 0, backoffMs: BURST_ERROR_RETRY_MS, stopAuto: false };
-    }
-    if (count >= 30) {
-      const msg = `完全ブロックの可能性が高いため、当日API・翌日APIをOFFに変更して停止します。${customMsg ? `\n${customMsg}` : ''}`;
-      showPopup(`🛑${toCircled(count)} ${getClockStr()}`, bgRed);
-      sendApiErrorDiscord(errStatus, targetInfoStr, msg, count);
+    const useDate = targetYmd || getActiveUseDateYmd() || '';
+    const bgOrange = 'rgba(255, 152, 0, 0.9)';
+    if (count >= 25) {
+      const msg = `当日API・翌日APIをOFFに変更して停止します。${customMsg ? `\n${customMsg}` : ''}`;
+      showPopup(`🔶${toCircled(count)} ${getClockStr()}`, bgOrange);
+      sendApiErrorDiscord(errStatus, useDate, sourceLabel, msg, count);
       return { ok: false, status: 0, backoffMs: 0, stopAuto: true };
     }
-    if (count === 25) {
-      const msg = `1800秒のロングクールダウンに入ります。${customMsg ? `\n${customMsg}` : ''}`;
-      showPopup(`🚫${toCircled(count)} ${getClockStr()}`, bgRed);
-      sendApiErrorDiscord(errStatus, targetInfoStr, msg, count);
-      return { ok: false, status: 0, backoffMs: LONG_COOLDOWN_MS, stopAuto: false };
-    }
     if ([10, 15, 20].includes(count)) {
-      const msg = `600秒後に現在のモードで自動再開します。${customMsg ? `\n${customMsg}` : ''}`;
-      showPopup(`🚫${toCircled(count)} ${getClockStr()}`, bgRed);
-      sendApiErrorDiscord(errStatus, targetInfoStr, msg, count);
+      const msg = `1200秒後に現在のモードで自動再開します。${customMsg ? `\n${customMsg}` : ''}`;
+      showPopup(`🟧${toCircled(count)} ${getClockStr()}`, bgOrange);
+      sendApiErrorDiscord(errStatus, useDate, sourceLabel, msg, count);
       return { ok: false, status: 0, backoffMs: NORMAL_COOLDOWN_MS, stopAuto: false };
     }
-    showPopup(`⚠️${toCircled(count)} ${getClockStr()}`, bgYellow, txtBlack);
-    return { ok: false, status: 0, backoffMs: NORMAL_ERROR_RETRY_MS, stopAuto: false };
+    showPopup(`⚠️${toCircled(count)} ${getClockStr()}`, 'rgba(255, 204, 0, 0.9)', '#000');
+    return { ok: false, status: 0, backoffMs: isBurstTime() ? BURST_ERROR_RETRY_MS : NORMAL_ERROR_RETRY_MS, stopAuto: false };
   }
-  async function sendApiErrorDiscord(errStatus, targetInfoStr, customMsg, count) {
-    fatalErrorCount++;
-    const ip = await getIP();
-    const icon = '🚫'.repeat(Math.min(fatalErrorCount, 10));
+  async function sendApiErrorDiscord(errStatus, targetYmd, sourceLabel, customMsg, count) {
+    const stopped = count >= 25;
+    const dateText = /^\d{8}$/.test(targetYmd)
+      ? `${targetYmd.slice(0, 4)}年${targetYmd.slice(4, 6)}月${targetYmd.slice(6, 8)}日`
+      : '日付不明';
+    const kindText = sourceLabel === API_KIND.next.label ? '翌日' : sourceLabel === API_KIND.current.label ? '当日' : 'API';
+    // Snapshot event times before awaiting the IP lookup.
+    const successLine = lastApiSuccessTime ? `${lastApiSuccessTime}　成功` : '成功記録なし';
+    const errorLine = `${lastApiErrorTime}　エラー${count}回目`;
     const modeText = Object.entries(API_KIND)
       .map(([kind, cfg]) => `${cfg.label}:${API_AUTO_MODES[apiAutoMode[kind]]?.name || apiAutoMode[kind]}`)
       .join(' / ');
+    const ip = await getIP();
     enqueueDiscord({
       username: SCRIPT_NAME,
       embeds: [{
-        title: `${icon} ${errStatus} 通信エラー多発`,
-        color: DISCORD_COLOR.error,
+        title: `${stopped ? '🔶' : '🟧'}${dateText}（${kindText}）\n${stopped ? '強制停止' : '20分停止'}（${count}回エラー）`,
+        color: 0xFF9800,
         description: [
-          `時刻: ${tStrFullMs()} (${ip})`,
-          `対象: ${targetInfoStr}`,
-          `連続エラー: ${count}回`,
+          successLine,
+          errorLine,
+          `HTTP ${errStatus}`,
+          `IP: ${ip}`,
           `モード: ${modeText}`,
           customMsg
         ].filter(Boolean).join('\n')
@@ -1193,9 +1178,16 @@
       if (result.stopAuto) {
         stopAllApiAuto(`${cfg.label} エラー多発`);
       } else {
+        const cooldown = result.backoffMs === NORMAL_COOLDOWN_MS;
+        if (cooldown) {
+          const resumeAt = nowMs() + NORMAL_COOLDOWN_MS;
+          Object.keys(API_KIND).forEach(key => { apiAutoNotBefore[key] = resumeAt; });
+        }
         resumeDeferredApiAuto();
         if (result.ok) apiAutoNotBefore[kind] = 0;
-        if (apiAutoMode[kind] !== 'manual') {
+        if (cooldown) {
+          Object.keys(API_KIND).forEach(key => scheduleApiAuto(key, { reason: 'errorCooldown' }));
+        } else if (apiAutoMode[kind] !== 'manual') {
           scheduleApiAuto(kind, { backoffMs: result.backoffMs || 0, reason });
         }
       }
@@ -1706,17 +1698,17 @@
     // A partial response does not establish that omitted rooms were deleted.
     saveStoredSnapshot(new Map([...previousSnapshot, ...currentSnapshot]));
     if (!changes.length) {
-      return { status: 'none', message: '在庫差分なし', changes: [], changedKeys: new Set() };
+      return { status: 'none', message: '差分なし', changes: [], changedKeys: new Set() };
     }
     const changedKeys = changedKeySet(changes);
     if (notifyEnabled) sendDiscordDiff(changes);
-    return { status: 'changed', message: `在庫差分あり: ${changes.length}件`, changes, changedKeys };
+    return { status: 'changed', message: `差分あり: ${changes.length}件`, changes, changedKeys };
   }
   function logDiffSummary(diffResult, sourceName, useDateText, filterLabel, option = {}) {
     if (!diffResult) return;
     const title = diffResult.status === 'changed'
-      ? `在庫差分 / ${diffResult.changes.length}件`
-      : '在庫差分 / なし';
+      ? `差分 / ${diffResult.changes.length}件`
+      : '差分 / なし';
     const groupFn = diffResult.status === 'changed'
       ? console.group.bind(console)
       : console.groupCollapsed.bind(console);
@@ -1732,7 +1724,7 @@
         console.info('Discord通知OFFのため送信しません');
       }
     } else if (diffResult.status === 'none') {
-      if (!option.compact) console.info('在庫差分なし');
+      if (!option.compact) console.info('差分なし');
     } else if (diffResult.status === 'baseline') {
       console.info(diffResult.message);
     } else if (diffResult.status === 'skipped') {
@@ -1813,7 +1805,7 @@
       console.info(`対象: ${sourceName}`);
       console.info(`useDate: ${useDateText}`);
       console.info(`フィルター: ${filterLabel}`);
-      console.info('表示モード: 全客室・全ステータス');
+      console.info('表示モード: 全室・全ステータス');
       console.info(`DOM読込: bed=${domOrder.countCommodity} / room=${domOrder.countRoomName}`);
       if (rareFilterEnabled) {
         console.info(`レア部屋フィルターON: 対象${targetRows.length}件 / 全${allRows.length}件 / rule=${getRareRuleHash()}`);
@@ -1831,7 +1823,7 @@
         ? 'background:#6a1b9a;color:#fff;font-weight:900;padding:1px 6px;border-radius:3px;line-height:1.1;'
         : 'color:inherit;font-weight:700;';
       roomGroupFn(
-        `%c${useDateText}%c / 全客室 / 表示${rows.length}件`,
+        `%c${useDateText}%c / 全室 / 表示${rows.length}件`,
         dateTitleStyle,
         'color:inherit;font-weight:normal;'
       );
@@ -1891,5 +1883,5 @@
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.02');
+  internalLog('official DOM-order logger ready / rare room filter / v2.03');
 })();
