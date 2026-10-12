@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.04
+// @version      2.05
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,13 +15,14 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.04';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.05';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
   const SNAPSHOT_SCHEMA = 'sp-search-scope-v1.99';
   const SNAPSHOT_MAX_AGE_MS = 60 * 60 * 1000;
   const DOM_WAIT_MS = 700;
+  const AUTO_ACQUIRE_PRICE_MIN = 110000;
   const AUTO_ACQUIRE_PRICE_LIMIT = 250000;
   const BURST_ERROR_RETRY_MS = 1500;
   const NORMAL_ERROR_RETRY_MS = 3000;
@@ -730,7 +731,7 @@
   function isAcquirePriceAllowed(value) {
     if (typeof value !== 'number' && typeof value !== 'string') return false;
     const price = Number(value);
-    return Number.isFinite(price) && price > 0 && price < AUTO_ACQUIRE_PRICE_LIMIT;
+    return Number.isFinite(price) && price >= AUTO_ACQUIRE_PRICE_MIN && price < AUTO_ACQUIRE_PRICE_LIMIT;
   }
   function tryAutoAcquire(rows, context) {
     if (!acquireEnabled || acquireCycle || getMaintenanceDelayMs() > 0 ||
@@ -2079,5 +2080,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.04');
+  internalLog('official DOM-order logger ready / rare room filter / v2.05');
 })();
