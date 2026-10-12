@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.50
+// @version      5.51
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -20,7 +20,7 @@
     MAX_ERRORS = 5,
     VACANCY_RENOTIFY_MS = 3600000,
     FORCE_INCIDENT_MS = 600000,
-    FORCE_STOP_RELOAD_MS = 3600000;
+    FORCE_STOP_RELOAD_MS = 3000000;
   const RED = 0xff0000,
     BLACK = 0x000001,
     BLUE = 0x3498db,
@@ -1853,7 +1853,7 @@
       meal = forceStopReloadMeal,
       reloadedAt = now;
     clearForceStopReload();
-    console.warn(`[${NAME}] 強制停止から60分経過 / ページ再読込`);
+    console.warn(`[${NAME}] 強制停止から50分経過 / ページ再読込`);
     try {
       // 再読込の実行直前に送信を開始し、keepaliveでページ遷移後も送信を継続する。
       postCriticalDiscord(
@@ -1884,7 +1884,7 @@
     forceStopReloadMeal = meal;
     forceStopReloadAt = now + FORCE_STOP_RELOAD_MS;
     forceStopReloadTimer = setTimeout(checkForceStopReload, FORCE_STOP_RELOAD_MS);
-    console.log(`[${NAME}] 強制停止から60分後にページを再読込します`);
+    console.log(`[${NAME}] 強制停止から50分後にページを再読込します`);
   }
   function forceStopError(meal, lastError) {
     const s = getState(meal);
@@ -2938,5 +2938,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.50 起動`);
+  console.log(`[${NAME}] v5.51 起動`);
 })();
