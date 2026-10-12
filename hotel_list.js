@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.03
+// @version      2.04
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.03';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.04';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -31,6 +31,7 @@
   const HIDDEN_STYLE = 'color:transparent;font-size:0;line-height:0';
   const HOTEL_ORDER = ['FSH', 'TDH', 'DAH', 'DHM', 'TSH', 'DCH'];
   const IDS = {
+    csv: '__datetime_stock_monitor_csv_panel',
     notify: '__datetime_stock_monitor_notify_panel',
     acquire: '__datetime_stock_monitor_acquire_panel',
     rare: '__datetime_stock_monitor_rare_filter_panel',
@@ -116,6 +117,7 @@
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
   const PANEL = { id: '__datetime_stock_monitor_panels', minWidth: '24px', apiWidth: '44px', height: '26px' };
   let panelContainer = null;
+  let csvPanel = null;
   let notifyPanel = null;
   let acquirePanel = null;
   // Acquisition is deliberately OFF on every page load; never restore it from storage.
@@ -600,6 +602,12 @@
     if (!notifyPanel || !document.body.contains(notifyPanel)) notifyPanel = makePanel(IDS.notify, '1', '2', toggleNotify);
     if (!acquirePanel || !document.body.contains(acquirePanel)) {
       acquirePanel = makePanel(IDS.acquire, '2', '2', toggleAcquire);
+    }
+    if (!csvPanel || !document.body.contains(csvPanel)) {
+      csvPanel = makePanel(IDS.csv, '2', '1', () => exportHotelCsv(false));
+      csvPanel.textContent = '📥';
+      csvPanel.title = '本日・全タブのCSVを保存（時間外は差分）';
+      Object.assign(csvPanel.style, { background: '#37474f', color: '#fff' });
     }
     Object.keys(API_KIND).forEach(kind => {
       const cfg = API_KIND[kind];
@@ -1405,20 +1413,195 @@
     lastJsonAt = currentMs;
     return false;
   }
+  // IndexedDB append transactions are shared by tabs; console snapshots remain separate.
+  const CSV_DB_NAME = 'tdr-hotel-list-csv-v1';
+  const csvTabId = win.crypto?.randomUUID?.() || `${nowMs()}-${Math.random().toString(36).slice(2)}`;
+  const csvBaselines = new Map();
+  const csvAutoCompleted = new Set();
+  let csvDbPromise = null;
+  let csvWriteQueue = Promise.resolve();
+  let csvAutoTimer = 0;
+  let csvExportBusy = false;
+  let csvStorageWarned = false;
+  function csvFailure(error) {
+    internalLog(`CSV記録・保存失敗: ${error?.message || error}`, 'warn');
+    if (!csvStorageWarned) {
+      csvStorageWarned = true;
+      console.warn('CSVを保存できません。ブラウザの保存容量・設定を確認してください。');
+      showPopup('CSV保存エラー', '#c62828');
+    }
+  }
+  function csvDayInfo(ms) {
+    const d = new Date(ms + 9 * 60 * 60 * 1000);
+    const year = d.getUTCFullYear(), month = d.getUTCMonth(), day = d.getUTCDate();
+    const dayKey = `${year}${pad(month + 1)}${pad(day)}`;
+    const midnight = new Date(`${year}-${pad(month + 1)}-${pad(day)}T00:00:00+09:00`).getTime();
+    const target = new Date(0);
+    target.setUTCFullYear(year, month + 4, day);
+    // No same calendar day exists in the target month: do not guess a stay date.
+    const targetYmd = target.getUTCDate() === day
+      ? `${target.getUTCFullYear()}${pad(target.getUTCMonth() + 1)}${pad(day)}` : '';
+    return { dayKey, midnight, targetYmd, start: midnight + 39540 * 1000, end: midnight + 39780 * 1000,
+      time: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}` };
+  }
+  function openHotelCsvDb() {
+    if (!csvDbPromise) csvDbPromise = new Promise((resolve, reject) => {
+      if (!win.indexedDB) return reject(new Error('IndexedDB未対応'));
+      const request = win.indexedDB.open(CSV_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore('responses', { keyPath: 'id', autoIncrement: true }).createIndex('day', 'day');
+        db.createObjectStore('exports', { keyPath: 'day' });
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => { db.close(); csvDbPromise = null; };
+        resolve(db);
+      };
+      request.onerror = () => reject(request.error);
+    }).catch(error => { csvDbPromise = null; throw error; });
+    return csvDbPromise;
+  }
+  function csvTransaction(db, stores, mode, action) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(stores, mode);
+      let result;
+      tx.oncomplete = () => resolve(result);
+      tx.onabort = () => reject(tx.error || new Error('CSV transaction aborted'));
+      tx.onerror = () => {}; // onabort reports the final transaction outcome.
+      try { action(tx, value => { result = value; }); } catch (error) { tx.abort(); reject(error); }
+    });
+  }
+  function recordHotelCsv(inputRows, context, receivedMs) {
+    try {
+      const useDate = String(context.useDateOverride || getUrlUseDateYmd() || '');
+      if (!/^\d{8}$/.test(useDate)) return;
+      const day = csvDayInfo(receivedMs);
+      const full = receivedMs >= day.start && receivedMs <= day.end;
+      const rare = rareFilterEnabled;
+      // A mismatched row date is not evidence for this request's stay date.
+      const rows = inputRows.filter(row => (!row.priceUseDate || row.priceUseDate === useDate) && (!rare || isRareRoomRow(row)))
+        .map(row => ({ ...row }));
+      if (!rows.length) return;
+      const domOrder = buildOfficialDomOrder();
+      applyDomInfo(rows, domOrder);
+      sortRows(rows);
+      const params = new URLSearchParams(location.search);
+      const search = Object.fromEntries(['stayingDays', 'roomsNum', 'adultNum', 'childNum', 'searchHotelCD', 'searchRoomName',
+        'keyword', 'hotelRoomCd', 'childAgeBedInform'].map(key => [key, params.get(key) || '']));
+      const scope = `${day.dayKey}|${useDate}|${rare}|${JSON.stringify(search)}|${getCommodityCodesFromDom().sort().join(',')}`;
+      const previous = csvBaselines.get(scope);
+      const next = new Map(previous || []);
+      const changed = [];
+      rows.forEach(row => {
+        const key = `${row.hotelCd}|${row.roomCd}|${row.roomName}`;
+        const value = `${row.saleStatus}|${row.remainStockNum}`;
+        if (!previous || previous.get(key) !== value) changed.push(row);
+        next.set(key, value);
+      });
+      const selected = full ? rows : changed;
+      const record = { day: day.dayKey, receivedMs, time: day.time, useDate, tabId: csvTabId,
+        source: context.sourceLabel || '通常API', rare: rare ? 'レア' : '全室', search: JSON.stringify(search),
+        mode: full ? '全室' : previous ? '差分' : '初回', am11: full && useDate === day.targetYmd,
+        elapsedSeconds: (receivedMs - (day.midnight + 39600 * 1000)) / 1000,
+        rows: selected.map(row => ({ hotelCd: row.hotelCd, hotelName: row.hotelName || row.hotelCd,
+          roomCd: row.roomCd, roomName: row.roomName, category: row.categoryLabel || '',
+          status: String(row.saleStatus), statusLabel: FULL_LABEL[row.saleStatus] || '未確認',
+          stock: row.remainStockNum, price: row.roomPriceTotal ?? '', rank: row.priceFrameID || '' })) };
+      if (!selected.length) return;
+      const write = (async () => {
+        const db = await openHotelCsvDb();
+        await csvTransaction(db, ['responses'], 'readwrite', tx => tx.objectStore('responses').add(record));
+      })().catch(error => { csvBaselines.delete(scope); csvFailure(error); });
+      csvWriteQueue = Promise.all([csvWriteQueue, write]).then(() => {});
+      csvBaselines.set(scope, next);
+    } catch (error) { csvFailure(error); }
+  }
+  function csvCell(value) {
+    let text = String(value ?? '');
+    if (/^[=+@\t\r]/.test(text) || /^-(?!\d+(?:\.\d+)?$)/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  function buildHotelCsv(records) {
+    const lines = [['取得日', '応答受信時刻', '11時からの経過秒', '宿泊日', 'ホテルコード', 'ホテル名', 'カテゴリ',
+      '客室コード', '客室名', 'ステータスコード', 'ステータス', '残室数', '料金', '価格ランク', 'タブID', '応答ID', 'API', 'フィルター', '記録種別', '検索条件']];
+    records.sort((a, b) => a.receivedMs - b.receivedMs || a.id - b.id).forEach(record => {
+      record.rows.forEach(row => lines.push([record.day, record.time, record.elapsedSeconds, record.useDate,
+        row.hotelCd, row.hotelName, row.category, row.roomCd, row.roomName, row.status, row.statusLabel, row.stock,
+        row.price, row.rank, record.tabId, record.id, record.source, record.rare, record.mode, record.search]));
+    });
+    return '\uFEFF' + lines.map(line => line.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  }
+  function downloadHotelCsv(text, filename) {
+    const url = win.URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    try { link.click(); } finally {
+      link.remove();
+      win.setTimeout(() => win.URL.revokeObjectURL(url), 60000);
+    }
+  }
+  async function exportHotelCsv(automatic, dayKey = csvDayInfo(nowMs()).dayKey) {
+    if (csvExportBusy || (automatic && csvAutoCompleted.has(dayKey))) return;
+    csvExportBusy = true;
+    let db, claimed = false;
+    try {
+      await csvWriteQueue;
+      db = await openHotelCsvDb();
+      let records = await csvTransaction(db, ['responses'], 'readonly', (tx, done) => {
+        const request = tx.objectStore('responses').index('day').getAll(dayKey);
+        request.onsuccess = () => done(request.result);
+      });
+      if (automatic) records = records.filter(record => record.am11);
+      if (!records.length) {
+        if (!automatic) showPopup('本日のCSVデータなし', '#37474f');
+        return;
+      }
+      if (automatic) {
+        claimed = await csvTransaction(db, ['exports'], 'readwrite', (tx, done) => {
+          const store = tx.objectStore('exports'), request = store.get(dayKey);
+          request.onsuccess = () => {
+            const old = request.result;
+            if (old?.done) { csvAutoCompleted.add(dayKey); return done(false); }
+            if (old?.leaseUntil > nowMs()) return done(false);
+            store.put({ day: dayKey, owner: csvTabId, leaseUntil: nowMs() + 60000, done: false });
+            done(true);
+          };
+        });
+        if (!claimed) return;
+      }
+      const filename = automatic ? `${dayKey}_AM11_hotel.csv` : `${dayKey}_hotel.csv`;
+      downloadHotelCsv(buildHotelCsv(records), filename);
+      if (automatic) await csvTransaction(db, ['exports'], 'readwrite', tx => {
+        tx.objectStore('exports').put({ day: dayKey, owner: csvTabId, done: true });
+      });
+      if (automatic) csvAutoCompleted.add(dayKey);
+      internalLog(`CSVダウンロード開始: ${filename} / ${records.length}応答`);
+    } catch (error) {
+      if (claimed && db) await csvTransaction(db, ['exports'], 'readwrite', tx => tx.objectStore('exports').delete(dayKey)).catch(() => {});
+      csvFailure(error);
+    } finally { csvExportBusy = false; }
+  }
+  function startHotelCsvAutoSave() {
+    openHotelCsvDb().catch(csvFailure);
+    const tick = () => {
+      const ms = nowMs(), day = csvDayInfo(ms);
+      // Let writes from other tabs at the 11:03 boundary settle before taking the snapshot.
+      if (ms >= day.end + 2000) exportHotelCsv(true, day.dayKey);
+      const delay = ms < day.end + 2000 ? Math.min(60000, day.end + 2000 - ms) : 60000;
+      csvAutoTimer = win.setTimeout(tick, delay);
+    };
+    if (csvAutoTimer) win.clearTimeout(csvAutoTimer);
+    tick();
+  }
+
   function handleJSON(txt, context = {}) {
-    if (isPassiveApiBlocked(context)) {
-      internalLog(`カスタムAPI優先中のため通常API処理をスキップ: useDate=${context.useDateOverride || getUrlUseDateYmd() || '不明'}`);
-      return;
-    }
-    if (isDuplicateJson(txt, context)) {
-      internalLog(`同一APIレスポンスの重複処理をスキップ: ${context.sourceLabel || '通常API'} / useDate=${context.useDateOverride || getUrlUseDateYmd() || '不明'}`);
-      return;
-    }
+    const receivedMs = nowMs();
     try {
       const json = JSON.parse(txt);
-      if (context.acquireEpoch === acquireEpoch && context.acquireRequestNo) {
-        latestAcquireResponse = Math.max(latestAcquireResponse, context.acquireRequestNo);
-      }
       const rows = [];
       let seq = 0;
       for (const [groupKey, group] of Object.entries(json.ecRoomStockInfos || {})) {
@@ -1448,6 +1631,18 @@
             });
           }
         }
+      }
+      recordHotelCsv(rows, context, receivedMs);
+      if (isPassiveApiBlocked(context)) {
+        internalLog(`カスタムAPI優先中のため通常API処理をスキップ: useDate=${context.useDateOverride || getUrlUseDateYmd() || '不明'}`);
+        return;
+      }
+      if (isDuplicateJson(txt, context)) {
+        internalLog(`同一APIレスポンスの重複処理をスキップ: ${context.sourceLabel || '通常API'} / useDate=${context.useDateOverride || getUrlUseDateYmd() || '不明'}`);
+        return;
+      }
+      if (context.acquireEpoch === acquireEpoch && context.acquireRequestNo) {
+        latestAcquireResponse = Math.max(latestAcquireResponse, context.acquireRequestNo);
       }
       return new Promise(resolve => win.setTimeout(() => {
         try {
@@ -1882,6 +2077,7 @@
   if (document.body) ensurePanels();
   else document.addEventListener('DOMContentLoaded', ensurePanels, { once: true });
   startPanelTicker();
+  startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.03');
+  internalLog('official DOM-order logger ready / rare room filter / v2.04');
 })();
