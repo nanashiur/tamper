@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.05
+// @version      2.06
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.05';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.06';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -45,6 +45,7 @@
   };
   const KEYS = {
     notify: 'datetime_stock_monitor_notify_enabled',
+    acquire: 'datetime_stock_monitor_acquire_enabled',
     rare: 'datetime_stock_monitor_rare_filter_enabled_v178',
     currentMode: 'datetime_stock_monitor_currentday_auto_mode_v178',
     nextMode: 'datetime_stock_monitor_nextday_auto_mode_v178',
@@ -121,7 +122,7 @@
   let csvPanel = null;
   let notifyPanel = null;
   let acquirePanel = null;
-  // Acquisition is deliberately OFF on every page load; never restore it from storage.
+  // Restore acquisition only within the same tab session.
   let acquireEnabled = false;
   let acquireEpoch = 0;
   let acquireRequestNo = 0;
@@ -137,14 +138,14 @@
   const apiAutoNextAt = { current: 0, next: 0 };
   const apiAutoNotBefore = { current: 0, next: 0 };
   const apiAutoDeferred = { current: null, next: null };
-  const discordQueue = [];
+  const discordQueues = { hotel: [], research: [] };
   const internalLogs = [];
   const NOTIFY_MODES = {
-    off: { label: 'OFF', icon: '🔕', key: '' },
-    hotel: { label: 'ホテル通知', icon: '🔔', key: 'hotel' },
+    off: { label: 'OFF（差分はホテル調査）', icon: '🔕', key: '' },
+    hotel: { label: 'ON（差分はホテル調査＋ホテル通知）', icon: '🔔', key: 'hotel' },
     research: { label: 'ホテル調査', icon: '📊', key: 'hotel_research_00' }
   };
-  const NOTIFY_MODE_ORDER = ['off', 'hotel', 'research'];
+  const NOTIFY_MODE_ORDER = ['off', 'hotel'];
   let notifyMode = 'off';
   let notifyEnabled = false;
   let rareFilterEnabled = false;
@@ -158,7 +159,7 @@
   let lastJsonKey = '';
   let lastJsonAt = 0;
   let webhookStatusLogged = false;
-  let discordSending = false;
+  const discordSending = { hotel: false, research: false };
   let consecutiveErrorCount = 0;
   let lastApiSuccessTime = '';
   let lastApiErrorTime = '';
@@ -491,8 +492,9 @@
       apiAutoMode[kind] = API_AUTO_MODES[saved] ? saved : 'manual';
     });
     const savedNotify = storage.get(KEYS.notify);
-    notifyMode = NOTIFY_MODES[savedNotify] ? savedNotify : savedNotify === '1' ? 'hotel' : 'off';
+    notifyMode = savedNotify === 'hotel' || savedNotify === '1' ? 'hotel' : 'off';
     notifyEnabled = notifyMode !== 'off';
+    try { acquireEnabled = win.sessionStorage.getItem(KEYS.acquire) === '1'; } catch { acquireEnabled = false; }
     rareFilterEnabled = storage.get(KEYS.rare) === '1';
   }
   function saveApiAutoState(kind) {
@@ -607,7 +609,7 @@
     if (!csvPanel || !document.body.contains(csvPanel)) {
       csvPanel = makePanel(IDS.csv, '2', '1', () => exportHotelCsv(false));
       csvPanel.textContent = '📥';
-      csvPanel.title = '本日・全タブのCSVを保存（時間外は差分）';
+      csvPanel.title = '本日・全タブの通常CSVを保存（差分）';
       Object.assign(csvPanel.style, { background: '#37474f', color: '#fff' });
     }
     Object.keys(API_KIND).forEach(kind => {
@@ -645,9 +647,9 @@
   function updateNotifyPanel() {
     if (!notifyPanel) return;
     Object.assign(notifyPanel.style, notifyEnabled ? {
-      background: notifyMode === 'research' ? '#2e7d32' : '#ffc107',
+      background: '#ffc107',
       color: '#fff',
-      borderColor: notifyMode === 'research' ? '#1b5e20' : '#ffb300',
+      borderColor: '#ffb300',
       opacity: '1'
     } : {
       background: '#111',
@@ -697,6 +699,9 @@
     acquirePanel.textContent = '👍️';
     acquirePanel.title = acquireEnabled ? '自動取得ON（最新APIの空室を取得）' : '自動取得OFF';
   }
+  function saveAcquireState() {
+    try { win.sessionStorage.setItem(KEYS.acquire, acquireEnabled ? '1' : '0'); } catch (error) { internalLog('自動取得状態を保存できません', 'warn'); }
+  }
   function toggleAcquire() {
     // An unfinished booking request must not be replaced by another room.
     if (!acquireEnabled && acquireCycle) {
@@ -704,6 +709,7 @@
       return;
     }
     acquireEnabled = !acquireEnabled;
+    saveAcquireState();
     acquireEpoch++;
     acquireErrorCount = 0;
     updateAcquirePanel();
@@ -711,6 +717,7 @@
   }
   function stopAcquire(reason) {
     acquireEnabled = false;
+    saveAcquireState();
     acquireEpoch++;
     updateAcquirePanel();
     internalLog('自動取得停止: ' + reason, 'warn');
@@ -863,7 +870,6 @@
     notifyMode = NOTIFY_MODE_ORDER[(NOTIFY_MODE_ORDER.indexOf(notifyMode) + 1) % NOTIFY_MODE_ORDER.length];
     notifyEnabled = notifyMode !== 'off';
     storage.set(KEYS.notify, notifyMode);
-    discordQueue.length = 0;
     updateNotifyPanel();
     internalLog(`Discord通知: ${NOTIFY_MODES[notifyMode].label}`);
     logWebhookStatus(true);
@@ -1156,7 +1162,7 @@
         ].filter(Boolean).join('\n')
       }],
       allowed_mentions: { parse: [] }
-    });
+    }, true);
   }
   async function runStockApiOnce(kind, reason = '手動') {
     const cfg = API_KIND[kind];
@@ -1416,13 +1422,14 @@
   }
   // IndexedDB append transactions are shared by tabs; console snapshots remain separate.
   const CSV_DB_NAME = 'tdr-hotel-list-csv-v1';
+  const CSV_AM11_DB_NAME = 'tdr-hotel-list-am11-csv-v1';
   const csvTabId = win.crypto?.randomUUID?.() || `${nowMs()}-${Math.random().toString(36).slice(2)}`;
   const csvBaselines = new Map();
   const csvAutoCompleted = new Set();
-  let csvDbPromise = null;
-  let csvWriteQueue = Promise.resolve();
+  const csvDbPromises = { normal: null, am11: null };
+  const csvWriteQueues = { normal: Promise.resolve(), am11: Promise.resolve() };
   let csvAutoTimer = 0;
-  let csvExportBusy = false;
+  const csvExportBusy = { normal: false, am11: false };
   let csvStorageWarned = false;
   function csvFailure(error) {
     internalLog(`CSV記録・保存失敗: ${error?.message || error}`, 'warn');
@@ -1442,13 +1449,13 @@
     // No same calendar day exists in the target month: do not guess a stay date.
     const targetYmd = target.getUTCDate() === day
       ? `${target.getUTCFullYear()}${pad(target.getUTCMonth() + 1)}${pad(day)}` : '';
-    return { dayKey, midnight, targetYmd, start: midnight + 39540 * 1000, end: midnight + 39780 * 1000,
+    return { dayKey, midnight, targetYmd, start: midnight + 39540 * 1000, end: midnight + 39900 * 1000,
       time: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}` };
   }
-  function openHotelCsvDb() {
-    if (!csvDbPromise) csvDbPromise = new Promise((resolve, reject) => {
+  function openHotelCsvDb(kind = 'normal') {
+    if (!csvDbPromises[kind]) csvDbPromises[kind] = new Promise((resolve, reject) => {
       if (!win.indexedDB) return reject(new Error('IndexedDB未対応'));
-      const request = win.indexedDB.open(CSV_DB_NAME, 1);
+      const request = win.indexedDB.open(kind === 'am11' ? CSV_AM11_DB_NAME : CSV_DB_NAME, 1);
       request.onupgradeneeded = () => {
         const db = request.result;
         db.createObjectStore('responses', { keyPath: 'id', autoIncrement: true }).createIndex('day', 'day');
@@ -1456,12 +1463,12 @@
       };
       request.onsuccess = () => {
         const db = request.result;
-        db.onversionchange = () => { db.close(); csvDbPromise = null; };
+        db.onversionchange = () => { db.close(); csvDbPromises[kind] = null; };
         resolve(db);
       };
       request.onerror = () => reject(request.error);
-    }).catch(error => { csvDbPromise = null; throw error; });
-    return csvDbPromise;
+    }).catch(error => { csvDbPromises[kind] = null; throw error; });
+    return csvDbPromises[kind];
   }
   function csvTransaction(db, stores, mode, action) {
     return new Promise((resolve, reject) => {
@@ -1472,6 +1479,13 @@
       tx.onerror = () => {}; // onabort reports the final transaction outcome.
       try { action(tx, value => { result = value; }); } catch (error) { tx.abort(); reject(error); }
     });
+  }
+  function appendHotelCsv(kind, record, onFailure = () => {}) {
+    const write = (async () => {
+      const db = await openHotelCsvDb(kind);
+      await csvTransaction(db, ['responses'], 'readwrite', tx => tx.objectStore('responses').add(record));
+    })().catch(error => { onFailure(); csvFailure(error); });
+    csvWriteQueues[kind] = Promise.all([csvWriteQueues[kind], write]).then(() => {});
   }
   function recordHotelCsv(inputRows, context, receivedMs) {
     try {
@@ -1500,21 +1514,13 @@
         if (!previous || previous.get(key) !== value) changed.push(row);
         next.set(key, value);
       });
-      const selected = full ? rows : changed;
+      const packRows = selected => selected.map(row => ({ hotelCd: row.hotelCd, hotelName: row.hotelName || row.hotelCd,
+        roomCd: row.roomCd, roomName: row.roomName, category: row.categoryLabel || '',
+        status: String(row.saleStatus), stock: row.remainStockNum, price: row.roomPriceTotal ?? '', rank: row.priceFrameID || '' }));
       const record = { day: day.dayKey, receivedMs, time: day.time, useDate, tabId: csvTabId,
-        source: context.sourceLabel || '通常API', rare: rare ? 'レア' : '全室', search: JSON.stringify(search),
-        mode: full ? '全室' : previous ? '差分' : '初回', am11: full && useDate === day.targetYmd,
-        elapsedSeconds: (receivedMs - (day.midnight + 39600 * 1000)) / 1000,
-        rows: selected.map(row => ({ hotelCd: row.hotelCd, hotelName: row.hotelName || row.hotelCd,
-          roomCd: row.roomCd, roomName: row.roomName, category: row.categoryLabel || '',
-          status: String(row.saleStatus), statusLabel: FULL_LABEL[row.saleStatus] || '未確認',
-          stock: row.remainStockNum, price: row.roomPriceTotal ?? '', rank: row.priceFrameID || '' })) };
-      if (!selected.length) return;
-      const write = (async () => {
-        const db = await openHotelCsvDb();
-        await csvTransaction(db, ['responses'], 'readwrite', tx => tx.objectStore('responses').add(record));
-      })().catch(error => { csvBaselines.delete(scope); csvFailure(error); });
-      csvWriteQueue = Promise.all([csvWriteQueue, write]).then(() => {});
+        source: context.sourceLabel || '通常API', rare: rare ? 'レア' : '全室', search: JSON.stringify(search) };
+      if (changed.length) appendHotelCsv('normal', { ...record, mode: previous ? '差分' : '初回', rows: packRows(changed) }, () => csvBaselines.delete(scope));
+      if (full && useDate === day.targetYmd) appendHotelCsv('am11', { ...record, mode: '全室', rows: packRows(rows) });
       csvBaselines.set(scope, next);
     } catch (error) { csvFailure(error); }
   }
@@ -1524,12 +1530,17 @@
     return `"${text.replace(/"/g, '""')}"`;
   }
   function buildHotelCsv(records) {
-    const lines = [['取得日', '応答受信時刻', '11時からの経過秒', '宿泊日', 'ホテルコード', 'ホテル名', 'カテゴリ',
-      '客室コード', '客室名', 'ステータスコード', 'ステータス', '残室数', '料金', '価格ランク', 'タブID', '応答ID', 'API', 'フィルター', '記録種別', '検索条件']];
+    const lines = [['取得日', '応答受信時刻', '宿泊日', 'ホテルコード', 'ホテル名', 'カテゴリ',
+      '客室コード', '客室名', 'ステータスコード', '残室数', '料金', '価格ランク', 'タブID', '応答ID', 'API', 'フィルター', '記録種別', '検索条件']];
+    const lastSearchByTab = new Map();
     records.sort((a, b) => a.receivedMs - b.receivedMs || a.id - b.id).forEach(record => {
-      record.rows.forEach(row => lines.push([record.day, record.time, record.elapsedSeconds, record.useDate,
-        row.hotelCd, row.hotelName, row.category, row.roomCd, row.roomName, row.status, row.statusLabel, row.stock,
-        row.price, row.rank, record.tabId, record.id, record.source, record.rare, record.mode, record.search]));
+      record.rows.forEach(row => {
+        const search = lastSearchByTab.get(record.tabId) === record.search ? '' : record.search;
+        lastSearchByTab.set(record.tabId, record.search);
+        lines.push([record.day, record.time, record.useDate, row.hotelCd, row.hotelName, row.category,
+          row.roomCd, row.roomName, row.status, row.stock, row.price, row.rank, record.tabId, record.id,
+          record.source, record.rare, record.mode, search]);
+      });
     });
     return '\uFEFF' + lines.map(line => line.map(csvCell).join(',')).join('\r\n') + '\r\n';
   }
@@ -1546,17 +1557,17 @@
     }
   }
   async function exportHotelCsv(automatic, dayKey = csvDayInfo(nowMs()).dayKey) {
-    if (csvExportBusy || (automatic && csvAutoCompleted.has(dayKey))) return;
-    csvExportBusy = true;
+    const kind = automatic ? 'am11' : 'normal';
+    if (csvExportBusy[kind] || (automatic && csvAutoCompleted.has(dayKey))) return;
+    csvExportBusy[kind] = true;
     let db, claimed = false;
     try {
-      await csvWriteQueue;
-      db = await openHotelCsvDb();
+      await csvWriteQueues[kind];
+      db = await openHotelCsvDb(kind);
       let records = await csvTransaction(db, ['responses'], 'readonly', (tx, done) => {
         const request = tx.objectStore('responses').index('day').getAll(dayKey);
         request.onsuccess = () => done(request.result);
       });
-      if (automatic) records = records.filter(record => record.am11);
       if (!records.length) {
         if (!automatic) showPopup('本日のCSVデータなし', '#37474f');
         return;
@@ -1574,7 +1585,8 @@
         });
         if (!claimed) return;
       }
-      const filename = automatic ? `${dayKey}_AM11_hotel.csv` : `${dayKey}_hotel.csv`;
+      const saveTime = csvDayInfo(nowMs()).time.slice(0, 8).replace(/:/g, '');
+      const filename = automatic ? `${dayKey}_110500_hotel_AM11.csv` : `${dayKey}_${saveTime}_hotel.csv`;
       downloadHotelCsv(buildHotelCsv(records), filename);
       if (automatic) await csvTransaction(db, ['exports'], 'readwrite', tx => {
         tx.objectStore('exports').put({ day: dayKey, owner: csvTabId, done: true });
@@ -1584,13 +1596,14 @@
     } catch (error) {
       if (claimed && db) await csvTransaction(db, ['exports'], 'readwrite', tx => tx.objectStore('exports').delete(dayKey)).catch(() => {});
       csvFailure(error);
-    } finally { csvExportBusy = false; }
+    } finally { csvExportBusy[kind] = false; }
   }
   function startHotelCsvAutoSave() {
-    openHotelCsvDb().catch(csvFailure);
+    openHotelCsvDb('normal').catch(csvFailure);
+    openHotelCsvDb('am11').catch(csvFailure);
     const tick = () => {
       const ms = nowMs(), day = csvDayInfo(ms);
-      // Let writes from other tabs at the 11:03 boundary settle before taking the snapshot.
+      // Let writes from other tabs at the 11:05 boundary settle before taking the snapshot.
       if (ms >= day.end + 2000) exportHotelCsv(true, day.dayKey);
       const delay = ms < day.end + 2000 ? Math.min(60000, day.end + 2000 - ms) : 60000;
       csvAutoTimer = win.setTimeout(tick, delay);
@@ -1663,27 +1676,29 @@
   }
   function logWebhookStatus(force = false) {
     if (webhookStatusLogged && !force) return;
-    const webhookUrl = getDiscordWebhookUrl();
-    if (!webhookUrl && notifyEnabled) {
-      internalLog(`Discord Webhook未読込: ${NOTIFY_MODES[notifyMode].label} の設定が見つかりません`, 'warn');
+    for (const mode of ['research', 'hotel']) {
+      if (!getDiscordWebhookUrl(mode)) internalLog(`Discord Webhook未読込: ${mode === 'hotel' ? 'ホテル通知' : 'ホテル調査'}`, 'warn');
     }
     webhookStatusLogged = true;
   }
-  function enqueueDiscord(payload) {
-    if (!notifyEnabled) return;
-    discordQueue.push({ payload, mode: notifyMode });
-    processDiscordQueue();
+  function enqueueDiscord(payload, important = false) {
+    const destinations = important ? ['hotel'] : notifyEnabled ? ['research', 'hotel'] : ['research'];
+    destinations.forEach(mode => {
+      discordQueues[mode].push({ payload, mode });
+      processDiscordQueue(mode);
+    });
   }
-  async function processDiscordQueue() {
-    if (discordSending || !notifyEnabled || !discordQueue.length) return;
+  async function processDiscordQueue(mode) {
+    const discordQueue = discordQueues[mode];
+    if (discordSending[mode] || !discordQueue.length) return;
     const item = discordQueue[0];
     const webhookUrl = getDiscordWebhookUrl(item.mode);
     if (!webhookUrl) {
       internalLog(`Discord Webhook未設定: ${NOTIFY_MODES[item.mode].label} の設定を確認してください`, 'warn');
-      win.setTimeout(processDiscordQueue, 3000);
+      win.setTimeout(() => processDiscordQueue(mode), 3000);
       return;
     }
-    discordSending = true;
+    discordSending[mode] = true;
     try {
       const res = await win.fetch(webhookUrl, {
         method: 'POST',
@@ -1697,8 +1712,8 @@
           if (Number.isFinite(Number(data.retry_after))) retryMs = Math.ceil(Number(data.retry_after) * 1000);
         } catch {}
         internalLog(`Discord rate limit: ${retryMs}ms待機`, 'warn');
-        discordSending = false;
-        win.setTimeout(processDiscordQueue, retryMs);
+        discordSending[mode] = false;
+        win.setTimeout(() => processDiscordQueue(mode), retryMs);
         return;
       }
       if (res.ok) internalLog('Discord通知送信完了');
@@ -1708,8 +1723,8 @@
       internalLog(`Discord通知エラー: ${e?.message || e}`, 'warn');
       if (discordQueue[0] === item) discordQueue.shift();
     }
-    discordSending = false;
-    win.setTimeout(processDiscordQueue, 300);
+    discordSending[mode] = false;
+    win.setTimeout(() => processDiscordQueue(mode), 300);
   }
   function getUseDateText() {
     const raw = getActiveUseDateYmd();
@@ -1897,7 +1912,7 @@
       return { status: 'none', message: '差分なし', changes: [], changedKeys: new Set() };
     }
     const changedKeys = changedKeySet(changes);
-    if (notifyEnabled) sendDiscordDiff(changes);
+    sendDiscordDiff(changes);
     return { status: 'changed', message: `差分あり: ${changes.length}件`, changes, changedKeys };
   }
   function logDiffSummary(diffResult, sourceName, useDateText, filterLabel, option = {}) {
@@ -1917,7 +1932,7 @@
         console.log(`%c${line}`, style);
       });
       if (!notifyEnabled && !option.compact) {
-        console.info('Discord通知OFFのため送信しません');
+        console.info('差分はホテル調査へ送信');
       }
     } else if (diffResult.status === 'none') {
       if (!option.compact) console.info('差分なし');
@@ -2080,5 +2095,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.05');
+  internalLog('official DOM-order logger ready / rare room filter / v2.06');
 })();
