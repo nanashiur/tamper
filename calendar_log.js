@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📅 客室指定在庫モニター
-// @version      5.29
+// @version      5.30
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -33,7 +33,7 @@
 
   const MODE_CONF = {
     0: { txt: '👆', bg: '#000', fg: '#fff' },
-    1: { txt: '🏃‍♀️', bg: 'pink', fg: '#000' },
+    1: { txt: '🏃‍♀️', bg: 'orange', fg: '#000' },
     2: { txt: '🚶', bg: 'blue', fg: '#fff' },
     3: { txt: '👍', bg: 'red', fg: '#fff' }
   };
@@ -598,6 +598,11 @@
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
   let notifyEnabled = load('notify', false);
   let longTimer = null;
+  let nextSearchAt = null;
+  let pendingSearchDelay = null;
+  let loadingStartedAt = null;
+  let runtimeDisplayTimer = null;
+  const loadingRequests = new Set();
 
   const initMonthClick = () => {
     const isSP = !!document.querySelector('.boxCalendar.month table');
@@ -629,8 +634,7 @@
 
   const resetModeRuntime = () => {
     hidePopup();
-    clearTimeout(longTimer);
-    longTimer = null;
+    clearSearchWait();
     consecutiveErrorCount = 0;
     fatalErrorCount = 0;
     autoVacancyDateClicked = false;
@@ -654,18 +658,85 @@
   const btnSearchMode = makeBtn(MODE_CONF[2].txt, MODE_CONF[2].bg, MODE_CONF[2].fg);
   const btnAutoGet = makeBtn(MODE_CONF[3].txt, MODE_CONF[3].bg, MODE_CONF[3].fg);
 
-  const updateModes = () => {
+  const renderRuntime = () => {
+    const buttons = [btnManual, btnSearchMode, btnAutoGet];
+    const configs = [MODE_CONF[0], MODE_CONF[mode === 1 ? 1 : 2], MODE_CONF[3]];
+    buttons.forEach((btn, i) => {
+      btn.textContent = configs[i].txt;
+      btn.style.setProperty('background-color', configs[i].bg, 'important');
+      btn.style.setProperty('color', configs[i].fg, 'important');
+      btn.style.fontSize = '14px';
+      btn.title = '';
+    });
     btnManual.style.opacity = mode === 0 ? '1' : '0.3';
     btnAutoGet.style.opacity = mode === 3 ? '1' : '0.3';
-
-    const searchMode = mode === 1 ? 1 : 2;
-    const conf = MODE_CONF[searchMode];
-
-    btnSearchMode.textContent = conf.txt;
-    btnSearchMode.style.setProperty('background-color', conf.bg, 'important');
-    btnSearchMode.style.setProperty('color', conf.fg, 'important');
     btnSearchMode.style.opacity = (mode === 1 || mode === 2) ? '1' : '0.3';
 
+    const loading = loadingRequests.size > 0;
+    if (loading || nextSearchAt !== null) {
+      const btn = mode === 0 ? btnManual : mode === 3 ? btnAutoGet : btnSearchMode;
+      const seconds = loading
+        ? Math.floor((Date.now() - loadingStartedAt) / 1000)
+        : Math.max(0, Math.ceil((nextSearchAt - Date.now()) / 1000));
+      btn.textContent = String(seconds);
+      btn.style.fontSize = `${Math.min(14, Number(btn.dataset.counterWidth) / (String(seconds).length * 0.65))}px`;
+      btn.title = `${loading ? '読み込み中' : '次回読み込みまで'}：${seconds}秒`;
+      if (loading) {
+        btn.style.setProperty('background-color', 'purple', 'important');
+        btn.style.setProperty('color', '#fff', 'important');
+      }
+    }
+
+    if (!loading && nextSearchAt === null) {
+      clearInterval(runtimeDisplayTimer);
+      runtimeDisplayTimer = null;
+    } else if (runtimeDisplayTimer === null) {
+      runtimeDisplayTimer = setInterval(renderRuntime, 200);
+    }
+  };
+
+  const clearSearchWait = () => {
+    clearTimeout(longTimer);
+    longTimer = null;
+    nextSearchAt = null;
+    pendingSearchDelay = null;
+    renderRuntime();
+  };
+
+  const scheduleSearch = delay => {
+    clearSearchWait();
+    // 通信とログ処理がすべて終わってから、待機時間を数え始める。
+    if (loadingRequests.size > 0) {
+      pendingSearchDelay = delay;
+      return;
+    }
+    nextSearchAt = Date.now() + delay;
+    longTimer = setTimeout(triggerSearch, delay);
+    renderRuntime();
+  };
+
+  const beginLoading = () => {
+    clearSearchWait();
+    const token = {};
+    if (loadingRequests.size === 0) loadingStartedAt = Date.now();
+    loadingRequests.add(token);
+    renderRuntime();
+    return () => {
+      if (!loadingRequests.delete(token)) return;
+      if (loadingRequests.size === 0) {
+        loadingStartedAt = null;
+        if (pendingSearchDelay !== null) {
+          const delay = pendingSearchDelay;
+          pendingSearchDelay = null;
+          scheduleSearch(delay);
+        }
+      }
+      renderRuntime();
+    };
+  };
+
+  const updateModes = () => {
+    renderRuntime();
     save('mode', mode);
   };
 
@@ -743,6 +814,19 @@
   panel.append(row1, row2);
   document.body.appendChild(panel);
 
+  // 元のボタン幅を固定し、秒数表示でパネルを広げない。
+  [btnManual, btnSearchMode, btnAutoGet].forEach(btn => {
+    const width = btn.getBoundingClientRect().width;
+    btn.dataset.counterWidth = String(Math.max(1, width - 12));
+    btn.style.boxSizing = 'border-box';
+    btn.style.width = `${width}px`;
+    btn.style.minWidth = `${width}px`;
+    btn.style.flex = '0 0 auto';
+    btn.style.height = `${btn.getBoundingClientRect().height}px`;
+    btn.style.whiteSpace = 'nowrap';
+    btn.style.overflow = 'hidden';
+  });
+
   updateModes();
   updateNotify();
   initMonthClick();
@@ -771,8 +855,8 @@
   }
 
   const triggerSearch = () => {
-    clearTimeout(longTimer);
-    longTimer = null;
+    clearSearchWait();
+    if (loadingRequests.size > 0) return;
 
     const now = new Date();
     const h = now.getHours();
@@ -784,7 +868,7 @@
       if (h === 4 && m === 59) interval = 1000;
       else if (h === 4 && m >= 55) interval = 10000;
 
-      longTimer = setTimeout(triggerSearch, interval);
+      scheduleSearch(interval);
       return;
     }
 
@@ -832,6 +916,7 @@
     const orig_ajax = window.$.lifeobs.ajax;
 
     window.$.lifeobs.ajax = function (opt) {
+      let finishLoading = () => {};
       if (opt.url && opt.url.includes('/hotel/api/queryHotelPriceStock/')) {
         let p_ym = '';
         let p_hotel = '';
@@ -876,18 +961,23 @@
         const requestYm = p_ym && p_ym.length >= 6 ? p_ym.slice(0, 6) : '';
 
         const ok = opt.success;
+        finishLoading = beginLoading();
 
         opt.success = resp => {
           consecutiveErrorCount = 0;
           fatalErrorCount = 0;
 
-          ok?.(resp);
-          initMonthClick();
+          try {
+            ok?.(resp);
+            initMonthClick();
+          } catch (error) {
+            finishLoading();
+            throw error;
+          }
 
           logStock(resp, contextKey, requestYm).then(foundVacancies => {
             if (mode === 3 && foundVacancies.length > 0) {
-              clearTimeout(longTimer);
-              longTimer = null;
+              clearSearchWait();
 
               mode = 0;
               updateModes();
@@ -899,17 +989,17 @@
             showPopup(getClockStr(), 'rgba(0, 102, 204, 0.9)');
 
             if (mode === 1) {
-              triggerSearch();
+              scheduleSearch(0);
             } else if (mode === 2) {
-              const randomInterval = Math.floor(Math.random() * (660001 - 540000)) + 540000;
-              longTimer = setTimeout(triggerSearch, randomInterval);
+              const randomInterval = Math.floor(Math.random() * (360001 - 240000)) + 240000;
+              scheduleSearch(randomInterval);
             } else if (mode === 3) {
-              triggerSearch();
+              scheduleSearch(0);
             }
-          });
+          }).catch(error => console.error('在庫ログ処理エラー', error)).finally(finishLoading);
         };
 
-        opt.error = function (k) {
+        const onStockError = function (k) {
           consecutiveErrorCount++;
 
           if (window.RecentDaysPriceStockQuery?.prototype?.afterSystemErrorOccurred) {
@@ -946,7 +1036,7 @@
               mode = 0;
               updateModes();
               showPopup(`🛑バーストブロック検知 ${getClockStr()}`, bgRed);
-              clearTimeout(longTimer);
+              clearSearchWait();
               return;
             }
 
@@ -957,8 +1047,7 @@
             showPopup(`⚠️${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgYellow, txtBlack);
 
             if (mode !== 0) {
-              clearTimeout(longTimer);
-              longTimer = setTimeout(triggerSearch, 1500);
+              scheduleSearch(1500);
             }
           } else {
             if (isStop) {
@@ -968,29 +1057,40 @@
                 mode = 0;
                 updateModes();
                 showPopup(`🛑${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgRed);
-                clearTimeout(longTimer);
+                clearSearchWait();
               }
             } else if (isCooldown) {
               handleFatalError(k, targetInfoStr, msg);
 
               if (mode !== 0) {
                 showPopup(`🚫${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgRed);
-                clearTimeout(longTimer);
-                longTimer = setTimeout(triggerSearch, waitTime);
+                scheduleSearch(waitTime);
               }
             } else {
               showPopup(`⚠️${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgYellow, txtBlack);
 
               if (mode !== 0) {
-                clearTimeout(longTimer);
-                longTimer = setTimeout(triggerSearch, 3000);
+                scheduleSearch(3000);
               }
             }
           }
         };
+
+        opt.error = function (k) {
+          try {
+            return onStockError(k);
+          } finally {
+            finishLoading();
+          }
+        };
       }
 
-      return orig_ajax(opt);
+      try {
+        return orig_ajax(opt);
+      } catch (error) {
+        finishLoading();
+        throw error;
+      }
     };
   }
 
@@ -1002,8 +1102,11 @@
     const targetUseDate = getTargetUseDate();
 
     const pendingNotifications = [];
-
-    console.group(tStrMs());
+    const logTime = tStrMs();
+    const logYm = /^\d{6}$/.test(requestYm) ? requestYm : getDisplayedYearMonthRaw();
+    const shortYm = /^\d{6}$/.test(logYm) ? `${logYm.slice(2, 4)}/${logYm.slice(4, 6)}` : '年月不明';
+    const logRows = [];
+    let hasChanges = false;
 
     for (const g of Object.values(infos)) {
       for (const r of Object.values(g.roomStockInfos ?? {})) {
@@ -1065,17 +1168,25 @@
               }
             }
 
-            lastStateMap.set(stateKey, { st, rm });
+            const changed = prev === undefined || prev.st !== st || prev.rm !== rm || prev.priceRank !== priceRank;
+            if (changed) hasChanges = true;
+            lastStateMap.set(stateKey, { st, rm, priceRank });
 
-            if (filters[st]) {
-              console.log(`%c${dt}%c\t%c${LABEL[st]} ${rm} ${priceRank}`, '', '', STYLE[st]);
+            if (filters[st] && (isFirstTime || changed)) {
+              logRows.push([`%c${dt}%c\t%c${LABEL[st]} ${rm} ${priceRank}`, '', '', STYLE[st]]);
             }
           }
         }
       }
     }
 
-    console.groupEnd();
+    if (isFirstTime || hasChanges) {
+      console.group(logTime);
+      logRows.forEach(row => console.log(...row));
+      console.groupEnd();
+    } else {
+      console.log(`▶${logTime} ${shortYm} 差分なし`);
+    }
     loadedKeys.add(contextKey);
 
     if (pendingNotifications.length > 0) {
