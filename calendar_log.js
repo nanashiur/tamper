@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📅 客室指定在庫モニター
-// @version      5.31
+// @version      5.32
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -604,6 +604,16 @@
 
   const lastStateMap = new Map();
   const loadedKeys = new Set();
+  let lastLoggedContextKey = null;
+  let automaticSearchPending = false;
+  let dispatchingAutomaticSearch = false;
+
+  // 自動モード中でも、利用者による月変更・再読込は全件ログにする。
+  document.addEventListener('change', event => {
+    if (event.target?.id === 'boxCalendarSelect' && !dispatchingAutomaticSearch) {
+      automaticSearchPending = false;
+    }
+  }, true);
 
   let consecutiveErrorCount = 0;
   let fatalErrorCount = 0;
@@ -648,6 +658,7 @@
 
   const resetModeRuntime = () => {
     hidePopup();
+    automaticSearchPending = false;
     clearSearchWait();
     consecutiveErrorCount = 0;
     fatalErrorCount = 0;
@@ -729,7 +740,7 @@
     }
     // サイトのdate.jsによるDate.now()の上書きに影響されない数値を使う。
     nextSearchAt = new Date().getTime() + delay;
-    longTimer = setTimeout(triggerSearch, delay);
+    longTimer = setTimeout(() => triggerSearch(true), delay);
     renderRuntime();
   };
 
@@ -872,7 +883,7 @@
     }
   }
 
-  const triggerSearch = () => {
+  const triggerSearch = (automatic = false) => {
     clearSearchWait();
     if (loadingRequests.size > 0) return;
 
@@ -892,7 +903,13 @@
 
     const sel = document.getElementById('boxCalendarSelect');
     if (sel && !document.querySelector('span.calLoad')) {
-      sel.dispatchEvent(new Event('change'));
+      automaticSearchPending = automatic;
+      dispatchingAutomaticSearch = automatic;
+      try {
+        sel.dispatchEvent(new Event('change'));
+      } finally {
+        dispatchingAutomaticSearch = false;
+      }
     }
   };
 
@@ -977,6 +994,9 @@
         const targetInfoStr = `[${yearMonthStr} ${hotelStr} ${roomStr}]`.trim().replace(/ +/g, ' ');
         const contextKey = `${p_hotel || 'default'}_${p_ym || 'now'}`;
         const requestYm = p_ym && p_ym.length >= 6 ? p_ym.slice(0, 6) : '';
+        // 通信開始時に確定し、応答までのモード変更に左右されないようにする。
+        const forceFullLog = !automaticSearchPending || mode === 0;
+        automaticSearchPending = false;
 
         const ok = opt.success;
         finishLoading = beginLoading();
@@ -993,7 +1013,7 @@
             throw error;
           }
 
-          logStock(resp, contextKey, requestYm).then(foundVacancies => {
+          logStock(resp, contextKey, requestYm, forceFullLog).then(foundVacancies => {
             if (mode === 3 && foundVacancies.length > 0) {
               clearSearchWait();
 
@@ -1112,9 +1132,10 @@
     };
   }
 
-  async function logStock(resp, contextKey, requestYm = '') {
+  async function logStock(resp, contextKey, requestYm = '', forceFullLog = false) {
     const infos = resp.ecRoomStockInfos ?? {};
     const isFirstTime = !loadedKeys.has(contextKey);
+    const showAll = forceFullLog || isFirstTime || contextKey !== lastLoggedContextKey;
     const foundVacancies = [];
     const nowObj = new Date();
     const targetUseDate = getTargetUseDate();
@@ -1190,7 +1211,7 @@
             if (changed) hasChanges = true;
             lastStateMap.set(stateKey, { st, rm, priceRank });
 
-            if (filters[st] && (isFirstTime || changed)) {
+            if (filters[st] && (showAll || changed)) {
               logRows.push([`%c${dt}%c\t%c${LABEL[st]} ${rm} ${priceRank}`, '', '', STYLE[st]]);
             }
           }
@@ -1198,7 +1219,7 @@
       }
     }
 
-    if (isFirstTime || hasChanges) {
+    if (showAll || hasChanges) {
       if (!isFirstTime && hasChanges) {
         console.group(`%c${logTime}`, 'background:gray;color:white;padding:1px 4px;border-radius:2px;');
       } else {
@@ -1210,6 +1231,7 @@
       console.log(`▶${logTime} ${shortYm} 差分なし`);
     }
     loadedKeys.add(contextKey);
+    lastLoggedContextKey = contextKey;
 
     if (pendingNotifications.length > 0) {
       for (const item of pendingNotifications) {
