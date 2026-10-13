@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📅 客室指定在庫モニター
-// @version      5.30
+// @version      5.31
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -166,6 +166,20 @@
     if (m) return `${m[1]}${pad(m[2])}`;
 
     return '';
+  };
+
+  // 表示月だけのサイトログを抑制し、在庫ログや警告・エラーは残す。
+  const originalConsoleLog = console.log;
+  console.log = function (...args) {
+    let text = '';
+    if (args.length === 1 && typeof args[0] === 'string') {
+      text = args[0];
+    } else if (args.length === 2 && args.every(v => typeof v === 'string' || typeof v === 'number')) {
+      text = args.join(',');
+    }
+    const match = text.match(/^\s*(\d{4})\s*[,\.]\s*(0?[1-9]|1[0-2])\s*$/);
+    if (match && `${match[1]}${pad(match[2])}` === getDisplayedYearMonthRaw()) return;
+    return originalConsoleLog.apply(console, args);
   };
 
   const isClickableVacancyDate = (dtRaw, baseYm = '') => {
@@ -664,6 +678,7 @@
     buttons.forEach((btn, i) => {
       btn.textContent = configs[i].txt;
       btn.style.setProperty('background-color', configs[i].bg, 'important');
+      btn.style.setProperty('background-image', 'none', 'important');
       btn.style.setProperty('color', configs[i].fg, 'important');
       btn.style.fontSize = '14px';
       btn.title = '';
@@ -676,13 +691,14 @@
     if (loading || nextSearchAt !== null) {
       const btn = mode === 0 ? btnManual : mode === 3 ? btnAutoGet : btnSearchMode;
       const seconds = loading
-        ? Math.floor((Date.now() - loadingStartedAt) / 1000)
-        : Math.max(0, Math.ceil((nextSearchAt - Date.now()) / 1000));
-      btn.textContent = String(seconds);
-      btn.style.fontSize = `${Math.min(14, Number(btn.dataset.counterWidth) / (String(seconds).length * 0.65))}px`;
-      btn.title = `${loading ? '読み込み中' : '次回読み込みまで'}：${seconds}秒`;
+        ? Math.max(0, Math.floor((new Date().getTime() - loadingStartedAt) / 1000))
+        : Math.max(0, Math.ceil((nextSearchAt - new Date().getTime()) / 1000));
+      const secondsText = Number.isFinite(seconds) ? String(seconds) : '--';
+      btn.textContent = secondsText;
+      btn.style.fontSize = `${Math.min(14, Number(btn.dataset.counterWidth) / (secondsText.length * 0.65))}px`;
+      btn.title = `${loading ? '読み込み中' : '次回読み込みまで'}：${secondsText}秒`;
       if (loading) {
-        btn.style.setProperty('background-color', 'purple', 'important');
+        btn.style.setProperty('background-image', 'linear-gradient(to right, transparent 33.333333%, purple 33.333333%)', 'important');
         btn.style.setProperty('color', '#fff', 'important');
       }
     }
@@ -705,12 +721,14 @@
 
   const scheduleSearch = delay => {
     clearSearchWait();
+    if (!Number.isFinite(delay) || delay < 0) return;
     // 通信とログ処理がすべて終わってから、待機時間を数え始める。
     if (loadingRequests.size > 0) {
       pendingSearchDelay = delay;
       return;
     }
-    nextSearchAt = Date.now() + delay;
+    // サイトのdate.jsによるDate.now()の上書きに影響されない数値を使う。
+    nextSearchAt = new Date().getTime() + delay;
     longTimer = setTimeout(triggerSearch, delay);
     renderRuntime();
   };
@@ -718,7 +736,7 @@
   const beginLoading = () => {
     clearSearchWait();
     const token = {};
-    if (loadingRequests.size === 0) loadingStartedAt = Date.now();
+    if (loadingRequests.size === 0) loadingStartedAt = new Date().getTime();
     loadingRequests.add(token);
     renderRuntime();
     return () => {
@@ -1181,7 +1199,11 @@
     }
 
     if (isFirstTime || hasChanges) {
-      console.group(logTime);
+      if (!isFirstTime && hasChanges) {
+        console.group(`%c${logTime}`, 'background:gray;color:white;padding:1px 4px;border-radius:2px;');
+      } else {
+        console.group(logTime);
+      }
       logRows.forEach(row => console.log(...row));
       console.groupEnd();
     } else {
