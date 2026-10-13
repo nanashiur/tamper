@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.51
+// @version      5.52
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -1617,6 +1617,7 @@
     if (!blocks.has(meal)) return;
     const s = getState(meal);
     if (s.pending || isMaintenance()) return;
+    // 強制停止中も手動読込を許可し、正常応答を確認してから停止を解除する。
     fireSameWeek(meal, true, '');
   }
   function toggleNotify() {
@@ -1815,13 +1816,21 @@
     return stopped;
   }
   function resetErrors(meal) {
-    const s = getState(meal);
-    if (s.consecutiveErrors) console.log(`[${NAME}] ${meal} 正常読込 / 連続エラー ${s.consecutiveErrors} → 0`);
-    s.consecutiveErrors = 0;
-    s.error403 = false;
-    s.pendingError = false;
-    s.retryError = false;
-    s.lastError = '';
+    clearForceStopReload();
+    forceStopIncident = { startedAt: 0, marketChanged: false, am9EmergencyHandled: false };
+    mealStates.forEach((s, targetMeal) => {
+      const wasStopped = s.forcedStopError;
+      if (s.consecutiveErrors || wasStopped)
+        console.log(`[${NAME}] ${meal} 正常読込 / ${targetMeal} 連続エラー ${s.consecutiveErrors} → 0 / 強制停止解除`);
+      s.consecutiveErrors = 0;
+      s.forcedStopError = false;
+      s.error403 = false;
+      s.pendingError = false;
+      s.retryError = false;
+      s.lastError = '';
+      // 正常応答した区分はfinishRequestで再予約する。通信中・OFF・AM9管理中は再開を待つ。
+      if (wasStopped && targetMeal !== meal && !s.pending && autoActive(s)) schedule(targetMeal);
+    });
   }
   function currentSearchRange(meal) {
     const block = blocks.get(meal);
@@ -2938,5 +2947,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.51 起動`);
+  console.log(`[${NAME}] v5.52 起動`);
 })();
