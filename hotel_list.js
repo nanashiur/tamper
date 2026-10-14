@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.06
-// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
+// @version      2.07
+// @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @run-at       document-start
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.06';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.07';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -325,9 +325,8 @@
   function isTargetSpHotelList() {
     try {
       const u = new URL(location.href);
-      return u.hostname === 'reserve.tokyodisneyresort.jp' &&
-        u.pathname === '/sp/hotel/list/' &&
-        !!u.searchParams.get('useDate');
+      return u.protocol === 'https:' && u.hostname === 'reserve.tokyodisneyresort.jp' &&
+        u.pathname.startsWith('/sp/hotel/list/');
     } catch {
       return false;
     }
@@ -1923,7 +1922,8 @@
     const groupFn = diffResult.status === 'changed'
       ? console.group.bind(console)
       : console.groupCollapsed.bind(console);
-    groupFn(option.compact ? `${option.apiReceivedAt} / ${useDateText} / ${filterLabel} / ${title}` : title);
+    const compactTitle = `${filterLabel}差分${diffResult.status === 'changed' ? `${diffResult.changes.length}件` : 'なし'}`;
+    groupFn(option.compact ? `${option.apiReceivedAt} / ${useDateText} / ${compactTitle}` : title);
     if (diffResult.status === 'changed') {
       diffResult.changes.forEach(change => {
         const base = change.now || change.old;
@@ -2082,7 +2082,7 @@
     }
   }
   if (!isTargetSpHotelList()) {
-    console.info('対象外ページのため停止: SPホテル一覧 useDate 付きのみ');
+    console.info('対象外ページのため停止: SPホテル一覧のみ');
     return;
   }
   patchXHR();
@@ -2095,5 +2095,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.06');
+  internalLog('official DOM-order logger ready / rare room filter / v2.07');
 })();
