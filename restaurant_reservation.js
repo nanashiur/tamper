@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🕙️レストラン予約
-// @version      0.17
+// @version      0.18
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/?nameCd=*
@@ -72,6 +72,9 @@
     #${PANEL_ID} .actions{display:flex;gap:6px;margin-top:8px}
     #${PANEL_ID} .book{flex:1;background:#c5a641;color:#fff;font-weight:bold}
     #${PANEL_ID} .status{font-size:12px;margin-top:4px}
+    #${PANEL_ID} .auto-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+    #${PANEL_ID} .auto-toggle{flex:none;white-space:nowrap}
+    #${PANEL_ID} .auto-row .status{margin:0;min-width:0}
   `;
   document.head.append(style);
   const panel = document.createElement('section');
@@ -111,17 +114,19 @@
   status.className = 'status';
   status.setAttribute('role', 'status');
   actions.append(book);
-  const autoLabel = document.createElement('label');
-  const autoEnabled = document.createElement('input');
-  autoEnabled.type = 'checkbox';
-  autoEnabled.checked = !autoDone;
+  const autoRow = document.createElement('div');
+  autoRow.className = 'auto-row';
+  const autoEnabled = document.createElement('button');
+  autoEnabled.type = 'button';
+  autoEnabled.className = 'auto-toggle';
+  let autoArmed = !autoDone;
   autoEnabled.disabled = autoDone;
   autoEnabled.setAttribute('aria-label', '10:00の自動実行');
   autoEnabled.title = '10:00の自動実行 ON/OFF';
-  autoLabel.append(autoEnabled);
   const autoStatus = document.createElement('div');
   autoStatus.className = 'status';
-  panel.append(tabs, values, autoLabel, autoStatus, actions, status);
+  autoRow.append(autoEnabled, autoStatus);
+  panel.append(tabs, values, autoRow, actions, status);
   document.body.append(panel);
 
   function ready(target) {
@@ -147,8 +152,10 @@
       !target.openNumKey && target.time && target.commodityCD ? 'KEY未設定：対象日の予約ボタンから確認してください。' :
       !ready(target) ? '未設定のセットです。' : !available ? '予約画面の読み込み待ち' : '';
     const remainingMs = scheduledAt - nowMs();
-    autoStatus.hidden = !autoDone && autoEnabled.checked && remainingMs > 10 * 60 * 1000;
-    autoStatus.textContent = autoDone ? autoMessage : !autoEnabled.checked ? '自動実行OFF' :
+    autoEnabled.textContent = autoArmed ? '自動実行 ON' : '自動実行 OFF';
+    autoEnabled.setAttribute('aria-pressed', String(autoArmed));
+    autoStatus.hidden = !autoDone && (!autoArmed || remainingMs > 10 * 60 * 1000);
+    autoStatus.textContent = autoDone ? autoMessage :
       autoStatus.hidden ? '' :
       `${targetLabel(target)}：10:00まで ${Math.max(0, Math.ceil(remainingMs / 1000))}秒`;
   }
@@ -233,7 +240,7 @@
     if (book.disabled) return;
     autoDone = true;
     autoEnabled.disabled = true;
-    autoEnabled.checked = false;
+    autoArmed = false;
     autoMessage = '手動実行のため自動実行は終了';
     submitSelected();
   });
@@ -246,8 +253,8 @@
       return;
     }
     autoDone = true;
-    const enabled = autoEnabled.checked;
-    autoEnabled.checked = false;
+    const enabled = autoArmed;
+    autoArmed = false;
     autoEnabled.disabled = true;
     if (!enabled) autoMessage = '自動実行OFFのため未実行';
     else if (remaining < -1000) autoMessage = '10:00から1秒超の遅延のため未実行';
@@ -257,7 +264,11 @@
     }
     render();
   }
-  autoEnabled.addEventListener('change', render);
+  autoEnabled.addEventListener('click', () => {
+    if (autoDone || autoEnabled.disabled) return;
+    autoArmed = !autoArmed;
+    render();
+  });
   render();
   checkAuto();
   window.setInterval(render, 1000);
