@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴レストラン予約
-// @version      0.11
+// @version      0.12
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/*
@@ -136,8 +136,11 @@
     status.textContent = busy ? '入力画面へ移動中…' : oldWrapper ? '旧テストスクリプトを無効にして再読み込みしてください。' :
       !target.openNumKey && target.time && target.commodityCD ? 'KEY未設定：対象日の予約ボタンから確認してください。' :
       !ready(target) ? '未設定のセットです。' : !available ? '予約画面の読み込み待ち' : '';
+    const remainingMs = scheduledAt - nowMs();
+    autoStatus.hidden = !autoDone && autoEnabled.checked && remainingMs > 10 * 60 * 1000;
     autoStatus.textContent = autoDone ? autoMessage : !autoEnabled.checked ? '自動実行OFF' :
-      `セット${selected + 1}：10:00まで ${Math.max(0, Math.ceil((scheduledAt - nowMs()) / 1000))}秒`;
+      autoStatus.hidden ? '' :
+      `セット${selected + 1}：10:00まで ${Math.max(0, Math.ceil(remainingMs / 1000))}秒`;
   }
 
   function submitSelected() {
