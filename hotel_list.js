@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.07
+// @version      2.08
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.07';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.08';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -326,7 +326,7 @@
     try {
       const u = new URL(location.href);
       return u.protocol === 'https:' && u.hostname === 'reserve.tokyodisneyresort.jp' &&
-        u.pathname.startsWith('/sp/hotel/list/');
+        u.pathname.startsWith('/sp/hotel/list/') && !!(u.searchParams.get('useDate') || '').trim();
     } catch {
       return false;
     }
@@ -2082,7 +2082,7 @@
     }
   }
   if (!isTargetSpHotelList()) {
-    console.info('対象外ページのため停止: SPホテル一覧のみ');
+    console.info('対象外ページのため停止: 宿泊日指定のSPホテル一覧のみ');
     return;
   }
   patchXHR();
@@ -2095,5 +2095,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.07');
+  internalLog('official DOM-order logger ready / rare room filter / v2.08');
 })();
