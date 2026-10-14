@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         🍴レストラン予約
-// @version      0.13
+// @version      0.14
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
-// @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/*
+// @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/?nameCd=*
 // @run-at       document-end
 // @grant        unsafeWindow
 // ==/UserScript==
