@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🍴レストラン予約
-// @version      0.15
+// @name         🍴🕙️レストラン予約
+// @version      0.16
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/?nameCd=*
@@ -10,6 +10,9 @@
 
 (() => {
   'use strict';
+
+  const pageUseDate = new URLSearchParams(location.search).get('useDate');
+  if (!pageUseDate?.trim()) return;
 
   // 一般枠のコード。KEYは対象日の実際の予約ボタンで確認して入力する。
   // 未確認のKEYは空欄のままにし、送信を無効にする。
@@ -76,10 +79,15 @@
   const tabs = document.createElement('div');
   tabs.className = 'tabs';
   tabs.setAttribute('role', 'tablist');
-  const buttons = SETS.map((_, index) => {
+  function targetLabel(target) {
+    const code = { RBVL0: 'BVL', RHPL3: 'HPL', RHPL4: 'HPL', RCAN0: 'CAN' }[target.nameCd] || target.nameCd;
+    return `${code} ${target.time.replace(/^(\d{2})(\d{2})$/, '$1:$2')}`;
+  }
+
+  const buttons = SETS.map((target, index) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = `セット${index + 1}`;
+    button.textContent = targetLabel(target);
     button.setAttribute('role', 'tab');
     button.addEventListener('click', () => { selected = index; render(); });
     tabs.append(button);
@@ -140,7 +148,7 @@
     autoStatus.hidden = !autoDone && autoEnabled.checked && remainingMs > 10 * 60 * 1000;
     autoStatus.textContent = autoDone ? autoMessage : !autoEnabled.checked ? '自動実行OFF' :
       autoStatus.hidden ? '' :
-      `セット${selected + 1}：10:00まで ${Math.max(0, Math.ceil(remainingMs / 1000))}秒`;
+      `${targetLabel(target)}：10:00まで ${Math.max(0, Math.ceil(remainingMs / 1000))}秒`;
   }
 
   function isVisibleNotice(dialog) {
@@ -242,7 +250,7 @@
     if (!enabled) autoMessage = '自動実行OFFのため未実行';
     else if (remaining < -1000) autoMessage = '10:00から1秒超の遅延のため未実行';
     else {
-      autoMessage = `セット${selected + 1}：自動実行済み`;
+      autoMessage = `${targetLabel(SETS[selected])}：自動実行済み`;
       if (!submitSelected()) autoMessage = '予約ボタンが無効のため未実行';
     }
     render();
