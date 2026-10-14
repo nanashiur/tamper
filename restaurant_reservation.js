@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🕙️レストラン予約
-// @version      0.16
+// @version      0.17
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/?nameCd=*
@@ -67,6 +67,7 @@
     #${PANEL_ID} .tabs button{flex:1;font-size:12px;white-space:nowrap}
     #${PANEL_ID} button[aria-selected=true]{background:#ead99b;font-weight:bold}
     #${PANEL_ID} .values{overflow-wrap:anywhere}
+    #${PANEL_ID} .codes{font-size:12px;white-space:nowrap;overflow-x:auto}
     #${PANEL_ID} .when{font-size:17px;font-weight:bold;margin-bottom:4px}
     #${PANEL_ID} .actions{display:flex;gap:6px;margin-top:8px}
     #${PANEL_ID} .book{flex:1;background:#c5a641;color:#fff;font-weight:bold}
@@ -97,9 +98,9 @@
   values.className = 'values';
   const when = document.createElement('div');
   when.className = 'when';
-  const name = document.createElement('div');
-  const commodity = document.createElement('div');
-  values.append(when, name, commodity);
+  const codes = document.createElement('div');
+  codes.className = 'codes';
+  values.append(when, codes);
   const actions = document.createElement('div');
   actions.className = 'actions';
   const book = document.createElement('button');
@@ -115,7 +116,9 @@
   autoEnabled.type = 'checkbox';
   autoEnabled.checked = !autoDone;
   autoEnabled.disabled = autoDone;
-  autoLabel.append(autoEnabled, ' 10:00に選択中のセットを1回実行（日本時間）');
+  autoEnabled.setAttribute('aria-label', '10:00の自動実行');
+  autoEnabled.title = '10:00の自動実行 ON/OFF';
+  autoLabel.append(autoEnabled);
   const autoStatus = document.createElement('div');
   autoStatus.className = 'status';
   panel.append(tabs, values, autoLabel, autoStatus, actions, status);
@@ -136,8 +139,7 @@
     const date = target.useDate.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1/$2/$3');
     const time = target.time.replace(/^(\d{2})(\d{2})$/, '$1:$2');
     when.textContent = `${date || '日付未設定'}　${time || '時刻未設定'}　KEY ${target.openNumKey || '—'}`;
-    name.textContent = `nameCd: ${target.nameCd || '—'}`;
-    commodity.textContent = `commodityCD: ${target.commodityCD || '—'}`;
+    codes.textContent = `nameCd: ${target.nameCd || '—'}　commodityCD: ${target.commodityCD || '—'}`;
     const available = !!document.getElementById('toOrderForm') && typeof page.toOrderForDate === 'function';
     const oldWrapper = !!page.__tdrCanna1021TestInstalled;
     book.disabled = busy || !ready(target) || !available || oldWrapper;
