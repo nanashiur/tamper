@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴レストラン予約
-// @version      0.14
+// @version      0.15
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/?nameCd=*
@@ -143,6 +143,62 @@
       `セット${selected + 1}：10:00まで ${Math.max(0, Math.ceil(remainingMs / 1000))}秒`;
   }
 
+  function isVisibleNotice(dialog) {
+    return !!(dialog && dialog.isConnected &&
+      (dialog.offsetWidth || dialog.offsetHeight || dialog.getClientRects().length));
+  }
+
+  function clickNoticeNext(dialog, attempt = 0) {
+    if (!isVisibleNotice(dialog)) return;
+    const checkbox = dialog.querySelector('#accept, input[name="accept"]');
+    const next = dialog.querySelector('#btnNext');
+    if (!checkbox?.checked || !next) return;
+    const disabled = next.disabled || next.getAttribute('disabled') !== null ||
+      next.classList.contains('nextDisabled') || next.classList.contains('ui-disabled') ||
+      next.closest('.ui-disabled');
+    if (!disabled) {
+      next.click();
+      return;
+    }
+    if (attempt >= 10 && !next.parentElement?.closest('.ui-disabled')) {
+      next.disabled = false;
+      next.removeAttribute('disabled');
+      next.classList.remove('nextDisabled', 'ui-disabled');
+      next.click();
+      return;
+    }
+    if (attempt < 30) window.setTimeout(() => clickNoticeNext(dialog, attempt + 1), 100);
+  }
+
+  function handleNoticeDialog(attempt = 0) {
+    const dialog = document.querySelector('#noticeMessage');
+    const checkbox = dialog?.querySelector('#accept, input[name="accept"]');
+    if (!isVisibleNotice(dialog) || !checkbox || !dialog.querySelector('#btnNext')) {
+      if (attempt < 30) window.setTimeout(() => handleNoticeDialog(attempt + 1), 100);
+      return;
+    }
+    if (!checkbox.checked) {
+      const label = dialog.querySelector('label[for="accept"]');
+      if (label) label.click();
+      else checkbox.click();
+      checkbox.checked = true;
+      checkbox.setAttribute('checked', 'checked');
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+      if (page.jQuery) {
+        try {
+          const control = page.jQuery(checkbox);
+          control.prop('checked', true);
+          if (control.checkboxradio) control.checkboxradio('refresh');
+          control.trigger('change');
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    }
+    window.setTimeout(() => clickNoticeNext(dialog), 200);
+  }
+
   function submitSelected() {
     render();
     if (book.disabled) return false;
@@ -153,10 +209,11 @@
       // サイト既存のnotice確認とフォーム送信を使用する。
       page.toOrderForDate('toOrderForm', target.commodityCD, target.openNumKey,
         target.useDate, target.nameCd, target.contentsCd, target.time);
+      window.setTimeout(() => handleNoticeDialog(), 150);
     } catch (error) {
       window.alert(`予約入力への移動に失敗しました: ${error.message}`);
     } finally {
-      window.setTimeout(() => { busy = false; render(); }, 2000);
+      window.setTimeout(() => { busy = false; render(); }, 6500);
     }
     return true;
   }
