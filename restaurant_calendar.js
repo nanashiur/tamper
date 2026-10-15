@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.52
+// @version      5.54
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -32,7 +32,7 @@
     AUTO_PREFIX = 'tdr_weekly_restaurant_auto_',
     OLD_AUTO_KEY = 'tdr_weekly_restaurant_auto';
   const NOTIFY_KEY = 'tdr_weekly_restaurant_notify_v3',
-    RESEARCH_NOTIFY_KEY = 'tdr_weekly_restaurant_research_delivery_v2',
+    ROTATION_KEY = 'tdr_weekly_restaurant_rotation_v1',
     DATE_SELECT_KEY = 'tdr_weekly_restaurant_date_select_v1';
   const RESEARCH_KEY = 'tdr_weekly_restaurant_9am_mode_v3',
     RESEARCH_PREV_AUTO_KEY = 'tdr_weekly_restaurant_9am_prev_auto_v4',
@@ -84,6 +84,10 @@
   let researchDelayNotifiedDate = '';
   const MIDNIGHT_CARRY_KEY = 'tdr_weekly_restaurant_midnight_carry_v1';
   let midnightReselectTimer = null;
+  let rotationEnabled = localStorage.getItem(ROTATION_KEY) === '1',
+    rotationRound = null,
+    rotationSequence = 0,
+    rotationRequestHint = null;
 
   function ymd() {
     const d = new Date();
@@ -218,10 +222,7 @@
   }
 
   function loadResearchNotifyMode() {
-    const v = localStorage.getItem(RESEARCH_NOTIFY_KEY),
-      mode = v === 'both' ? 'both' : 'research';
-    localStorage.setItem(RESEARCH_NOTIFY_KEY, mode);
-    return mode;
+    return 'research';
   }
   function researchNotifyLabel(mode = researchNotifyMode) {
     return mode === 'both' ? '調査＋通知' : '調査用のみ';
@@ -976,13 +977,14 @@
     }
   }
   function scheduleMidnightReselect() {
+    if (rotationApplies()) return;
     if (midnightReselectTimer !== null) return;
     const selected = dateSelection();
     if (!dateButtons.some((b) => b.dataset.value === selected)) return;
     if (!saveMidnightCarry()) return;
     midnightReselectTimer = setTimeout(() => {
       midnightReselectTimer = null;
-      if (dateSelection() !== selected) {
+      if (rotationApplies() || dateSelection() !== selected) {
         sessionStorage.removeItem(MIDNIGHT_CARRY_KEY);
         return;
       }
@@ -1151,12 +1153,12 @@
   }
   function autoModePanel(mode) {
     return mode === 'off'
-      ? { label: 'OFF', name: 'OFF', color: '#000' }
+      ? { label: 'OFF', name: 'OFF', color: '#333333' }
       : mode === 'short'
         ? { label: '短', name: '短期', color: '#ff69b4' }
       : mode === 'medium'
-        ? { label: '中', name: '中期', color: '#ff9800' }
-        : { label: '長', name: '長期', color: '#1976d2' };
+        ? { label: '中', name: '中期', color: '#ff8c00' }
+        : { label: '長', name: '長期', color: '#007bff' };
   }
   function hidePanelCounter(s) {
     if (s.statusCount) s.statusCount.style.display = 'none';
@@ -1271,7 +1273,7 @@
       researchNotifyPanel.style.fontSize = '10px';
       researchNotifyPanel.style.whiteSpace = 'pre-line';
       researchNotifyPanel.style.lineHeight = '12px';
-      researchNotifyPanel.onclick = toggleResearchNotify;
+      researchNotifyPanel.onclick = toggleRotation;
       researchPanel = document.createElement('div');
       compactButtonStyle(researchPanel, 29);
       researchPanel.onclick = toggleResearchMode;
@@ -1310,6 +1312,10 @@
           ['63', 63],
           ['70', 70],
           ['77', 77],
+          ['84', 84]
+        ],
+        [
+          ['91', 91],
           ['末', 'end']
         ]
       ];
@@ -1333,8 +1339,12 @@
           b.dataset.value = String(value);
           b.title = value === 'end' ? '3か月後を最終日に含む週を検索' : `本日から${value}日後を開始日にして検索`;
           b.onclick = () => {
+            rotationRound = null;
             selectDateShortcut(value);
-            value === 'end' ? searchEndWeek() : searchOffset(value);
+            if (rotationApplies()) {
+              mealStates.forEach(clearTimer);
+              rotationTick();
+            } else value === 'end' ? searchEndWeek() : searchOffset(value);
           };
           dateButtons.push(b);
           row.appendChild(b);
@@ -1406,6 +1416,98 @@
   function sameLocalDate(a, b) {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
+  function rotationGroup(selected = dateSelection(), today = new Date()) {
+    const offset = Number(selected),
+      group = [[7, 14, 21, 28], [35, 42, 49, 56], [63, 70, 77, 84, 91]]
+        .find((values) => values.includes(offset));
+    if (!group) return [];
+    const end = addMonthsClamped(today, 3),
+      max = Math.round((Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) -
+        Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
+    return group.filter((value) => value <= max);
+  }
+  function rotationApplies() {
+    return rotationEnabled && rotationGroup().length > 0;
+  }
+  function rotationWeek(offset) {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+  }
+  function staleRotationRequest(meta) {
+    return !!meta.rotation && (!rotationApplies() || !rotationRound ||
+      meta.rotation.id !== rotationRound.id || rotationRound.day !== ymd() ||
+      String(rotationRound.offset) !== dateSelection());
+  }
+  function finishRotationRead(meta, meal, success) {
+    if (!meta.rotation || staleRotationRequest(meta)) return;
+    const round = rotationRound;
+    if (success) round.done.add(meal);
+    else {
+      round.done.delete(meal);
+      round.nextAt = 0;
+      const wait = randomWaitMs(getState(meal).mode);
+      round.retryAt.set(meal, new Date().getTime() + wait);
+      getState(meal).deadline = performance.now() + wait;
+    }
+  }
+  function toggleRotation() {
+    rotationEnabled = !rotationEnabled;
+    localStorage.setItem(ROTATION_KEY, rotationEnabled ? '1' : '0');
+    rotationRound = null;
+    mealStates.forEach(clearTimer);
+    if (rotationApplies()) rotationTick();
+    else existingMeals().forEach((meal) => {
+      if (!getState(meal).pending) schedule(meal);
+    });
+    renderPanels();
+  }
+  function rotationTick() {
+    if (!rotationApplies()) {
+      if (rotationRound) {
+        rotationRound = null;
+        existingMeals().forEach((meal) => { if (!getState(meal).pending) schedule(meal); });
+      }
+      return;
+    }
+    if (researchWindowActive || isMaintenance()) return;
+    const day = ymd(), selected = Number(dateSelection()),
+      meals = existingMeals(), group = rotationGroup(), now = new Date().getTime();
+    if (rotationRound && (rotationRound.day !== day || rotationRound.offset !== selected)) rotationRound = null;
+    // OFFの食事区分を勝手に再開しない。全区分をONに戻すまで同じ週で待機する。
+    if (!meals.length || meals.some((meal) => getState(meal).mode === 'off')) return;
+    if (!rotationRound) {
+      if ([...mealStates.values()].some((s) => s.pending)) return;
+      const offset = group.includes(selected) ? selected : group[0];
+      selectDateShortcut(offset);
+      mealStates.forEach(clearTimer);
+      rotationRound = { id: ++rotationSequence, day, offset, weekStart: rotationWeek(offset),
+        meals: [...meals], done: new Set(), retryAt: new Map(), nextAt: 0 };
+    }
+    const round = rotationRound;
+    // DOMが一時的に消えても、その区分の完了と見なさない。
+    meals.forEach((meal) => { if (!round.meals.includes(meal)) round.meals.push(meal); });
+    if (round.meals.every((meal) => round.done.has(meal)) &&
+        ![...mealStates.values()].some((s) => s.pending)) {
+      if (!round.nextAt) {
+        const wait = Math.max(...round.meals.map((meal) => randomWaitMs(getState(meal).mode)));
+        round.nextAt = now + wait;
+        round.meals.forEach((meal) => { getState(meal).deadline = performance.now() + wait; });
+      }
+      if (now < round.nextAt) return;
+      selectDateShortcut(group[(group.indexOf(round.offset) + 1) % group.length]);
+      rotationRound = null;
+      rotationTick();
+      return;
+    }
+    round.meals.forEach((meal) => {
+      const s = getState(meal);
+      if (!blocks.has(meal) || round.done.has(meal) || s.pending || !autoActive(s) ||
+          now < (round.retryAt.get(meal) || 0)) return;
+      if (!fireSameWeek(meal, false, '', round.weekStart, round.id))
+        finishRotationRead({ rotation: { id: round.id } }, meal, false);
+    });
+  }
   function reservationLeadDays(v) {
     const s = normalizeYmd(v);
     if (!s) return null;
@@ -1472,6 +1574,7 @@
   }
   function beginResearchWindow(source = '8:57') {
     if (!researchMode || researchWindowActive || isMaintenance()) return;
+    rotationRound = null;
     refreshBlocks();
     const pendingBefore = new Set(existingMeals().filter((meal) => getState(meal).pending > 0));
     savePreviousAuto();
@@ -1618,19 +1721,25 @@
     const s = getState(meal);
     if (s.pending || isMaintenance()) return;
     // 強制停止中も手動読込を許可し、正常応答を確認してから停止を解除する。
-    fireSameWeek(meal, true, '');
+    if (rotationApplies() && !researchWindowActive) {
+      if (!rotationRound || rotationRound.day !== ymd() || String(rotationRound.offset) !== dateSelection()) {
+        // 強制停止・OFF中でも手動で同じ巡回週を確認できる。
+        if ([...mealStates.values()].some((state) => state.pending)) return;
+        const group = rotationGroup(), selected = Number(dateSelection()),
+          offset = group.includes(selected) ? selected : group[0];
+        selectDateShortcut(offset);
+        rotationRound = { id: ++rotationSequence, day: ymd(), offset, weekStart: rotationWeek(offset),
+          meals: existingMeals(), done: new Set(), retryAt: new Map(), nextAt: 0 };
+      }
+      rotationRound.done.delete(meal);
+      rotationRound.nextAt = 0;
+      fireSameWeek(meal, true, '', rotationRound.weekStart, rotationRound.id);
+    } else fireSameWeek(meal, true, '');
   }
   function toggleNotify() {
     syncNotifyDay();
     notifyState.mode = notifyState.mode === 'vacancy' ? 'all' : notifyState.mode === 'all' ? 'off' : 'vacancy';
     localStorage.setItem(NOTIFY_KEY, JSON.stringify(notifyState));
-    renderPanels();
-  }
-  function toggleResearchNotify() {
-    researchNotifyMode = researchNotifyMode === 'research' ? 'both' : 'research';
-    localStorage.setItem(RESEARCH_NOTIFY_KEY, researchNotifyMode);
-    syncNormalLogMode();
-    console.log(`[${NAME}] 調査通知：${researchNotifyLabel()}`);
     renderPanels();
   }
   function clearTimer(s) {
@@ -1641,7 +1750,7 @@
   function schedule(meal) {
     const s = getState(meal);
     clearTimer(s);
-    if (!blocks.has(meal) || !autoActive(s) || isMaintenance()) return;
+    if (!blocks.has(meal) || !autoActive(s) || isMaintenance() || rotationApplies()) return;
     const wait = randomWaitMs(s.mode);
     s.deadline = performance.now() + wait;
     s.timer = setTimeout(() => {
@@ -1659,7 +1768,7 @@
       if (!s?.panel || !blocks.has(meal)) return;
       hidePanelCounter(s);
       if (s.manual) {
-        s.manual.style.background = maintenance || s.pending ? '#777' : '#444';
+        s.manual.style.background = maintenance || s.pending ? '#777777' : '#444';
         s.manual.style.color = '#fff';
         s.manual.style.cursor = maintenance || s.pending ? 'default' : 'pointer';
         s.manual.style.opacity = maintenance || s.pending ? '0.6' : '1';
@@ -1680,7 +1789,7 @@
         return;
       }
       if (maintenance) {
-        s.panel.style.background = '#777';
+        s.panel.style.background = '#777777';
         s.panel.style.color = '#fff';
         s.panel.textContent = `${meal} メンテ`;
         return;
@@ -1710,7 +1819,7 @@
       }
       s.panel.title = `${meal} 自動読込：長期 → 中期 → 短期 → OFF`;
       if (s.mode === 'off') {
-        s.panel.style.background = '#000';
+        s.panel.style.background = '#333333';
         s.panel.style.color = '#fff';
         s.panel.textContent = `${meal} OFF`;
         return;
@@ -1728,39 +1837,36 @@
     }
     if (notifyPanel) {
       if (notifyState.mode === 'vacancy') {
-        notifyPanel.style.background = '#ffd600';
-        notifyPanel.style.color = '#000';
+        notifyPanel.style.background = '#ffeb00';
+        notifyPanel.style.color = '#000000';
         notifyPanel.textContent = '🔔';
         notifyPanel.title = '空席通知';
       } else if (notifyState.mode === 'all') {
-        notifyPanel.style.background = '#d32f2f';
+        notifyPanel.style.background = '#dc3545';
         notifyPanel.style.color = '#fff';
         notifyPanel.textContent = '📢';
         notifyPanel.title = '全通知';
       } else {
-        notifyPanel.style.background = '#000';
+        notifyPanel.style.background = '#333333';
         notifyPanel.style.color = '#fff';
         notifyPanel.textContent = '🔕';
         notifyPanel.title = '通知OFF';
       }
     }
     if (researchNotifyPanel) {
-      if (researchNotifyMode === 'research') {
-        researchNotifyPanel.style.background = '#f8bbd0';
-        researchNotifyPanel.style.color = '#000';
-        researchNotifyPanel.textContent = '調査用';
-        researchNotifyPanel.title = '調査用のみ / 毎正時に自動出力（4:00・5:00を除く）';
-      } else {
-        researchNotifyPanel.style.background = '#000';
-        researchNotifyPanel.style.color = '#fff';
-        researchNotifyPanel.textContent = '調査\n＋通知';
-        researchNotifyPanel.title = '調査＋通知 / 調査チャンネルとレストラン通知用へ送信';
-      }
+      researchNotifyPanel.style.background = rotationEnabled ? (rotationApplies() ? '#28a745' : '#777777') : '#333333';
+      researchNotifyPanel.style.color = '#fff';
+      researchNotifyPanel.textContent = rotationEnabled ? '🔄\nON' : '🔄\nOFF';
+      researchNotifyPanel.title = rotationEnabled
+        ? rotationApplies()
+          ? `ローテーション ON：${rotationGroup().map((d) => `D${d}`).join(' → ')} / 全食事区分をONにすると巡回（9時調査・メンテナンス中は待機）`
+          : 'ローテーション ON / D7未満・末ボタンでは無効'
+        : 'ローテーション OFF / 調査チャンネルに送信';
     }
     if (researchPanel) {
-      researchPanel.style.background = researchMode ? (researchWindowActive ? '#d32f2f' : '#f8bbd0') : '#000';
-      researchPanel.style.color = researchMode && !researchWindowActive ? '#000' : '#fff';
-      researchPanel.textContent = '9️⃣';
+      researchPanel.style.background = researchMode ? (researchWindowActive ? '#d32f2f' : '#f8bbd0') : '#333333';
+      researchPanel.style.color = '#ffffff';
+      researchPanel.textContent = researchMode ? '9️⃣' : '⏸️';
       researchPanel.title = researchMode
         ? researchWindowActive
           ? '9時調査 ON / 調査管理中'
@@ -1913,8 +2019,9 @@
     } else console.log(`[${NAME}] ${meal} 同一ブロック事故の後続STOP / 追加通知・ログ抑制`);
     renderPanels();
   }
-  function fireSameWeek(meal, manual = false, researchPhase = '') {
+  function fireSameWeek(meal, manual = false, researchPhase = '', targetWeek = '', rotationId = 0) {
     const s = getState(meal);
+    if (rotationApplies() && !manual && !researchPhase && !rotationId) return false;
     if ((researchPhase && s.forcedStopError) || (!manual && !autoActive(s)) || s.pending || isMaintenance())
       return false;
     refreshBlocks();
@@ -1937,7 +2044,9 @@
     const current = display.textContent.trim();
     let prev;
     try {
-      const d = jq.datepicker.parseDate(format, current, {});
+      const d = targetWeek
+        ? new Date(+targetWeek.slice(0, 4), +targetWeek.slice(4, 6) - 1, +targetWeek.slice(6, 8))
+        : jq.datepicker.parseDate(format, current, {});
       d.setDate(d.getDate() - 7);
       prev = jq.datepicker.formatDate(format, d, {});
     } catch (e) {
@@ -1952,6 +2061,7 @@
     link.classList.remove('hasNoData');
     autoHint = meal;
     researchPhaseHint = researchPhase;
+    rotationRequestHint = rotationId ? { id: rotationId, weekStart: targetWeek } : null;
     let fireError = '';
     try {
       link.click();
@@ -1961,6 +2071,9 @@
     } finally {
       autoHint = '';
       researchPhaseHint = '';
+      rotationRequestHint = null;
+      // 送信のために借りた日付は戻す。通信失敗時も表示を前週へずらさない。
+      if (targetWeek && display.textContent === prev) display.textContent = current;
     }
     if (s.pending === before) {
       const d2 = block.box.querySelector('.timeList .date li:first-child .display');
@@ -2272,6 +2385,7 @@
           pendingTimer: null,
           errorCounted: false,
           researchPhase: researchPhaseHint || '',
+          rotation: rotationRequestHint,
           completed: false,
           timedOut: false
         };
@@ -2292,7 +2406,7 @@
         if (pendingMeal) {
           const s = getState(pendingMeal);
           s.pendingError = true;
-          requestError(pendingMeal, meta, 'Pending 5分超過');
+          if (!staleRotationRequest(meta)) requestError(pendingMeal, meta, 'Pending 5分超過');
           if (s.pending > 0) s.pending--;
           if (!s.pending) {
             s.startedAt = 0;
@@ -2306,6 +2420,7 @@
               schedule(pendingMeal);
           }
           markResearchDone(pendingMeal, meta.researchPhase);
+          finishRotationRead(meta, pendingMeal, false);
         } else {
           recordNormalError('食事区分不明', 'Pending 5分超過');
           sendErrorDiscord('食事区分不明', 'Pending 5分超過');
@@ -2348,6 +2463,17 @@
   }
   function finishRequest(meal, meta, status, text) {
     const s = getState(meal);
+    if (staleRotationRequest(meta)) {
+      if (s.pending > 0) s.pending--;
+      if (!s.pending) {
+        s.startedAt = 0;
+        s.pendingError = false;
+        if (!triggerWaitingResearchBaseline(meal)) schedule(meal);
+      }
+      queueRefresh();
+      return;
+    }
+    let success = false;
     if (status !== 403) s.error403 = false;
     if (status === 403) {
       s.error403 = true;
@@ -2364,6 +2490,8 @@
           console.log(`[${NAME}] ${meal} 対象DOMなしのため解析スキップ`);
         } else {
           const current = readCurrentSlots(meal);
+          if (meta.rotation && normalizeYmd(current.weekStart) !== meta.rotation.weekStart)
+            throw new Error('ローテーション対象週と応答日程が不一致');
           lastKnownRanges.set(meal, { weekStart: current.weekStart, weekEnd: current.weekEnd });
           saveFullSnapshots(meal, current);
           if (meta.researchPhase === 'baseline') saveResearchBase(meal, meta, current, researchBaselineSourceLabel);
@@ -2377,6 +2505,7 @@
             if (changes.length) sendChangesDiscord(changes);
           }
           resetErrors(meal);
+          success = true;
         }
       } catch (e) {
         console.error(`[${NAME}] ${meal} 解析失敗`, e);
@@ -2391,6 +2520,7 @@
       if (!triggerWaitingResearchBaseline(meal) && autoActive(s) && blocks.has(meal)) schedule(meal);
     }
     markResearchDone(meal, meta.researchPhase);
+    finishRotationRead(meta, meal, success);
     queueRefresh();
     renderPanels();
   }
@@ -2589,7 +2719,6 @@
       destinations.push(researchWebhook('00'));
       const code = restaurantResearchCode();
       if (code) destinations.push(researchWebhook(code));
-      if (researchNotifyMode === 'both') destinations.push(window.TDR_WEBHOOKS?.restaurant);
     }
     return [...new Set(destinations.filter(Boolean))];
   }
@@ -2944,8 +3073,9 @@
     checkForceStopReload();
     maintenanceTick();
     researchTick();
+    rotationTick();
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.52 起動`);
+  console.log(`[${NAME}] v5.54 起動`);
 })();
