@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.54
+// @version      5.55
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -98,7 +98,8 @@
     return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
   }
   function dateSelection() {
-    return localStorage.getItem(DATE_SELECT_KEY) || '';
+    const value = localStorage.getItem(DATE_SELECT_KEY) || '';
+    return value === '84' || value === '91' ? 'end' : value;
   }
   function detectedAtText(at = Date.now()) {
     const d = new Date(at);
@@ -1312,10 +1313,6 @@
           ['63', 63],
           ['70', 70],
           ['77', 77],
-          ['84', 84]
-        ],
-        [
-          ['91', 91],
           ['末', 'end']
         ]
       ];
@@ -1361,11 +1358,15 @@
     renderDateSelection();
   }
   function renderDateSelection() {
-    const selected = dateSelection();
+    const rotating = rotationApplies(), selected = rotating ? dateSelection() : currentDateShortcut();
     dateButtons.forEach((b) => {
-      b.style.background = b.dataset.value === selected ? '#d32f2f' : '#0b1f3a';
+      b.style.background = b.dataset.value === selected ? (rotating ? '#28a745' : '#ff0000') : '#0b1f3a';
       b.style.color = '#fff';
     });
+  }
+  function currentDateShortcut() {
+    const useDate = new URL(location.href).searchParams.get('useDate') || '';
+    return dateButtons.find((b) => rotationWeek(b.dataset.value) === useDate)?.dataset.value || '';
   }
   function setSearchDate(d) {
     const y = d.getFullYear(),
@@ -1416,22 +1417,18 @@
   function sameLocalDate(a, b) {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
-  function rotationGroup(selected = dateSelection(), today = new Date()) {
-    const offset = Number(selected),
-      group = [[7, 14, 21, 28], [35, 42, 49, 56], [63, 70, 77, 84, 91]]
+  function rotationGroup(selected = dateSelection()) {
+    const offset = selected === 'end' ? 'end' : Number(selected),
+      group = [[7, 14, 21, 28], [35, 42, 49, 56], [63, 70, 77, 'end']]
         .find((values) => values.includes(offset));
-    if (!group) return [];
-    const end = addMonthsClamped(today, 3),
-      max = Math.round((Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) -
-        Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
-    return group.filter((value) => value <= max);
+    return group || [];
   }
   function rotationApplies() {
     return rotationEnabled && rotationGroup().length > 0;
   }
-  function rotationWeek(offset) {
-    const date = new Date();
-    date.setDate(date.getDate() + offset);
+  function rotationWeek(offset, today = new Date()) {
+    const date = offset === 'end' ? addMonthsClamped(today, 3) : new Date(today.getTime());
+    date.setDate(date.getDate() + (offset === 'end' ? -6 : Number(offset)));
     return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
   }
   function staleRotationRequest(meta) {
@@ -1452,6 +1449,7 @@
     }
   }
   function toggleRotation() {
+    if (!rotationEnabled && dateButtons.length) selectDateShortcut(currentDateShortcut());
     rotationEnabled = !rotationEnabled;
     localStorage.setItem(ROTATION_KEY, rotationEnabled ? '1' : '0');
     rotationRound = null;
@@ -1471,7 +1469,7 @@
       return;
     }
     if (researchWindowActive || isMaintenance()) return;
-    const day = ymd(), selected = Number(dateSelection()),
+    const day = ymd(), selected = dateSelection() === 'end' ? 'end' : Number(dateSelection()),
       meals = existingMeals(), group = rotationGroup(), now = new Date().getTime();
     if (rotationRound && (rotationRound.day !== day || rotationRound.offset !== selected)) rotationRound = null;
     // OFFの食事区分を勝手に再開しない。全区分をONに戻すまで同じ週で待機する。
@@ -1507,6 +1505,24 @@
       if (!fireSameWeek(meal, false, '', round.weekStart, round.id))
         finishRotationRead({ rotation: { id: round.id } }, meal, false);
     });
+  }
+  function rescheduleRotation(meal) {
+    const round = rotationRound;
+    if (round) {
+      round.nextAt = 0;
+      // OFFで巡回全体を待機させ、再開時に過去の期限で即切替しない。
+      if (existingMeals().some((m) => getState(m).mode === 'off')) {
+        mealStates.forEach(clearTimer);
+        return;
+      }
+      const s = getState(meal);
+      if (!round.done.has(meal) && !s.pending && autoActive(s)) {
+        const wait = randomWaitMs(s.mode);
+        round.retryAt.set(meal, new Date().getTime() + wait);
+        s.deadline = performance.now() + wait;
+      }
+    }
+    rotationTick();
   }
   function reservationLeadDays(v) {
     const s = normalizeYmd(v);
@@ -1706,14 +1722,16 @@
       forceStopIncident = { startedAt: 0, marketChanged: false, am9EmergencyHandled: false };
       if (s.mode === 'off') s.mode = 'medium';
       localStorage.setItem(AUTO_MODE_PREFIX + meal, s.mode);
-      if (!s.pending && !isMaintenance()) schedule(meal);
+      if (rotationApplies()) rescheduleRotation(meal);
+      else if (!s.pending && !isMaintenance()) schedule(meal);
       renderPanels();
       return;
     }
     s.mode = s.mode === 'long' ? 'medium' : s.mode === 'medium' ? 'short' : s.mode === 'short' ? 'off' : 'long';
     localStorage.setItem(AUTO_MODE_PREFIX + meal, s.mode);
     clearTimer(s);
-    if (autoActive(s) && !s.pending && !isMaintenance()) schedule(meal);
+    if (rotationApplies()) rescheduleRotation(meal);
+    else if (autoActive(s) && !s.pending && !isMaintenance()) schedule(meal);
     renderPanels();
   }
   function manualFire(meal) {
@@ -1725,7 +1743,7 @@
       if (!rotationRound || rotationRound.day !== ymd() || String(rotationRound.offset) !== dateSelection()) {
         // 強制停止・OFF中でも手動で同じ巡回週を確認できる。
         if ([...mealStates.values()].some((state) => state.pending)) return;
-        const group = rotationGroup(), selected = Number(dateSelection()),
+        const group = rotationGroup(), selected = dateSelection() === 'end' ? 'end' : Number(dateSelection()),
           offset = group.includes(selected) ? selected : group[0];
         selectDateShortcut(offset);
         rotationRound = { id: ++rotationSequence, day: ymd(), offset, weekStart: rotationWeek(offset),
@@ -1859,8 +1877,8 @@
       researchNotifyPanel.textContent = rotationEnabled ? '🔄\nON' : '🔄\nOFF';
       researchNotifyPanel.title = rotationEnabled
         ? rotationApplies()
-          ? `ローテーション ON：${rotationGroup().map((d) => `D${d}`).join(' → ')} / 全食事区分をONにすると巡回（9時調査・メンテナンス中は待機）`
-          : 'ローテーション ON / D7未満・末ボタンでは無効'
+          ? `ローテーション ON：${rotationGroup().map((d) => d === 'end' ? '末' : `D${d}`).join(' → ')} / 全食事区分をONにすると巡回（9時調査・メンテナンス中は待機）`
+          : 'ローテーション ON / D7未満では無効'
         : 'ローテーション OFF / 調査チャンネルに送信';
     }
     if (researchPanel) {
@@ -3077,5 +3095,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.54 起動`);
+  console.log(`[${NAME}] v5.55 起動`);
 })();
