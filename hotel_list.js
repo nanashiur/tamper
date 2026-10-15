@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.09
+// @version      2.10
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.09';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.10';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -602,7 +602,7 @@
       Object.assign(panelContainer.style, {
         position: 'fixed', top: '0px', right: '1px', zIndex: '2147483647',
         display: 'grid', gridTemplateColumns: 'repeat(4, max-content)',
-        gridTemplateRows: 'repeat(3, 26px)', gap: '1px'
+        gridTemplateRows: 'repeat(4, 26px)', gap: '1px'
       });
       document.body.appendChild(panelContainer);
     }
@@ -642,21 +642,14 @@
       const labelText = bound === 'min' ? '最小' : '最大';
       let select = acquirePriceSelects[bound];
       if (!select || !document.body.contains(select)) {
-        const label = document.createElement('label');
-        Object.assign(label.style, {
-          gridRow: '3', gridColumn: bound === 'min' ? '1 / 3' : '3 / 5',
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          gap: '1px', color: '#ffffff', background: '#333333',
-          borderRadius: '5px', font: 'bold 10px Arial, sans-serif'
-        });
-        label.appendChild(document.createTextNode(labelText));
         select = document.createElement('select');
         select.id = '__datetime_stock_monitor_price_' + bound;
         select.setAttribute('aria-label', '自動取得の' + labelText + '金額');
         Object.assign(select.style, {
+          gridRow: bound === 'min' ? '3' : '4', gridColumn: '2', justifySelf: 'end',
           width: '46px', height: PANEL.height, padding: '0', margin: '0',
           boxSizing: 'border-box', font: 'bold 11px Arial, sans-serif',
-          background: '#333333', color: '#ffffff', borderRadius: '4px'
+          background: '#ffffff', color: '#000000', borderRadius: '4px'
         });
         for (const value of ['', ...ACQUIRE_PRICE_OPTIONS]) {
           const option = document.createElement('option');
@@ -670,8 +663,7 @@
           acquireEpoch++; // Require an API request started after the price change.
           ensureAcquirePricePanels();
         });
-        label.appendChild(select);
-        panelContainer.appendChild(label);
+        panelContainer.appendChild(select);
         acquirePriceSelects[bound] = select;
       }
       select.value = acquirePrice[bound];
@@ -748,7 +740,7 @@
       background: acquireEnabled ? '#dc3545' : '#333333',
       color: '#ffffff', borderColor: acquireEnabled ? '#dc3545' : '#666', opacity: '1'
     });
-    acquirePanel.textContent = acquireEnabled ? '👍️' : '⏸️';
+    acquirePanel.textContent = acquireEnabled ? '🎯' : '⏸️';
     acquirePanel.title = acquireEnabled ? '自動取得ON（最新APIの空室を取得）' : '自動取得OFF';
   }
   function saveAcquireState() {
@@ -2150,5 +2142,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.09');
+  internalLog('official DOM-order logger ready / rare room filter / v2.10');
 })();
