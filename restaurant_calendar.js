@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.56
+// @version      5.57
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -827,9 +827,14 @@
       stamp = `${fileStamp(d.getTime()).slice(0, 8)}_240000`;
     }
     return downloadCsv(
-      `${stamp}_${safeFileName(state.restaurant || restaurantName())}_${csvLeadLabel(d.getTime())}_通常.csv`,
+      `${stamp}_${safeFileName(state.restaurant || restaurantName())}_${normalCsvLeadLabel(d.getTime())}_通常.csv`,
       buildNormalCsvRows(state, mode, endAt)
     );
+  }
+  function normalCsvLeadLabel(referenceAt) {
+    if (!rotationApplies()) return csvLeadLabel(referenceAt);
+    const group = rotationGroup(), last = group[group.length - 1];
+    return `D${group[0]}-${last === 'end' ? '末' : `D${last}`}`;
   }
   function downloadAm9Csv(state, endAt) {
     return downloadCsv(
@@ -931,7 +936,7 @@
         JSON.stringify(
           {
             restaurant: restaurantName(),
-            savedAt: Date.now(),
+            savedAt: new Date().getTime(),
             state: normalLogState,
             lastHourlySnapshotKey
           },
@@ -978,22 +983,22 @@
     }
   }
   function scheduleMidnightReselect() {
-    if (rotationApplies()) return;
     if (midnightReselectTimer !== null) return;
-    const selected = dateSelection();
+    const selected = dateSelection(), rotating = rotationApplies(),
+      target = rotating ? String(rotationGroup()[0]) : selected;
     if (!dateButtons.some((b) => b.dataset.value === selected)) return;
     if (!saveMidnightCarry()) return;
     midnightReselectTimer = setTimeout(() => {
       midnightReselectTimer = null;
-      if (rotationApplies() || dateSelection() !== selected) {
+      if (rotationApplies() !== rotating || dateSelection() !== selected) {
         sessionStorage.removeItem(MIDNIGHT_CARRY_KEY);
         return;
       }
-      const button = dateButtons.find((b) => b.dataset.value === selected);
+      const button = dateButtons.find((b) => b.dataset.value === target);
       if (!button) return;
       // 5秒の待機中に記録した差分も、遷移の直前に退避する。
       if (!saveMidnightCarry()) return;
-      console.log(`[${NAME}] 24時CSV保存指示から5秒経過 / 選択中の日付ボタンを再実行：${selected}`);
+      console.log(`[${NAME}] 24時CSV保存指示から5秒経過 / 翌日基準で再検索：${target}`);
       button.click();
     }, 5000);
   }
@@ -1333,12 +1338,7 @@
           b.dataset.value = String(value);
           b.title = value === 'end' ? '3か月後を最終日に含む週を検索' : `本日から${value}日後を開始日にして検索`;
           b.onclick = () => {
-            rotationRound = null;
-            selectDateShortcut(value);
-            if (rotationApplies()) {
-              mealStates.forEach(clearTimer);
-              rotationTick();
-            } else value === 'end' ? searchEndWeek() : searchOffset(value);
+            searchDateShortcut(value);
           };
           dateButtons.push(b);
           row.appendChild(b);
@@ -1349,6 +1349,18 @@
       renderDateSelection();
     }
     renderPanels();
+  }
+  function searchDateShortcut(value) {
+    // 数字パネルの手動操作は、自動読込のON/OFFにかかわらず通常検索する。
+    if (midnightReselectTimer !== null) {
+      clearTimeout(midnightReselectTimer);
+      midnightReselectTimer = null;
+      saveMidnightCarry();
+    }
+    rotationRound = null;
+    mealStates.forEach(clearTimer);
+    selectDateShortcut(value);
+    value === 'end' ? searchEndWeek() : searchOffset(Number(value));
   }
   function selectDateShortcut(value) {
     localStorage.setItem(DATE_SELECT_KEY, String(value));
@@ -1449,6 +1461,10 @@
     if (!rotationEnabled && dateButtons.length) selectDateShortcut(currentDateShortcut());
     rotationEnabled = !rotationEnabled;
     localStorage.setItem(ROTATION_KEY, rotationEnabled ? '1' : '0');
+    if (rotationApplies() && researchWindowActive) {
+      if (hasAm9LogData()) sendAm9StateLog();
+      cancelResearchMode();
+    }
     rotationRound = null;
     mealStates.forEach(clearTimer);
     if (rotationApplies()) rotationTick();
@@ -1465,7 +1481,7 @@
       }
       return;
     }
-    if (researchWindowActive || isMaintenance()) return;
+    if (researchWindowActive || isMaintenance() || midnightReselectTimer !== null) return;
     const day = ymd(), selected = dateSelection() === 'end' ? 'end' : Number(dateSelection()),
       meals = existingMeals(), group = rotationGroup(), now = new Date().getTime();
     if (rotationRound && (rotationRound.day !== day || rotationRound.offset !== selected)) rotationRound = null;
@@ -1586,7 +1602,7 @@
     });
   }
   function beginResearchWindow(source = '8:57') {
-    if (!researchMode || researchWindowActive || isMaintenance()) return;
+    if (!researchMode || researchWindowActive || isMaintenance() || rotationApplies()) return;
     rotationRound = null;
     refreshBlocks();
     const pendingBefore = new Set(existingMeals().filter((meal) => getState(meal).pending > 0));
@@ -1692,7 +1708,8 @@
       sessionStorage.removeItem(RESEARCH_900_RUN_KEY);
       const d = new Date(),
         min = d.getHours() * 60 + d.getMinutes();
-      if (min >= 537 && min < 540) {
+      if (rotationApplies()) console.log(`[${NAME}] 9時調査 ON設定を保持 / ローテーション中は実行しません`);
+      else if (min >= 537 && min < 540) {
         sessionStorage.setItem(RESEARCH_857_RUN_KEY, ymd());
         beginResearchWindow(d.getMinutes() === 57 ? '8:57' : `${clockHM()}緊急`);
       } else if (min >= 540) console.log(`[${NAME}] 9時調査 ON / 本日の9時調査は実行せず翌日8:57待機`);
@@ -1874,15 +1891,15 @@
       researchNotifyPanel.textContent = '🔄';
       researchNotifyPanel.title = rotationEnabled
         ? rotationApplies()
-          ? `ローテーション ON：${rotationGroup().map((d) => d === 'end' ? '末' : `D${d}`).join(' → ')} / 全食事区分をONにすると巡回（9時調査・メンテナンス中は待機）`
+          ? `ローテーション ON：${rotationGroup().map((d) => d === 'end' ? '末' : `D${d}`).join(' → ')} / 全食事区分をONにすると巡回（AM9は無効・メンテナンス中は待機）`
           : 'ローテーション ON / D7未満では無効'
         : 'ローテーション OFF / 調査チャンネルに送信';
     }
     if (researchPanel) {
-      researchPanel.style.background = researchMode ? (researchWindowActive ? '#d32f2f' : '#f8bbd0') : '#333333';
+      researchPanel.style.background = rotationApplies() ? '#777777' : researchMode ? (researchWindowActive ? '#d32f2f' : '#f8bbd0') : '#333333';
       researchPanel.style.color = '#ffffff';
       researchPanel.textContent = researchMode ? '9️⃣' : '⏸️';
-      researchPanel.title = researchMode
+      researchPanel.title = rotationApplies() ? `ローテーション中は9時調査無効 / 通常時の設定：${researchMode ? 'ON' : 'OFF'}` : researchMode
         ? researchWindowActive
           ? '9時調査 ON / 調査管理中'
           : '9時調査 ON / 8:57まで通常自動検索継続'
@@ -2036,6 +2053,7 @@
   }
   function fireSameWeek(meal, manual = false, researchPhase = '', targetWeek = '', rotationId = 0) {
     const s = getState(meal);
+    if (researchPhase && rotationApplies()) return false;
     if (rotationApplies() && !manual && !researchPhase && !rotationId) return false;
     if ((researchPhase && s.forcedStopError) || (!manual && !autoActive(s)) || s.pending || isMaintenance())
       return false;
@@ -2102,7 +2120,7 @@
   }
 
   function researchTick() {
-    if (!researchMode || isMaintenance()) return;
+    if (!researchMode || isMaintenance() || rotationApplies()) return;
     const d = new Date(),
       date = ymd(),
       h = d.getHours(),
@@ -2421,7 +2439,8 @@
         if (pendingMeal) {
           const s = getState(pendingMeal);
           s.pendingError = true;
-          if (!staleRotationRequest(meta)) requestError(pendingMeal, meta, 'Pending 5分超過');
+          if (!staleRotationRequest(meta) && !(meta.researchPhase && (!researchWindowActive || rotationApplies())))
+            requestError(pendingMeal, meta, 'Pending 5分超過');
           if (s.pending > 0) s.pending--;
           if (!s.pending) {
             s.startedAt = 0;
@@ -2478,7 +2497,7 @@
   }
   function finishRequest(meal, meta, status, text) {
     const s = getState(meal);
-    if (staleRotationRequest(meta)) {
+    if (staleRotationRequest(meta) || (meta.researchPhase && (!researchWindowActive || rotationApplies()))) {
       if (s.pending > 0) s.pending--;
       if (!s.pending) {
         s.startedAt = 0;
@@ -3066,7 +3085,7 @@
     refreshBlocks();
     setTimeout(refreshBlocks, 300);
     setTimeout(refreshBlocks, 1000);
-    if (researchMode) {
+    if (researchMode && !rotationApplies()) {
       const d = new Date(),
         min = d.getHours() * 60 + d.getMinutes();
       if (min >= 537 && min < 540) {
@@ -3088,9 +3107,9 @@
     checkForceStopReload();
     maintenanceTick();
     researchTick();
-    rotationTick();
     normalLogTick();
+    rotationTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.56 起動`);
+  console.log(`[${NAME}] v5.57 起動`);
 })();
