@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.10
+// @version      2.11
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.10';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.11';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -118,7 +118,7 @@
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const DISCORD_COLOR = { 0: 16711680, 1: 1, 2: 255, 3: 32768, error: 0xFFFF00 };
-  const PANEL = { id: '__datetime_stock_monitor_panels', minWidth: '24px', apiWidth: '44px', height: '26px' };
+  const PANEL = { id: '__datetime_stock_monitor_panels', minWidth: '26px', apiWidth: '44px', height: '26px' };
   let panelContainer = null;
   let csvPanel = null;
   let notifyPanel = null;
@@ -539,7 +539,7 @@
       justifySelf: 'end',
       boxSizing: 'border-box',
       minWidth: Number(column) >= 3 ? PANEL.apiWidth : PANEL.minWidth,
-      width: Number(column) >= 3 ? PANEL.apiWidth : 'auto',
+      width: Number(column) >= 3 ? PANEL.apiWidth : PANEL.minWidth,
       height: PANEL.height,
       padding: '0 2px',
       borderRadius: '5px',
@@ -601,7 +601,7 @@
       panelContainer.id = PANEL.id;
       Object.assign(panelContainer.style, {
         position: 'fixed', top: '0px', right: '1px', zIndex: '2147483647',
-        display: 'grid', gridTemplateColumns: 'repeat(4, max-content)',
+        display: 'grid', gridTemplateColumns: `repeat(2, ${PANEL.minWidth}) repeat(2, ${PANEL.apiWidth})`,
         gridTemplateRows: 'repeat(4, 26px)', gap: '1px'
       });
       document.body.appendChild(panelContainer);
@@ -646,8 +646,8 @@
         select.id = '__datetime_stock_monitor_price_' + bound;
         select.setAttribute('aria-label', '自動取得の' + labelText + '金額');
         Object.assign(select.style, {
-          gridRow: bound === 'min' ? '3' : '4', gridColumn: '2', justifySelf: 'end',
-          width: '46px', height: PANEL.height, padding: '0', margin: '0',
+          gridRow: bound === 'min' ? '3' : '4', gridColumn: '1 / 3', justifySelf: 'stretch',
+          width: '100%', minWidth: '0', height: PANEL.height, padding: '0 2px', margin: '0',
           boxSizing: 'border-box', font: 'bold 11px Arial, sans-serif',
           background: '#ffffff', color: '#000000', borderRadius: '4px'
         });
@@ -2142,5 +2142,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.10');
+  internalLog('official DOM-order logger ready / rare room filter / v2.11');
 })();
