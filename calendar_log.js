@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📅 客室指定在庫モニター
-// @version      5.32
+// @version      5.33
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -32,10 +32,11 @@
   const BTN_BG_COLOR = { 0: 'red', 1: 'black', 2: 'blue', 3: 'green' };
 
   const MODE_CONF = {
-    0: { txt: '👆', bg: '#000', fg: '#fff' },
-    1: { txt: '🏃‍♀️', bg: 'orange', fg: '#000' },
-    2: { txt: '🚶', bg: 'blue', fg: '#fff' },
-    3: { txt: '👍', bg: 'red', fg: '#fff' }
+    0: { txt: 'OFF', bg: '#333333', fg: '#ffffff', name: '手動' },
+    1: { txt: '🏃‍♀️', bg: '#ff69b4', fg: '#ffffff', name: '短期' },
+    2: { txt: '🚶', bg: '#007bff', fg: '#ffffff', name: '長期' },
+    3: { txt: '🎯', bg: '#dc3545', fg: '#ffffff', name: '自動取得' },
+    4: { txt: '中', bg: '#ff8c00', fg: '#ffffff', name: '中期' }
   };
 
   const DISCORD_COLOR = {
@@ -48,6 +49,20 @@
   };
 
   const pad = (x, len = 2) => String(x).padStart(len, '0');
+
+  const normalizeYearMonth = value => {
+    const text = String(value || '').trim();
+    const m = text.match(/^(\d{4})[,/年]\s*(\d{1,2})(?:月)?$/) || text.match(/^(\d{4})(\d{2})(?:\d{2})?$/);
+    return m && Number(m[2]) >= 1 && Number(m[2]) <= 12 ? `${m[1]}${pad(m[2])}` : '';
+  };
+
+  const getRotationMonths = () => {
+    const now = new Date();
+    return Array.from({ length: 5 }, (_, offset) => {
+      const date = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+      return `${date.getFullYear()}${pad(date.getMonth() + 1)}`;
+    });
+  };
 
   const tStrSec = () => {
     const d = new Date();
@@ -604,7 +619,6 @@
 
   const lastStateMap = new Map();
   const loadedKeys = new Set();
-  let lastLoggedContextKey = null;
   let automaticSearchPending = false;
   let dispatchingAutomaticSearch = false;
 
@@ -619,11 +633,16 @@
   let fatalErrorCount = 0;
 
   let mode = load('mode', 2);
+  if (!Object.hasOwn(MODE_CONF, mode)) mode = 2;
   const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
   let notifyEnabled = load('notify', false);
+  let rotationEnabled = load('rotation', false) === true;
+  let maintenanceWaiting = false;
+  let forcedStop = false;
   let longTimer = null;
   let nextSearchAt = null;
   let pendingSearchDelay = null;
+  let pendingRotationAdvance = false;
   let loadingStartedAt = null;
   let runtimeDisplayTimer = null;
   const loadingRequests = new Set();
@@ -658,6 +677,8 @@
 
   const resetModeRuntime = () => {
     hidePopup();
+    forcedStop = false;
+    maintenanceWaiting = false;
     automaticSearchPending = false;
     clearSearchWait();
     consecutiveErrorCount = 0;
@@ -679,38 +700,48 @@
     style: 'display:flex; justify-content:flex-start; align-items:center; gap:4px;'
   });
 
-  const btnManual = makeBtn(MODE_CONF[0].txt, MODE_CONF[0].bg, MODE_CONF[0].fg);
   const btnSearchMode = makeBtn(MODE_CONF[2].txt, MODE_CONF[2].bg, MODE_CONF[2].fg);
   const btnAutoGet = makeBtn(MODE_CONF[3].txt, MODE_CONF[3].bg, MODE_CONF[3].fg);
 
   const renderRuntime = () => {
-    const buttons = [btnManual, btnSearchMode, btnAutoGet];
-    const configs = [MODE_CONF[0], MODE_CONF[mode === 1 ? 1 : 2], MODE_CONF[3]];
+    const buttons = [btnSearchMode, btnAutoGet];
+    const isSearchMode = [1, 2, 4].includes(mode);
+    const configs = [MODE_CONF[isSearchMode ? mode : 0], MODE_CONF[mode === 3 ? 3 : 0]];
     buttons.forEach((btn, i) => {
       btn.textContent = configs[i].txt;
       btn.style.setProperty('background-color', configs[i].bg, 'important');
       btn.style.setProperty('background-image', 'none', 'important');
       btn.style.setProperty('color', configs[i].fg, 'important');
-      btn.style.fontSize = '14px';
-      btn.title = '';
+      btn.style.fontSize = configs[i].txt === 'OFF' ? '12px' : '14px';
     });
-    btnManual.style.opacity = mode === 0 ? '1' : '0.3';
-    btnAutoGet.style.opacity = mode === 3 ? '1' : '0.3';
-    btnSearchMode.style.opacity = (mode === 1 || mode === 2) ? '1' : '0.3';
+    btnAutoGet.style.opacity = '1';
+    btnSearchMode.style.opacity = '1';
+    btnSearchMode.title = `自動読込：${isSearchMode ? MODE_CONF[mode].name : 'OFF'}（OFF→長期→中期→短期→OFF）`;
+    btnAutoGet.title = `自動取得：${mode === 3 ? 'ON' : 'OFF'}`;
+    if (forcedStop && mode === 0) {
+      btnSearchMode.textContent = '🛑';
+      btnSearchMode.style.setProperty('background-color', '#cc0000', 'important');
+      btnSearchMode.title = '連続エラーによる強制停止';
+    }
 
     const loading = loadingRequests.size > 0;
     if (loading || nextSearchAt !== null) {
-      const btn = mode === 0 ? btnManual : mode === 3 ? btnAutoGet : btnSearchMode;
+      const btn = mode === 3 ? btnAutoGet : btnSearchMode;
       const seconds = loading
         ? Math.max(0, Math.floor((new Date().getTime() - loadingStartedAt) / 1000))
         : Math.max(0, Math.ceil((nextSearchAt - new Date().getTime()) / 1000));
       const secondsText = Number.isFinite(seconds) ? String(seconds) : '--';
       btn.textContent = secondsText;
       btn.style.fontSize = `${Math.min(14, Number(btn.dataset.counterWidth) / (secondsText.length * 0.65))}px`;
-      btn.title = `${loading ? '読み込み中' : '次回読み込みまで'}：${secondsText}秒`;
+      btn.title = `${MODE_CONF[mode].name}・${loading ? '読み込み中' : '次回読み込みまで'}：${secondsText}秒`;
       if (loading) {
-        btn.style.setProperty('background-image', 'linear-gradient(to right, transparent 33.333333%, purple 33.333333%)', 'important');
-        btn.style.setProperty('color', '#fff', 'important');
+        btn.style.setProperty('background-image', 'linear-gradient(to right, transparent 33.333333%, #7b2cbf 33.333333%)', 'important');
+        btn.style.setProperty('color', '#ffffff', 'important');
+      } else if (maintenanceWaiting) {
+        btn.textContent = '🛠️';
+        btn.style.fontSize = '14px';
+        btn.style.setProperty('background-color', '#777777', 'important');
+        btn.title = `メンテナンス休止：次回確認まで${secondsText}秒`;
       }
     }
 
@@ -727,24 +758,27 @@
     longTimer = null;
     nextSearchAt = null;
     pendingSearchDelay = null;
+    pendingRotationAdvance = false;
     renderRuntime();
   };
 
-  const scheduleSearch = delay => {
+  const scheduleSearch = (delay, advanceRotation = false) => {
     clearSearchWait();
     if (!Number.isFinite(delay) || delay < 0) return;
     // 通信とログ処理がすべて終わってから、待機時間を数え始める。
     if (loadingRequests.size > 0) {
       pendingSearchDelay = delay;
+      pendingRotationAdvance = advanceRotation;
       return;
     }
     // サイトのdate.jsによるDate.now()の上書きに影響されない数値を使う。
     nextSearchAt = new Date().getTime() + delay;
-    longTimer = setTimeout(() => triggerSearch(true), delay);
+    longTimer = setTimeout(() => triggerSearch(true, advanceRotation), delay);
     renderRuntime();
   };
 
   const beginLoading = () => {
+    maintenanceWaiting = false;
     clearSearchWait();
     const token = {};
     if (loadingRequests.size === 0) loadingStartedAt = new Date().getTime();
@@ -756,8 +790,9 @@
         loadingStartedAt = null;
         if (pendingSearchDelay !== null) {
           const delay = pendingSearchDelay;
+          const advanceRotation = pendingRotationAdvance;
           pendingSearchDelay = null;
-          scheduleSearch(delay);
+          scheduleSearch(delay, advanceRotation);
         }
       }
       renderRuntime();
@@ -769,28 +804,21 @@
     save('mode', mode);
   };
 
-  btnManual.onclick = () => {
-    if (mode === 0) return;
-
-    resetModeRuntime();
-
-    mode = 0;
-    updateModes();
-  };
-
   btnSearchMode.onclick = () => {
     resetModeRuntime();
 
     if (mode === 1) {
-      mode = 2;
+      mode = 0;
     } else if (mode === 2) {
+      mode = 4;
+    } else if (mode === 4) {
       mode = 1;
     } else {
       mode = 2;
     }
 
     updateModes();
-    triggerSearch();
+    if (mode !== 0) triggerSearch();
   };
 
   btnAutoGet.onclick = () => {
@@ -803,14 +831,17 @@
     triggerSearch();
   };
 
-  row1.append(btnManual, btnSearchMode, btnAutoGet);
+  row1.append(btnSearchMode, btnAutoGet);
 
-  const btnNotify = makeBtn('🔔', 'gray', '#fff');
+  const btnNotify = makeBtn('🔔', '#333333', '#ffffff');
 
   const updateNotify = () => {
-    btnNotify.style.opacity = notifyEnabled ? '1' : '0.3';
-    btnNotify.style.setProperty('background-color', notifyEnabled ? 'yellow' : 'gray', 'important');
-    btnNotify.style.setProperty('color', notifyEnabled ? '#000' : '#fff', 'important');
+    btnNotify.textContent = notifyEnabled ? '🔔' : 'OFF';
+    btnNotify.style.fontSize = notifyEnabled ? '14px' : '12px';
+    btnNotify.style.opacity = '1';
+    btnNotify.style.setProperty('background-color', notifyEnabled ? '#ffeb00' : '#333333', 'important');
+    btnNotify.style.setProperty('color', notifyEnabled ? '#000000' : '#ffffff', 'important');
+    btnNotify.title = `差分通知：${notifyEnabled ? 'ON' : 'OFF'}`;
     save('notify', notifyEnabled);
   };
 
@@ -820,6 +851,39 @@
   };
 
   row1.appendChild(btnNotify);
+
+  const btnRotation = makeBtn('🔄', '#333333', '#ffffff');
+  const updateRotation = () => {
+    btnRotation.textContent = rotationEnabled ? '🔄' : 'OFF';
+    btnRotation.style.fontSize = rotationEnabled ? '14px' : '12px';
+    btnRotation.style.setProperty('background-color', rotationEnabled ? '#007bff' : '#333333', 'important');
+    btnRotation.title = `5ヶ月ローテーション：${rotationEnabled ? 'ON' : 'OFF'}（当月〜4ヶ月後／読込モードの間隔で巡回）`;
+    save('rotation', rotationEnabled);
+  };
+  btnRotation.onclick = () => {
+    rotationEnabled = !rotationEnabled;
+    updateRotation();
+  };
+  row1.appendChild(btnRotation);
+
+  const advanceRotationMonth = sel => {
+    const months = getRotationMonths();
+    const options = months.map(ym => [...sel.options].find(option =>
+      !option.disabled && (normalizeYearMonth(option.value) || normalizeYearMonth(option.textContent)) === ym));
+    if (options.some(option => !option)) {
+      // 未取得の月を監視済み扱いにせず、現在月の監視へ戻す。
+      rotationEnabled = false;
+      updateRotation();
+      const missing = months.filter((_, i) => !options[i]).map(ym => `${ym.slice(0, 4)}/${ym.slice(4)}`).join('・');
+      console.warn(`ローテーションOFF：カレンダーに対象月がありません（${missing}）`);
+      showPopup(`ローテーションOFF\n選択肢なし：${missing}`, 'rgba(204, 0, 0, 0.9)');
+      return;
+    }
+    const current = months.indexOf(getDisplayedYearMonthRaw());
+    const next = options[(current + 1) % months.length];
+    sel.value = next.value;
+    sel.selectedIndex = [...sel.options].indexOf(next);
+  };
 
   const makeFilter = c => {
     const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff');
@@ -844,8 +908,8 @@
   document.body.appendChild(panel);
 
   // 元のボタン幅を固定し、秒数表示でパネルを広げない。
-  [btnManual, btnSearchMode, btnAutoGet].forEach(btn => {
-    const width = btn.getBoundingClientRect().width;
+  [btnSearchMode, btnAutoGet, btnNotify, btnRotation].forEach(btn => {
+    const width = btnSearchMode.getBoundingClientRect().width;
     btn.dataset.counterWidth = String(Math.max(1, width - 12));
     btn.style.boxSizing = 'border-box';
     btn.style.width = `${width}px`;
@@ -858,6 +922,7 @@
 
   updateModes();
   updateNotify();
+  updateRotation();
   initMonthClick();
   initCalendarStartPlus4();
 
@@ -883,7 +948,7 @@
     }
   }
 
-  const triggerSearch = (automatic = false) => {
+  const triggerSearch = (automatic = false, advanceRotation = false) => {
     clearSearchWait();
     if (loadingRequests.size > 0) return;
 
@@ -892,17 +957,20 @@
     const m = now.getMinutes();
 
     if (h >= 3 && h < 5) {
+      maintenanceWaiting = true;
       let interval = 600000;
 
       if (h === 4 && m === 59) interval = 1000;
       else if (h === 4 && m >= 55) interval = 10000;
 
-      scheduleSearch(interval);
+      scheduleSearch(interval, advanceRotation);
       return;
     }
+    maintenanceWaiting = false;
 
     const sel = document.getElementById('boxCalendarSelect');
     if (sel && !document.querySelector('span.calLoad')) {
+      if (automatic && mode !== 0 && rotationEnabled && advanceRotation) advanceRotationMonth(sel);
       automaticSearchPending = automatic;
       dispatchingAutomaticSearch = automatic;
       try {
@@ -978,6 +1046,9 @@
         }
 
         const curUrl = new URLSearchParams(window.location.search);
+        // ローテーションではURLに残った初期月より、実際の要求月を優先する。
+        const requestYm = normalizeYearMonth(p_ym) || getDisplayedYearMonthRaw() ||
+          normalizeYearMonth(curUrl.get('useYearMonth') || curUrl.get('useDate'));
 
         p_ym = p_ym || curUrl.get('useYearMonth') || curUrl.get('useDate') || '';
         p_hotel = p_hotel || curUrl.get('searchHotelCD') || curUrl.get('hotelId') || '';
@@ -985,15 +1056,14 @@
 
         let yearMonthStr = '年月不明';
 
-        if (p_ym && p_ym.length >= 6) {
-          yearMonthStr = `${p_ym.slice(0, 4)}年${p_ym.slice(4, 6)}月`;
+        if (requestYm) {
+          yearMonthStr = `${requestYm.slice(0, 4)}年${requestYm.slice(4, 6)}月`;
         }
 
         const hotelStr = p_hotel ? `ホテル:${p_hotel}` : '';
         const roomStr = p_room ? `客室:${p_room}` : '';
         const targetInfoStr = `[${yearMonthStr} ${hotelStr} ${roomStr}]`.trim().replace(/ +/g, ' ');
-        const contextKey = `${p_hotel || 'default'}_${p_ym || 'now'}`;
-        const requestYm = p_ym && p_ym.length >= 6 ? p_ym.slice(0, 6) : '';
+        const contextKey = `${p_hotel || 'default'}_${requestYm || p_ym || 'now'}`;
         // 通信開始時に確定し、応答までのモード変更に左右されないようにする。
         const forceFullLog = !automaticSearchPending || mode === 0;
         automaticSearchPending = false;
@@ -1014,6 +1084,9 @@
           }
 
           logStock(resp, contextKey, requestYm, forceFullLog).then(foundVacancies => {
+            // 別の月へ手動変更した後の古い応答から、巡回や自動取得を開始しない。
+            const displayedYm = getDisplayedYearMonthRaw();
+            if (requestYm && displayedYm && requestYm !== displayedYm) return;
             if (mode === 3 && foundVacancies.length > 0) {
               clearSearchWait();
 
@@ -1027,12 +1100,15 @@
             showPopup(getClockStr(), 'rgba(0, 102, 204, 0.9)');
 
             if (mode === 1) {
-              scheduleSearch(0);
+              scheduleSearch(0, true);
             } else if (mode === 2) {
               const randomInterval = Math.floor(Math.random() * (360001 - 240000)) + 240000;
-              scheduleSearch(randomInterval);
+              scheduleSearch(randomInterval, true);
+            } else if (mode === 4) {
+              const randomInterval = Math.floor(Math.random() * (70001 - 50000)) + 50000;
+              scheduleSearch(randomInterval, true);
             } else if (mode === 3) {
-              scheduleSearch(0);
+              scheduleSearch(0, true);
             }
           }).catch(error => console.error('在庫ログ処理エラー', error)).finally(finishLoading);
         };
@@ -1070,8 +1146,9 @@
 
           if (isBurstTime) {
             if (consecutiveErrorCount >= 30) {
-              handleBurstError(k, targetInfoStr, `バーストタイム中ですが連続${consecutiveErrorCount}回拒否されたため、安全のため自動停止（手動👆化）しました。`);
+              handleBurstError(k, targetInfoStr, `バーストタイム中ですが連続${consecutiveErrorCount}回拒否されたため、安全のため自動停止（手動化）しました。`);
               mode = 0;
+              forcedStop = true;
               updateModes();
               showPopup(`🛑バーストブロック検知 ${getClockStr()}`, bgRed);
               clearSearchWait();
@@ -1093,6 +1170,7 @@
 
               if (mode !== 0) {
                 mode = 0;
+                forcedStop = true;
                 updateModes();
                 showPopup(`🛑${toCircled(consecutiveErrorCount)} ${getClockStr()}`, bgRed);
                 clearSearchWait();
@@ -1135,7 +1213,7 @@
   async function logStock(resp, contextKey, requestYm = '', forceFullLog = false) {
     const infos = resp.ecRoomStockInfos ?? {};
     const isFirstTime = !loadedKeys.has(contextKey);
-    const showAll = forceFullLog || isFirstTime || contextKey !== lastLoggedContextKey;
+    const showAll = forceFullLog || isFirstTime;
     const foundVacancies = [];
     const nowObj = new Date();
     const targetUseDate = getTargetUseDate();
@@ -1231,7 +1309,6 @@
       console.log(`▶${logTime} ${shortYm} 差分なし`);
     }
     loadedKeys.add(contextKey);
-    lastLoggedContextKey = contextKey;
 
     if (pendingNotifications.length > 0) {
       for (const item of pendingNotifications) {
