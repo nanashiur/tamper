@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️日付指定在庫モニター
-// @version      2.08
+// @version      2.09
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,15 +15,14 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.08';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.09';
   const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
   const SNAPSHOT_SCHEMA = 'sp-search-scope-v1.99';
   const SNAPSHOT_MAX_AGE_MS = 60 * 60 * 1000;
   const DOM_WAIT_MS = 700;
-  const AUTO_ACQUIRE_PRICE_MIN = 110000;
-  const AUTO_ACQUIRE_PRICE_LIMIT = 250000;
+  const ACQUIRE_PRICE_OPTIONS = Array.from({ length: 17 }, (_, i) => String((i + 7) * 10000));
   const BURST_ERROR_RETRY_MS = 1500;
   const NORMAL_ERROR_RETRY_MS = 3000;
   const NORMAL_COOLDOWN_MS = 20 * 60 * 1000;
@@ -46,6 +45,8 @@
   const KEYS = {
     notify: 'datetime_stock_monitor_notify_enabled',
     acquire: 'datetime_stock_monitor_acquire_enabled',
+    priceMin: 'datetime_stock_monitor_price_min',
+    priceMax: 'datetime_stock_monitor_price_max',
     rare: 'datetime_stock_monitor_rare_filter_enabled_v178',
     currentMode: 'datetime_stock_monitor_currentday_auto_mode_v178',
     nextMode: 'datetime_stock_monitor_nextday_auto_mode_v178',
@@ -82,10 +83,10 @@
     'HOFSHSBA0001N'
   ]);
   const API_AUTO_MODES = {
-    manual: { label: 'OFF', name: 'OFF', background: '#111', color: '#fff' },
-    short: { label: '短期', name: '短期', background: '#f06292', color: '#fff' },
-    medium: { label: '中期', name: '中期', background: '#ff9800', color: '#fff' },
-    long: { label: '長期', name: '長期', background: '#1976d2', color: '#fff' }
+    manual: { label: 'OFF', name: 'OFF', background: '#333333', color: '#ffffff' },
+    short: { label: '短期', name: '短期', background: '#ff69b4', color: '#ffffff' },
+    medium: { label: '中期', name: '中期', background: '#ff8c00', color: '#ffffff' },
+    long: { label: '長期', name: '長期', background: '#007bff', color: '#ffffff' }
   };
   const API_MODE_ORDER = ['long', 'medium', 'short', 'manual'];
   const API_KIND = {
@@ -122,6 +123,8 @@
   let csvPanel = null;
   let notifyPanel = null;
   let acquirePanel = null;
+  const acquirePrice = { min: '', max: '' };
+  const acquirePriceSelects = { min: null, max: null };
   // Restore acquisition only within the same tab session.
   let acquireEnabled = false;
   let acquireEpoch = 0;
@@ -494,6 +497,11 @@
     notifyMode = savedNotify === 'hotel' || savedNotify === '1' ? 'hotel' : 'off';
     notifyEnabled = notifyMode !== 'off';
     try { acquireEnabled = win.sessionStorage.getItem(KEYS.acquire) === '1'; } catch { acquireEnabled = false; }
+    for (const bound of ['min', 'max']) {
+      let value = '';
+      try { value = win.sessionStorage.getItem(bound === 'min' ? KEYS.priceMin : KEYS.priceMax); } catch {}
+      acquirePrice[bound] = ACQUIRE_PRICE_OPTIONS.includes(value) ? value : '';
+    }
     rareFilterEnabled = storage.get(KEYS.rare) === '1';
   }
   function saveApiAutoState(kind) {
@@ -594,7 +602,7 @@
       Object.assign(panelContainer.style, {
         position: 'fixed', top: '0px', right: '1px', zIndex: '2147483647',
         display: 'grid', gridTemplateColumns: 'repeat(4, max-content)',
-        gridTemplateRows: 'repeat(2, 26px)', gap: '1px'
+        gridTemplateRows: 'repeat(3, 26px)', gap: '1px'
       });
       document.body.appendChild(panelContainer);
     }
@@ -609,7 +617,7 @@
       csvPanel = makePanel(IDS.csv, '2', '1', () => exportHotelCsv(false));
       csvPanel.textContent = '📥';
       csvPanel.title = '本日・全タブの通常CSVを保存（差分）';
-      Object.assign(csvPanel.style, { background: '#37474f', color: '#fff' });
+      Object.assign(csvPanel.style, { background: '#29b6f6', color: '#000000' });
     }
     Object.keys(API_KIND).forEach(kind => {
       const cfg = API_KIND[kind];
@@ -620,6 +628,7 @@
         apiButtonPanels[kind] = makePanel(cfg.buttonId, '2', cfg.column, () => runStockApiOnce(kind, '手動ボタン'));
       }
     });
+    ensureAcquirePricePanels();
     updateRarePanel();
     updateNotifyPanel();
     updateAcquirePanel();
@@ -627,6 +636,49 @@
       updateApiModePanel(kind);
       updateApiButtonPanel(kind);
     });
+  }
+  function ensureAcquirePricePanels() {
+    for (const bound of ['min', 'max']) {
+      const labelText = bound === 'min' ? '最小' : '最大';
+      let select = acquirePriceSelects[bound];
+      if (!select || !document.body.contains(select)) {
+        const label = document.createElement('label');
+        Object.assign(label.style, {
+          gridRow: '3', gridColumn: bound === 'min' ? '1 / 3' : '3 / 5',
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+          gap: '1px', color: '#ffffff', background: '#333333',
+          borderRadius: '5px', font: 'bold 10px Arial, sans-serif'
+        });
+        label.appendChild(document.createTextNode(labelText));
+        select = document.createElement('select');
+        select.id = '__datetime_stock_monitor_price_' + bound;
+        select.setAttribute('aria-label', '自動取得の' + labelText + '金額');
+        Object.assign(select.style, {
+          width: '46px', height: PANEL.height, padding: '0', margin: '0',
+          boxSizing: 'border-box', font: 'bold 11px Arial, sans-serif',
+          background: '#333333', color: '#ffffff', borderRadius: '4px'
+        });
+        for (const value of ['', ...ACQUIRE_PRICE_OPTIONS]) {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = value ? (Number(value) / 10000) + '万' : '--';
+          select.appendChild(option);
+        }
+        select.addEventListener('change', () => {
+          acquirePrice[bound] = ACQUIRE_PRICE_OPTIONS.includes(select.value) ? select.value : '';
+          try { win.sessionStorage.setItem(bound === 'min' ? KEYS.priceMin : KEYS.priceMax, acquirePrice[bound]); } catch {}
+          acquireEpoch++; // Require an API request started after the price change.
+          ensureAcquirePricePanels();
+        });
+        label.appendChild(select);
+        panelContainer.appendChild(label);
+        acquirePriceSelects[bound] = select;
+      }
+      select.value = acquirePrice[bound];
+      const reversed = acquirePrice.min && acquirePrice.max && Number(acquirePrice.min) > Number(acquirePrice.max);
+      select.setCustomValidity(reversed ? '最小値が最大値を超えています（自動取得対象なし）' : '');
+      select.title = reversed ? '最小値が最大値を超えています（自動取得対象なし）' : labelText + '金額（-- は指定なし）';
+    }
   }
   function updateRarePanel() {
     if (!rarePanel) return;
@@ -636,25 +688,25 @@
       borderColor: '#f57f17',
       opacity: '1'
     } : {
-      background: '#111',
+      background: '#333333',
       color: '#fff',
       borderColor: '#666',
-      opacity: '.9'
+      opacity: '1'
     });
     rarePanel.textContent = rareFilterEnabled ? '★' : '全';
   }
   function updateNotifyPanel() {
     if (!notifyPanel) return;
     Object.assign(notifyPanel.style, notifyEnabled ? {
-      background: '#ffc107',
-      color: '#fff',
-      borderColor: '#ffb300',
+      background: '#ffeb00',
+      color: '#000000',
+      borderColor: '#ffeb00',
       opacity: '1'
     } : {
-      background: '#111',
-      color: '#fff',
+      background: '#333333',
+      color: '#ffffff',
       borderColor: '#666',
-      opacity: '.9'
+      opacity: '1'
     });
     notifyPanel.textContent = NOTIFY_MODES[notifyMode].icon;
     notifyPanel.title = `通知先: ${NOTIFY_MODES[notifyMode].label}`;
@@ -664,16 +716,17 @@
     if (!panel) return;
     const mode = API_AUTO_MODES[apiAutoMode[kind]] || API_AUTO_MODES.manual;
     const elapsed = getApiBusyElapsedText(kind);
+    const maintenance = apiAutoMode[kind] !== 'manual' && getMaintenanceDelayMs() > 0;
     Object.assign(panel.style, {
       background: elapsed
-        ? `linear-gradient(to right, ${mode.background} 0%, ${mode.background} 20%, #800080 20%, #800080 100%)`
-        : mode.background,
-      color: elapsed ? '#fff' : mode.color,
+        ? `linear-gradient(to right, ${mode.background} 0%, ${mode.background} 20%, #7b2cbf 20%, #7b2cbf 100%)`
+        : maintenance ? '#777777' : mode.background,
+      color: elapsed ? '#ffffff' : mode.color,
       borderColor: 'rgba(255,255,255,.75)',
       opacity: '1'
     });
-    panel.title = mode.name;
-    panel.textContent = elapsed || (apiAutoMode[kind] === 'manual'
+    panel.title = maintenance ? 'メンテナンス休止（5時再開）' : mode.name;
+    panel.textContent = elapsed || (maintenance ? 'メンテ' : apiAutoMode[kind] === 'manual'
       ? 'OFF'
       : String(Math.max(0, Math.ceil((apiAutoNextAt[kind] - nowMs()) / 1000))));
   }
@@ -692,10 +745,10 @@
   function updateAcquirePanel() {
     if (!acquirePanel) return;
     Object.assign(acquirePanel.style, {
-      background: acquireEnabled ? '#d50000' : '#111',
-      color: '#fff', borderColor: acquireEnabled ? '#b71c1c' : '#666', opacity: '1'
+      background: acquireEnabled ? '#dc3545' : '#333333',
+      color: '#ffffff', borderColor: acquireEnabled ? '#dc3545' : '#666', opacity: '1'
     });
-    acquirePanel.textContent = '👍️';
+    acquirePanel.textContent = acquireEnabled ? '👍️' : '⏸️';
     acquirePanel.title = acquireEnabled ? '自動取得ON（最新APIの空室を取得）' : '自動取得OFF';
   }
   function saveAcquireState() {
@@ -737,7 +790,9 @@
   function isAcquirePriceAllowed(value) {
     if (typeof value !== 'number' && typeof value !== 'string') return false;
     const price = Number(value);
-    return Number.isFinite(price) && price >= AUTO_ACQUIRE_PRICE_MIN && price < AUTO_ACQUIRE_PRICE_LIMIT;
+    return Number.isFinite(price) && price > 0 &&
+      (!acquirePrice.min || price >= Number(acquirePrice.min)) &&
+      (!acquirePrice.max || price <= Number(acquirePrice.max));
   }
   function tryAutoAcquire(rows, context) {
     if (!acquireEnabled || acquireCycle || getMaintenanceDelayMs() > 0 ||
@@ -2095,5 +2150,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.08');
+  internalLog('official DOM-order logger ready / rare room filter / v2.09');
 })();
