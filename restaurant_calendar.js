@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.55
+// @version      5.56
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -1271,9 +1271,6 @@
       notifyPanel.onclick = toggleNotify;
       researchNotifyPanel = document.createElement('div');
       compactButtonStyle(researchNotifyPanel, 31);
-      researchNotifyPanel.style.fontSize = '10px';
-      researchNotifyPanel.style.whiteSpace = 'pre-line';
-      researchNotifyPanel.style.lineHeight = '12px';
       researchNotifyPanel.onclick = toggleRotation;
       researchPanel = document.createElement('div');
       compactButtonStyle(researchPanel, 29);
@@ -1360,7 +1357,7 @@
   function renderDateSelection() {
     const rotating = rotationApplies(), selected = rotating ? dateSelection() : currentDateShortcut();
     dateButtons.forEach((b) => {
-      b.style.background = b.dataset.value === selected ? (rotating ? '#28a745' : '#ff0000') : '#0b1f3a';
+      b.style.background = b.dataset.value === selected ? (rotating ? '#00ffff' : '#ff0000') : '#0b1f3a';
       b.style.color = '#fff';
     });
   }
@@ -1872,9 +1869,9 @@
       }
     }
     if (researchNotifyPanel) {
-      researchNotifyPanel.style.background = rotationEnabled ? (rotationApplies() ? '#28a745' : '#777777') : '#333333';
+      researchNotifyPanel.style.background = rotationEnabled ? '#00ffff' : '#333333';
       researchNotifyPanel.style.color = '#fff';
-      researchNotifyPanel.textContent = rotationEnabled ? '🔄\nON' : '🔄\nOFF';
+      researchNotifyPanel.textContent = '🔄';
       researchNotifyPanel.title = rotationEnabled
         ? rotationApplies()
           ? `ローテーション ON：${rotationGroup().map((d) => d === 'end' ? '末' : `D${d}`).join(' → ')} / 全食事区分をONにすると巡回（9時調査・メンテナンス中は待機）`
@@ -3095,5 +3092,5 @@
     normalLogTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.55 起動`);
+  console.log(`[${NAME}] v5.56 起動`);
 })();
