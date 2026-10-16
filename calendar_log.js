@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📅 ホテルカレンダー
-// @version      5.36
+// @version      5.37
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -624,6 +624,8 @@
 
   const lastStateMap = new Map();
   const loadedKeys = new Set();
+  // このタブの保存待ちログ。差分検知用の履歴とは独立させる。
+  const csvBuffer = [];
   let automaticSearchPending = false;
   let dispatchingAutomaticSearch = false;
 
@@ -961,6 +963,49 @@
   dayMenu.append(dayHelp, dayGrid, clearDays);
   dayPicker.append(daySummary, dayMenu);
   row2.appendChild(dayPicker);
+  const btnCsv = makeBtn('📥', '#29b6f6', '#000000');
+  btnCsv.style.gridColumn = '4';
+  const updateCsvButton = () => {
+    btnCsv.title = `CSV保存：${csvBuffer.length}行（このタブ／ダウンロード開始後に保存用バッファをクリア）`;
+  };
+  const csvCell = value => {
+    let text = String(value ?? '');
+    if (typeof value === 'string' && /^[=+@\-\t\r]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  btnCsv.onclick = () => {
+    if (csvBuffer.length === 0) {
+      showPopup('CSV保存データなし', '#333333');
+      return;
+    }
+    const count = csvBuffer.length;
+    const header = ['読込日時', '対象年月', '記録種別', '客室名', '客室コード', '利用日', '販売状態', '在庫数', '価格ランク', '価格'];
+    let url = null;
+    const link = document.createElement('a');
+    try {
+      const text = '\uFEFF' + [header, ...csvBuffer.slice(0, count)]
+        .map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+      url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+      const now = new Date();
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}${pad(now.getMilliseconds(), 3)}`;
+      link.href = url;
+      link.download = `${stamp}_hotel_calendar.csv`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      csvBuffer.splice(0, count);
+      updateCsvButton();
+      showPopup(`CSVダウンロード開始：${count}行`, '#29b6f6', '#000000');
+    } catch (error) {
+      console.error('CSV保存エラー', error);
+      showPopup('CSV保存エラー（データ保持）', '#dc3545');
+    } finally {
+      link.remove();
+      if (url) setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+  };
+  updateCsvButton();
+  row2.appendChild(btnCsv);
   document.addEventListener('click', event => {
     if (!dayPicker.contains(event.target)) dayPicker.open = false;
   });
@@ -1299,6 +1344,11 @@
     const logYm = /^\d{6}$/.test(requestYm) ? requestYm : getDisplayedYearMonthRaw();
     const shortYm = /^\d{6}$/.test(logYm) ? `${logYm.slice(2, 4)}/${logYm.slice(4, 6)}` : '年月不明';
     const logRows = [];
+    const csvRows = [];
+    let csvObservedCount = 0;
+    const csvTime = `${nowObj.getFullYear()}/${pad(nowObj.getMonth() + 1)}/${pad(nowObj.getDate())} ${logTime}`;
+    const csvYm = /^\d{6}$/.test(logYm) ? `${logYm.slice(0, 4)}/${logYm.slice(4, 6)}` : '年月不明';
+    const csvKind = isFirstTime ? '初回' : forceFullLog ? '全件' : '差分';
     let hasChanges = false;
 
     for (const g of Object.values(infos)) {
@@ -1307,6 +1357,7 @@
 
         for (const [roomCd, b] of Object.entries(r.roomBedStockRangeInfos ?? {})) {
           for (const d of (b.roomBedStockRange ?? [])) {
+            csvObservedCount++;
             const dtRaw = d.useDate;
             const useDateObj = new Date(dtRaw.slice(0, 4), dtRaw.slice(4, 6) - 1, dtRaw.slice(6));
             const dt = `${dtRaw.slice(0, 4)}/${dtRaw.slice(4, 6)}/${dtRaw.slice(6)}`;
@@ -1367,6 +1418,7 @@
 
             if (showAll || changed) {
               logRows.push([`%c${dt}%c\t%c${LABEL[st]} ${rm} ${priceRank}`, '', '', STYLE[st]]);
+              csvRows.push([csvTime, csvYm, csvKind, roomName, commodityCd, dt, FULL_LABEL[st] ?? String(st), rm, priceRank, totalPrice]);
             }
           }
         }
@@ -1385,6 +1437,11 @@
       console.log(`▶${logTime} ${shortYm} 差分なし`);
     }
     loadedKeys.add(contextKey);
+    if (csvRows.length === 0) {
+      csvRows.push([csvTime, csvYm, csvObservedCount === 0 ? 'データなし' : '差分なし', '', '', '', '', '', '', '']);
+    }
+    csvRows.forEach(row => csvBuffer.push(row));
+    updateCsvButton();
 
     if (pendingNotifications.length > 0) {
       for (const item of pendingNotifications) {
