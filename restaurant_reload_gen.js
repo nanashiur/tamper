@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🍴📱レストラン一般再検索
-// @version      4.98
+// @name         🍴📋️レストラン日時指定
+// @version      5.00
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_NAME = '🍴📱レストラン一般再検索';
+  const SCRIPT_NAME = '🍴📋️レストラン日時指定';
   const MARK_ID = '__restaurant_reload_running_v4';
   const SNAPSHOT_STORAGE_KEY = 'restaurantDiffSnapshotsV2';
   const ERROR_CONTEXT_STORAGE_KEY = 'restaurantErrorNotificationContextV1';
@@ -874,7 +874,7 @@
         padding: '24px 30px',
         borderRadius: '14px',
         background: '#dc3545',
-        color: '#fff',
+        color: '#ffffff',
         boxShadow: '0 4px 20px rgba(0,0,0,0.45)',
         fontSize: '22px',
         fontWeight: 'bold',
@@ -1078,7 +1078,7 @@
       fontWeight: 'bold',
       cursor: 'pointer',
       background: bg,
-      color: '#fff',
+      color: '#ffffff',
       boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
       opacity: '0.9',
       textAlign: 'center',
@@ -1132,15 +1132,15 @@
 
   function updatePanels(isMaintenance = false) {
     if (isMaintenance) {
-      panels.main.textContent = '休止';
-      panels.main.style.background = '#888';
+      panels.main.textContent = 'メンテ';
+      panels.main.style.background = '#777777';
     } else {
       const colors = {
-        OFF: state.errorStopped ? '#dc3545' : '#333',
+        OFF: state.errorStopped ? '#dc3545' : '#333333',
         L: '#007bff',
         M: '#ff8c00',
         T: '#28a745',
-        S: '#e83e8c'
+        S: '#ff69b4'
       };
 
       if (state.searchStatus === 'OFF') {
@@ -1156,12 +1156,12 @@
       }
 
       panels.main.style.background = state.isSearchPending
-        ? `linear-gradient(to right, ${colors[state.searchStatus]} 0%, ${colors[state.searchStatus]} 20%, #800080 20%, #800080 100%)`
+        ? `linear-gradient(to right, ${colors[state.searchStatus]} 0%, ${colors[state.searchStatus]} 20%, #7b2cbf 20%, #7b2cbf 100%)`
         : colors[state.searchStatus];
     }
 
     if (!state.autoF5) {
-      panels.f5.style.background = '#333';
+      panels.f5.style.background = '#333333';
       panels.f5.textContent = 'OFF';
     } else {
       const m = Math.floor(state.f5WaitSec / 60);
@@ -1170,28 +1170,31 @@
       panels.f5.textContent = `${m}:${s.toString().padStart(2, '0')}`;
     }
 
-    panels.open.style.background = state.autoOpen ? '#28a745' : '#333';
-    panels.open.textContent = 'TAB';
-    panels.reserve.style.background = state.autoReserve ? '#dc3545' : '#333';
-    panels.reserve.textContent = '👆️';
+    panels.open.style.background = state.autoOpen ? '#28a745' : '#333333';
+    panels.open.textContent = state.autoOpen ? 'TAB' : 'OFF';
+    panels.open.title = state.autoOpen ? '時間枠を別タブで開く：ON' : '時間枠を別タブで開く：OFF';
+    panels.reserve.style.background = state.autoReserve ? '#dc3545' : '#333333';
+    panels.reserve.textContent = state.autoReserve ? '🎯' : 'OFF';
 
     if (state.notifyMode === 'VACANCY') {
-      panels.notify.style.background = '#ffc107';
-      panels.notify.style.color = '#000';
+      panels.notify.style.background = '#ffeb00';
+      panels.notify.style.color = '#000000';
       panels.notify.textContent = '🔔';
     } else if (state.notifyMode === 'ALL') {
       panels.notify.style.background = '#dc3545';
-      panels.notify.style.color = '#fff';
+      panels.notify.style.color = '#ffffff';
       panels.notify.textContent = '📢';
     } else {
-      panels.notify.style.background = '#333';
-      panels.notify.style.color = '#fff';
-      panels.notify.textContent = '🔕';
+      panels.notify.style.background = '#333333';
+      panels.notify.style.color = '#ffffff';
+      panels.notify.textContent = 'OFF';
     }
 
+    panels.notify.title = { VACANCY: '空席通知', ALL: '全通知' }[state.notifyMode] || '通知OFF';
+
     if (panels.reset) {
-      panels.reset.textContent = '🧹';
-      panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#000';
+      panels.reset.textContent = '🗑️';
+      panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#000000';
     }
   }
 
@@ -1327,7 +1330,7 @@
     state.waitSec = Math.floor(Math.random() * r[1]) + r[0];
   }
 
-  panels.main = createPanel(10, '#333', () => {
+  panels.main = createPanel(10, '#333333', () => {
     const nextStatus = {
       L: 'T',
       T: 'M',
@@ -1344,7 +1347,7 @@
     updatePanels();
   });
 
-  panels.notify = createPanel(50, '#333', () => {
+  panels.notify = createPanel(50, '#333333', () => {
     const nextNotifyMode = {
       VACANCY: 'ALL',
       ALL: 'OFF',
@@ -1356,7 +1359,7 @@
     updatePanels();
   });
 
-  panels.reset = createPanel(90, '#000', () => {
+  panels.reset = createPanel(90, '#000000', () => {
     state.excludedTimes = [];
     localStorage.setItem('excludedTimes', '[]');
 
@@ -1368,7 +1371,7 @@
     updatePanels();
   });
 
-  panels.f5 = createPanel(10, '#333', () => {
+  panels.f5 = createPanel(10, '#333333', () => {
     syncF5Clock();
     state.autoF5 = !state.autoF5;
     localStorage.setItem('autoF520min', state.autoF5 ? '1' : '0');
@@ -1376,7 +1379,7 @@
   });
   panels.f5.style.right = '84px';
 
-  panels.open = createPanel(50, '#333', () => {
+  panels.open = createPanel(50, '#333333', () => {
     state.autoOpen = !state.autoOpen;
     localStorage.setItem('autoOpenTimeTabs', state.autoOpen ? '1' : '0');
     updatePanels();
@@ -1384,7 +1387,7 @@
   });
   panels.open.style.right = '84px';
 
-  panels.reserve = createPanel(90, '#333', () => {
+  panels.reserve = createPanel(90, '#333333', () => {
     state.autoReserve = !state.autoReserve;
     localStorage.setItem('autoReserveClick', state.autoReserve ? '1' : '0');
     updatePanels();
@@ -1417,8 +1420,8 @@
       padding: '0',
       border: '1px solid #555',
       borderRadius: '3px',
-      background: '#000',
-      color: '#fff',
+      background: '#000000',
+      color: '#ffffff',
       fontSize: '11px',
       fontWeight: 'bold',
       lineHeight: '22px',
@@ -1449,16 +1452,16 @@
     navigationButtons.meals.forEach(({ button, value }) => {
       const selected = meal === value;
       button.style.borderColor = selected ? '#ff0000' : '#555';
-      button.style.background = selected ? '#ff0000' : '#000';
-      button.style.color = '#fff';
+      button.style.background = selected ? '#ff0000' : '#000000';
+      button.style.color = '#ffffff';
       button.setAttribute('aria-pressed', String(selected));
     });
 
     navigationButtons.days.forEach(({ button, day }) => {
       const selected = useDate === getJstUseDate(day);
       button.style.borderColor = selected ? '#ff0000' : '#555';
-      button.style.background = selected ? '#ff0000' : '#000';
-      button.style.color = '#fff';
+      button.style.background = selected ? '#ff0000' : '#000000';
+      button.style.color = '#ffffff';
       button.setAttribute('aria-pressed', String(selected));
     });
   }
