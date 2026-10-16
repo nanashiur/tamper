@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🍴📅レストラン週間モニター
-// @version      5.59
+// @name         🍴📅レストランカレンダー
+// @version      5.60
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -13,7 +13,7 @@
   if (window.__tdr_weekly_restaurant_monitor) return;
   window.__tdr_weekly_restaurant_monitor = true;
 
-  const NAME = '🍴📅レストラン週間モニター';
+  const NAME = '🍴📅レストランカレンダー';
   const UI_TICK = 1000,
     PENDING_ERROR_MS = 300000,
     IP_TIMEOUT = 5000,
@@ -3214,5 +3214,5 @@
     rotationTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.59 起動`);
+  console.log(`[${NAME}] v5.60 起動`);
 })();
