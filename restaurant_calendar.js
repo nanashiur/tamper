@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.57
+// @version      5.58
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -84,6 +84,9 @@
   let researchDelayNotifiedDate = '';
   const MIDNIGHT_CARRY_KEY = 'tdr_weekly_restaurant_midnight_carry_v1';
   let midnightReselectTimer = null;
+  const NORMAL_JOURNAL_PREFIX = 'tdr_weekly_restaurant_normal_journal_v1:';
+  let normalJournalKey = '', normalJournalReady = false, normalJournalWarned = false,
+    changeNotificationRotation = '';
   let rotationEnabled = localStorage.getItem(ROTATION_KEY) === '1',
     rotationRound = null,
     rotationSequence = 0,
@@ -275,6 +278,7 @@
     const states = cloneFullSnapshotMap(latestAnySnapshots);
     normalLogState.hourlySnapshots.push({ at: hourSnapshotAt(now), states });
     lastHourlySnapshotKey = key;
+    saveNormalJournal();
     console.log(`[${NAME}] 正時全枠状態保存：${analysisDateTime(hourSnapshotAt(now))}`);
     return true;
   }
@@ -316,6 +320,7 @@
     } else if (normalLogState.active && !p.active) normalLogState.active = false;
   }
   function prepareNormalLog(now = Date.now()) {
+    initializeNormalJournal();
     rollNormalLogPeriod(now);
     return normalLogState.active && !isMaintenance();
   }
@@ -326,6 +331,7 @@
     normalLogState.knownMeals.add(meal);
     m.success++;
     m.ranges.add(`${analysisDate(current.weekStart)}-${analysisDate(current.weekEnd)}`);
+    saveNormalJournal();
   }
   function recordNormalError(meal, error) {
     if (!prepareNormalLog()) return;
@@ -335,6 +341,7 @@
     normalLogState.knownMeals.add(meal || '食事区分不明');
     m.errors++;
     normalLogState.errors.push({ at, meal: meal || '食事区分不明', error: String(error) });
+    saveNormalJournal();
   }
   function recordNormalChanges(changes) {
     if (!changes?.length) return;
@@ -356,6 +363,8 @@
         vacancy: c.vacancy ? { count: c.vacancy.count, prevVacancyGapMs: c.vacancy.prevVacancyGapMs } : null
       });
     });
+    // Discord送信より先に、再読込で失われない領域へ差分を退避する。
+    saveNormalJournal();
   }
   function recordAm9Error(meal, error, phase) {
     if (!am9LogState.startAt) am9LogState.startAt = Date.now();
@@ -870,6 +879,7 @@
   function resetNormalLogState(now = Date.now()) {
     normalLogState = createNormalLogState(now);
     seedNormalMeals();
+    saveNormalJournal();
   }
   function flushNormalLog(mode, forceCurrent = false) {
     const now = Date.now();
@@ -879,7 +889,7 @@
       return false;
     }
     const old = normalLogState;
-    if (!sendNormalLogSnapshot(old, mode, now)) return false;
+    if (!sendNormalLogSnapshot(old, mode, now, true)) return false;
     resetNormalLogState(now);
     console.log(`[${NAME}] 通常在庫差分ログ送信・リセット：${mode}`);
     return true;
@@ -888,7 +898,7 @@
     const now = Date.now(),
       old = normalLogState,
       state = old.active ? old : { ...old, active: true };
-    if (!sendNormalLogSnapshot(state, '🔶強制停止', now)) return false;
+    if (!sendNormalLogSnapshot(state, '🔶強制停止', now, true)) return false;
     resetNormalLogState(now);
     console.log(`[${NAME}] 通常在庫差分ログ送信・リセット：🔶強制停止`);
     return true;
@@ -920,6 +930,7 @@
       if (boundary)
         normalLogState.hourlySnapshots.push({ at: boundary.at, states: cloneFullSnapshotMap(boundary.states) });
       seedNormalMeals();
+      saveNormalJournal();
       const end = new Date(endAt);
       if (end.getHours() === 0 && sameLocalDate(end, new Date(now))) scheduleMidnightReselect();
       return;
@@ -927,6 +938,68 @@
     if (!normalLogState.active && p.active) {
       normalLogState = createNormalLogState(now);
       seedNormalMeals();
+      saveNormalJournal();
+    }
+  }
+  function journalReplacer(key, value) {
+    // サイトのDate.now()がDateを返す環境でも、時刻は数値で復元する。
+    if (this[key] instanceof Date) return this[key].getTime();
+    if (value instanceof Map) return { __tdrType: 'Map', entries: [...value] };
+    if (value instanceof Set) return { __tdrType: 'Set', entries: [...value] };
+    return value;
+  }
+  function journalReviver(key, value) {
+    if (value?.__tdrType === 'Map') return new Map(value.entries);
+    if (value?.__tdrType === 'Set') return new Set(value.entries);
+    return value;
+  }
+  function initializeNormalJournal() {
+    if (normalJournalReady) return;
+    const name = restaurantName();
+    if (!name || name === 'レストラン名取得失敗') return;
+    normalJournalKey = NORMAL_JOURNAL_PREFIX + encodeURIComponent(name);
+    let restored = false;
+    try {
+      const raw = sessionStorage.getItem(normalJournalKey),
+        data = raw ? JSON.parse(raw, journalReviver) : null, state = data?.state;
+      if (data?.restaurant === name && state?.active &&
+          Number.isFinite(state.periodStartAt) && Number.isFinite(state.periodEndAt) &&
+          Array.isArray(state.events) && Array.isArray(state.errors) &&
+          Array.isArray(state.hourlySnapshots) && state.knownMeals instanceof Set && state.meals) {
+        normalLogState = state;
+        // 期間をまたいでも未出力ログを捨てず、通常の自動保存処理へ引き渡す。
+        lastHourlySnapshotKey = data.lastHourlySnapshotKey || lastHourlySnapshotKey;
+        const maps = { snapshots, latestNormalSnapshots, latestAnySnapshots, lastKnownRanges, vacancyHistory };
+        Object.entries(maps).forEach(([key, map]) => {
+          if (data[key] instanceof Map) {
+            map.clear();
+            data[key].forEach((value, entryKey) => map.set(entryKey, value));
+          }
+        });
+        restored = true;
+        console.log(`[${NAME}] 未保存ログ復元：差分${state.events.length}件 / ${analysisDateTime(state.startAt)}から継続`);
+      }
+    } catch (e) {
+      console.error(`[${NAME}] 未保存ログ復元失敗`, e);
+    }
+    if (!restored) restoreMidnightCarry();
+    else sessionStorage.removeItem(MIDNIGHT_CARRY_KEY);
+    normalJournalReady = true;
+  }
+  function saveNormalJournal() {
+    if (!normalJournalReady || !normalJournalKey) return false;
+    try {
+      sessionStorage.setItem(normalJournalKey, JSON.stringify({
+        restaurant: normalLogState.restaurant || restaurantName(), savedAt: new Date().getTime(),
+        state: normalLogState, lastHourlySnapshotKey,
+        snapshots, latestNormalSnapshots, latestAnySnapshots, lastKnownRanges, vacancyHistory
+      }, journalReplacer));
+      normalJournalWarned = false;
+      return true;
+    } catch (e) {
+      if (!normalJournalWarned) console.error(`[${NAME}] 未保存ログの退避失敗 / この状態での再読込ではログを引き継げません`, e);
+      normalJournalWarned = true;
+      return false;
     }
   }
   function saveMidnightCarry() {
@@ -1003,6 +1076,8 @@
     }, 5000);
   }
   function normalLogTick() {
+    initializeNormalJournal();
+    if (!normalJournalReady) return;
     rollNormalLogPeriod();
     captureHourlySnapshot();
   }
@@ -1352,6 +1427,8 @@
   }
   function searchDateShortcut(value) {
     // 数字パネルの手動操作は、自動読込のON/OFFにかかわらず通常検索する。
+    initializeNormalJournal();
+    saveNormalJournal();
     if (midnightReselectTimer !== null) {
       clearTimeout(midnightReselectTimer);
       midnightReselectTimer = null;
@@ -2539,6 +2616,7 @@
             if (changes.length) sendChangesDiscord(changes);
           }
           resetErrors(meal);
+          saveNormalJournal();
           success = true;
         }
       } catch (e) {
@@ -2762,6 +2840,8 @@
       console.warn(`[${NAME}] Discord通知先未設定`);
       return false;
     }
+    if (changeNotificationRotation)
+      description = `${description.slice(0, 3900)}\nローテーション：${changeNotificationRotation}`;
     const body = JSON.stringify({
       username: NAME,
       embeds: [{ title: title.slice(0, 256), description: description.slice(0, 4000), color }]
@@ -2820,6 +2900,15 @@
     });
   }
   function sendChangesDiscord(changes) {
+    const previous = changeNotificationRotation;
+    changeNotificationRotation = rotationApplies() ? normalCsvLeadLabel(new Date().getTime()) : '';
+    try {
+      sendChangesDiscordBody(changes);
+    } finally {
+      changeNotificationRotation = previous;
+    }
+  }
+  function sendChangesDiscordBody(changes) {
     syncNotifyDay();
     sendCategoryFullDiscord(changes);
     const categorized = { special: [], believe: [], rare: [] },
@@ -3081,7 +3170,7 @@
   };
 
   function init() {
-    restoreMidnightCarry();
+    initializeNormalJournal();
     refreshBlocks();
     setTimeout(refreshBlocks, 300);
     setTimeout(refreshBlocks, 1000);
@@ -3103,6 +3192,10 @@
   document.addEventListener('visibilitychange', checkForceStopReload);
   window.addEventListener('focus', checkForceStopReload);
   window.addEventListener('pageshow', checkForceStopReload);
+  window.addEventListener('pagehide', saveNormalJournal);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveNormalJournal();
+  });
   setInterval(() => {
     checkForceStopReload();
     maintenanceTick();
@@ -3111,5 +3204,5 @@
     rotationTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.57 起動`);
+  console.log(`[${NAME}] v5.58 起動`);
 })();
