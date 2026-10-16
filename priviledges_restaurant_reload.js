@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🍴🏨宿泊特典レストラン検索
-// @version      2.70
+// @name         🧳📱トラベルバッグSP版
+// @version      2.71
 // @match        https://reserve.tokyodisneyresort.jp/online/sp/travelbag/*
 // @run-at       document-idle
 // @grant        none
@@ -12,6 +12,7 @@
   'use strict';
 
   const win = window;
+  const SCRIPT_NAME = '🧳📱トラベルバッグSP版';
 
   const VACANCY_ICON = '❤️';
   const FULL_ICON = '🖤';
@@ -73,9 +74,9 @@
 
   const state = {
     notifyEnabled: localStorage.getItem('tdr_priv_notifyEnabled') !== '0',
-    autoCheckEnabled: localStorage.getItem(AUTO_CHECK_KEY) === '1',
-    autoNoticeEnabled: localStorage.getItem(AUTO_NOTICE_KEY) === '1',
-    autoDuplicationEnabled: localStorage.getItem(AUTO_DUPLICATION_KEY) === '1',
+    autoCheckEnabled: (localStorage.getItem(AUTO_CHECK_KEY) ?? '1') === '1',
+    autoNoticeEnabled: (localStorage.getItem(AUTO_NOTICE_KEY) ?? '1') === '1',
+    autoDuplicationEnabled: (localStorage.getItem(AUTO_DUPLICATION_KEY) ?? '1') === '1',
     excludedTimes: loadExcludedTimes(),
     mealStates: {},
     activeReloadMeal: '',
@@ -556,8 +557,7 @@
       const displayDate = getDisplayDateLong(ajaxOptions);
 
       return [
-        getDetectTime(icon),
-        `${displayDate}${mealName ? ` 【${mealName}】` : ''}`,
+        `${icon}${displayDate}【${mealName || 'すべて'}】`,
         `【宿泊特典】${restaurantName}`
       ].join('\n');
     }
@@ -616,7 +616,10 @@
       let body = lines.join('\n');
 
       if (!body) return;
-      if (body.length > 4000) body = `${body.slice(0, 3990)}\n…`;
+      const detectedLine = getNotificationDetectedLine(getDisplayDateLong(ajaxOptions));
+      const bodyLimit = 4000 - detectedLine.length - 1;
+      if (body.length > bodyLimit) body = `${body.slice(0, bodyLimit - 2)}\n…`;
+      body += `\n${detectedLine}`;
 
       const title = buildDiffTitle(titleIcon, restaurantName, mealName, ajaxOptions);
 
@@ -846,12 +849,20 @@
       return restaurantName;
     }
 
-    function getDetectTime(icon) {
+    function getDetectDateTime(d = new Date()) {
+      return `${String(d.getFullYear()).slice(-2)}年${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日 ${String(d.getHours()).padStart(2, '0')}時${String(d.getMinutes()).padStart(2, '0')}分${String(d.getSeconds()).padStart(2, '0')}秒`;
+    }
+
+    function getNotificationDetectedLine(displayDate) {
       const d = new Date();
-      const h = d.getHours().toString().padStart(2, '0');
-      const m = d.getMinutes().toString().padStart(2, '0');
-      const s = d.getSeconds().toString().padStart(2, '0');
-      return `${icon}${d.getMonth() + 1}/${d.getDate()} ${h}:${m}:${s}`;
+      const match = displayDate.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+      if (!match) return getDetectDateTime(d);
+
+      const targetDay = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      const detectedDay = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+      const days = Math.round((targetDay - detectedDay) / 86400000);
+      const relative = days > 0 ? `${days}日前` : days < 0 ? `${Math.abs(days)}日後` : '当日';
+      return `${getDetectDateTime(d)}　${relative}`;
     }
 
     function formatUseDateLong(yyyymmdd) {
@@ -938,7 +949,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: '🍴🏨宿泊特典レストラン検索',
+          username: SCRIPT_NAME,
           embeds: [
             {
               title: title,
@@ -968,7 +979,7 @@
         fontWeight: 'bold',
         cursor: 'pointer',
         background: bg,
-        color: '#fff',
+        color: '#ffffff',
         boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
         opacity: '0.95',
         textAlign: 'center',
@@ -999,8 +1010,8 @@
         fontSize: '14px',
         fontWeight: 'bold',
         cursor: 'pointer',
-        background: '#000',
-        color: '#fff',
+        background: '#333333',
+        color: '#ffffff',
         boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
         opacity: '0.95',
         textAlign: 'center',
@@ -1020,17 +1031,17 @@
     function updateActionPanels() {
       if (actionPanels.check) {
         actionPanels.check.textContent = state.autoCheckEnabled ? '入力ON' : '入力OFF';
-        actionPanels.check.style.background = state.autoCheckEnabled ? '#198754' : '#000';
+        actionPanels.check.style.background = state.autoCheckEnabled ? '#198754' : '#333333';
       }
 
       if (actionPanels.notice) {
         actionPanels.notice.textContent = state.autoNoticeEnabled ? '注意ON' : '注意OFF';
-        actionPanels.notice.style.background = state.autoNoticeEnabled ? '#198754' : '#000';
+        actionPanels.notice.style.background = state.autoNoticeEnabled ? '#198754' : '#333333';
       }
 
       if (actionPanels.duplication) {
         actionPanels.duplication.textContent = state.autoDuplicationEnabled ? '重複ON' : '重複OFF';
-        actionPanels.duplication.style.background = state.autoDuplicationEnabled ? '#198754' : '#000';
+        actionPanels.duplication.style.background = state.autoDuplicationEnabled ? '#198754' : '#333333';
       }
     }
 
@@ -1089,24 +1100,25 @@
           panel.style.background = '#7b2cbf';
         } else {
           panel.style.background = ms.searchStatus === 'OFF'
-            ? '#000'
-            : { L: '#007bff', M: '#ff8c00', S: '#e83e8c' }[ms.searchStatus];
+            ? '#333333'
+            : { L: '#007bff', M: '#ff8c00', S: '#ff69b4' }[ms.searchStatus];
         }
 
-        panel.style.color = '#fff';
+        panel.style.color = '#ffffff';
       });
 
-      panels.notify.textContent = '🔔';
-      panels.notify.style.background = state.notifyEnabled ? '#ffc107' : '#000';
-      panels.notify.style.color = state.notifyEnabled ? '#000' : '#fff';
+      panels.notify.textContent = state.notifyEnabled ? '🔔' : 'OFF';
+      panels.notify.title = state.notifyEnabled ? '通知ON' : '通知OFF';
+      panels.notify.style.background = state.notifyEnabled ? '#ffeb00' : '#333333';
+      panels.notify.style.color = state.notifyEnabled ? '#000000' : '#ffffff';
 
       panels.reset.textContent = '🗑️';
-      panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#000';
-      panels.reset.style.color = '#fff';
+      panels.reset.style.background = state.excludedTimes.length ? '#8e44ad' : '#000000';
+      panels.reset.style.color = '#ffffff';
     }
 
     MEALS.forEach((meal, index) => {
-      panels[meal.key] = createPanel(index * 35, 0, '#000', () => {
+      panels[meal.key] = createPanel(index * 35, 0, '#333333', () => {
         const ms = state.mealStates[meal.key];
         const next = { OFF: 'L', L: 'M', M: 'S', S: 'OFF' };
 
@@ -1121,13 +1133,13 @@
       });
     });
 
-    panels.notify = createPanel(0, 60, '#000', () => {
+    panels.notify = createPanel(0, 60, '#333333', () => {
       state.notifyEnabled = !state.notifyEnabled;
       localStorage.setItem('tdr_priv_notifyEnabled', state.notifyEnabled ? '1' : '0');
       updatePanels();
     });
 
-    panels.reset = createPanel(35, 60, '#000', () => {
+    panels.reset = createPanel(35, 60, '#000000', () => {
       state.excludedTimes = [];
       localStorage.removeItem('tdr_priv_excludedTimes');
 
@@ -1208,15 +1220,15 @@
 
           if (excluded) {
             box.textContent = '';
-            box.style.background = '#fff';
+            box.style.background = '#ffffff';
             box.style.borderColor = '#999';
-            box.style.color = '#fff';
+            box.style.color = '#ffffff';
             box.title = `${timeStr} は通知除外中`;
           } else {
             box.textContent = '✓';
             box.style.background = '#4d7cff';
             box.style.borderColor = '#4d7cff';
-            box.style.color = '#fff';
+            box.style.color = '#ffffff';
             box.title = `${timeStr} は通知対象`;
           }
         };
