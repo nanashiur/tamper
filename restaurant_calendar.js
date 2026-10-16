@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストラン週間モニター
-// @version      5.58
+// @version      5.59
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -856,7 +856,7 @@
     if (!state?.active) return false;
     const csvOk = downloadNormalCsv(state, mode, endAt);
     const discordOk = sendSummaryLog(
-      buildSystemTitle('📊', snapshotRangesText(latestAnySnapshots), state.restaurant || restaurantName()),
+      buildMonitoringSystemTitle('📊', snapshotRangesText(latestAnySnapshots), state.restaurant || restaurantName(), new Date(Number(endAt) - 1)),
       buildNormalDiscordSummary(state, mode, endAt),
       PURPLE
     );
@@ -2670,6 +2670,16 @@
   function buildSystemTitle(icon, range, name = restaurantName()) {
     return `${icon}${range}\n${name}`;
   }
+  function buildMonitoringSystemTitle(icon, range, name = restaurantName(), today = new Date()) {
+    if (rotationApplies()) {
+      const group = rotationGroup(), start = rotationWeek(group[0], today),
+        last = rotationWeek(group[group.length - 1], today),
+        end = new Date(Number(last.slice(0, 4)), Number(last.slice(4, 6)) - 1, Number(last.slice(6, 8)) + 6);
+      range = `${analysisDate(start)}-${analysisDate(rotationWeek(0, end))}`;
+      if (!icon.includes('🔄')) icon += '🔄';
+    }
+    return buildSystemTitle(icon, range, name);
+  }
   function buildErrorTitle(icon, meal, fallback = '') {
     const block = blocks.get(meal),
       dates = block
@@ -2680,7 +2690,7 @@
       start = dates[0] || last?.weekStart,
       end = dates[dates.length - 1] || last?.weekEnd,
       range = start && end ? `${analysisDate(start)}-${analysisDate(end)}` : fallback || '未取得';
-    return buildSystemTitle(icon, range);
+    return buildMonitoringSystemTitle(icon, range);
   }
   function buildTimeOnlyDescription(changes, label = '') {
     const times = sortChanges(changes).map((c) => `${c.time}${label ? `　${label}` : ''}`),
@@ -3204,5 +3214,5 @@
     rotationTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.58 起動`);
+  console.log(`[${NAME}] v5.59 起動`);
 })();
