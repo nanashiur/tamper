@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📅 客室指定在庫モニター
-// @version      5.33
+// @version      5.34
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -864,7 +864,7 @@
     rotationEnabled = !rotationEnabled;
     updateRotation();
   };
-  row1.appendChild(btnRotation);
+  row1.insertBefore(btnRotation, btnAutoGet);
 
   const advanceRotationMonth = sel => {
     const months = getRotationMonths();
