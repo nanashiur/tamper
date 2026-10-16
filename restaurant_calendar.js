@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📅レストランカレンダー
-// @version      5.60
+// @version      5.61
 // @match        https://reserve.tokyodisneyresort.jp/restaurant/calendar/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_calendar.js
@@ -1868,6 +1868,14 @@
       if (blocks.has(meal)) fireSameWeek(meal, false, '');
     }, wait);
   }
+  function normalAutoTick() {
+    if (rotationApplies() || researchWindowActive || isMaintenance() || midnightReselectTimer !== null) return;
+    // 起動時やDOMの一時消失後、ONのまま読込予約がなくなった区分を再予約する。
+    existingMeals().forEach((meal) => {
+      const s = getState(meal);
+      if (autoActive(s) && !s.pending && !s.timer) schedule(meal);
+    });
+  }
   function renderPanels() {
     syncNotifyDay();
     const now = performance.now(),
@@ -3210,9 +3218,10 @@
     checkForceStopReload();
     maintenanceTick();
     researchTick();
+    normalAutoTick();
     normalLogTick();
     rotationTick();
     renderPanels();
   }, UI_TICK);
-  console.log(`[${NAME}] v5.60 起動`);
+  console.log(`[${NAME}] v5.61 起動`);
 })();
