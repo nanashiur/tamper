@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📅 客室指定在庫モニター
-// @version      5.34
+// @version      5.35
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -29,7 +29,6 @@
   const LABEL = { 0: '空', 1: '満', 2: '吸', 3: '未' };
   const STYLE = { 0: 'color:red;font-weight:bold', 1: 'color:inherit', 2: 'color:blue', 3: 'color:green' };
   const MARKS = { 1: '①', 2: '②', 3: '③', 4: '④', 5: '⑤' };
-  const BTN_BG_COLOR = { 0: 'red', 1: 'black', 2: 'blue', 3: 'green' };
 
   const MODE_CONF = {
     0: { txt: 'OFF', bg: '#333333', fg: '#ffffff', name: '手動' },
@@ -198,6 +197,7 @@
   };
 
   const isClickableVacancyDate = (dtRaw, baseYm = '') => {
+    if (!isSelectedAcquireDay(dtRaw)) return false;
     const displayedYm = baseYm || getDisplayedYearMonthRaw();
 
     if (displayedYm && dtRaw.slice(0, 6) !== displayedYm) {
@@ -221,7 +221,7 @@
     }
 
     sortedVacancies = sortedVacancies
-      .filter(v => v.dtRaw <= getMaxClickableUseDate())
+      .filter(v => v.dtRaw <= getMaxClickableUseDate() && isSelectedAcquireDay(v.dtRaw))
       .sort((a, b) => b.dtRaw.localeCompare(a.dtRaw));
 
     const primary = [...document.querySelectorAll('.boxCalendar.month dl')];
@@ -634,7 +634,10 @@
 
   let mode = load('mode', 2);
   if (!Object.hasOwn(MODE_CONF, mode)) mode = 2;
-  const filters = load('filters', { 0: true, 1: true, 2: true, 3: true });
+  const savedAcquireDays = load('acquireDays', []);
+  const acquireDays = new Set((Array.isArray(savedAcquireDays) ? savedAcquireDays : [])
+    .filter(day => Number.isInteger(day) && day >= 1 && day <= 31));
+  const isSelectedAcquireDay = dtRaw => acquireDays.size === 0 || acquireDays.has(Number(dtRaw.slice(6, 8)));
   let notifyEnabled = load('notify', false);
   let rotationEnabled = load('rotation', false) === true;
   let maintenanceWaiting = false;
@@ -697,7 +700,7 @@
   });
 
   const row2 = Object.assign(document.createElement('div'), {
-    style: 'display:flex; justify-content:flex-start; align-items:center; gap:4px;'
+    style: 'display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;position:relative;'
   });
 
   const btnSearchMode = makeBtn(MODE_CONF[2].txt, MODE_CONF[2].bg, MODE_CONF[2].fg);
@@ -885,24 +888,85 @@
     sel.selectedIndex = [...sel.options].indexOf(next);
   };
 
-  const makeFilter = c => {
-    const b = makeBtn(LABEL[c], BTN_BG_COLOR[c], '#fff');
-
-    const updateF = () => {
-      b.style.opacity = filters[c] ? '1' : '0.3';
-    };
-
-    b.onclick = () => {
-      filters[c] = !filters[c];
-      updateF();
-      save('filters', filters);
-    };
-
-    updateF();
-    return b;
+  const calendarDaySelector = '.boxCalendar.month dl, .boxInputSelect .cal dl';
+  const highlightStyle = document.createElement('style');
+  highlightStyle.textContent = `
+    dl.cal-log-acquire-day { box-shadow:inset 0 0 0 3px #dc3545 !important; }
+    dl.cal-log-acquire-day dt.calendarDate { background-color:#dc3545 !important;color:#ffffff !important; }
+    .cal-log-day-picker > summary { list-style:none; }
+    .cal-log-day-picker > summary::-webkit-details-marker { display:none; }
+  `;
+  document.head.appendChild(highlightStyle);
+  const updateDayHighlights = () => {
+    document.querySelectorAll(calendarDaySelector).forEach(dl => {
+      const day = Number(dl.querySelector('dt.calendarDate')?.textContent?.trim());
+      dl.classList.toggle('cal-log-acquire-day', acquireDays.has(day));
+    });
   };
 
-  row2.append(makeFilter(0), makeFilter(1), makeFilter(2), makeFilter(3));
+  const dayPicker = document.createElement('details');
+  dayPicker.className = 'cal-log-day-picker';
+  dayPicker.style.cssText = 'grid-column:3;min-width:0;';
+  const daySummary = document.createElement('summary');
+  daySummary.style.cssText = 'box-sizing:border-box;width:100%;padding:4px 0;border-radius:4px;background:#333333;color:#ffffff;cursor:pointer;text-align:center;font-size:11px;line-height:1.5;font-weight:bold;white-space:nowrap;';
+  const dayMenu = document.createElement('div');
+  dayMenu.style.cssText = 'position:absolute;top:100%;right:0;left:0;margin-top:4px;padding:6px;border-radius:6px;background:#333333;color:#ffffff;box-shadow:0 4px 10px #0005;max-height:60vh;overflow:auto;';
+  const dayHelp = document.createElement('div');
+  dayHelp.textContent = '取得日（複数選択・各月共通）';
+  dayHelp.style.cssText = 'font-size:10px;margin-bottom:4px;';
+  const dayGrid = document.createElement('div');
+  dayGrid.style.cssText = 'display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;';
+  const updateAcquireDays = () => {
+    const days = [...acquireDays].sort((a, b) => a - b);
+    daySummary.textContent = days.length ? `${days.length}件▾` : '全日▾';
+    daySummary.title = days.length ? `自動取得対象：各月 ${days.join('・')}日` : '自動取得対象：日付指定なし（従来どおり）';
+    daySummary.setAttribute('aria-label', daySummary.title);
+    dayGrid.querySelectorAll('input').forEach(input => { input.checked = acquireDays.has(Number(input.value)); });
+    save('acquireDays', days);
+    updateDayHighlights();
+  };
+  for (let day = 1; day <= 31; day++) {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:1px;font-size:11px;cursor:pointer;color:#ffffff;';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = String(day);
+    input.setAttribute('aria-label', `${day}日`);
+    input.style.cssText = 'margin:0;width:13px;height:13px;flex:none;';
+    input.onchange = () => {
+      if (input.checked) acquireDays.add(day);
+      else acquireDays.delete(day);
+      updateAcquireDays();
+    };
+    label.append(input, document.createTextNode(String(day)));
+    dayGrid.appendChild(label);
+  }
+  const clearDays = document.createElement('button');
+  clearDays.type = 'button';
+  clearDays.textContent = '指定解除（全日）';
+  clearDays.style.cssText = 'margin-top:6px;background:#333333;color:#ffffff;border:1px solid #ffffff;border-radius:4px;font-size:11px;cursor:pointer;';
+  clearDays.onclick = () => { acquireDays.clear(); updateAcquireDays(); };
+  dayMenu.append(dayHelp, dayGrid, clearDays);
+  dayPicker.append(daySummary, dayMenu);
+  row2.appendChild(dayPicker);
+  document.addEventListener('click', event => {
+    if (!dayPicker.contains(event.target)) dayPicker.open = false;
+  });
+  dayPicker.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { dayPicker.open = false; daySummary.focus(); }
+  });
+  let highlightPending = false;
+  const highlightObserver = new MutationObserver(records => {
+    const calendarSelector = '.boxCalendar.month, .boxInputSelect .cal';
+    const changed = records.some(record =>
+      (record.target.nodeType === 1 ? record.target : record.target.parentElement)?.closest(calendarSelector) ||
+      [...record.addedNodes].some(node => node.nodeType === 1 &&
+        (node.matches(calendarSelector) || node.querySelector(calendarSelector))));
+    if (!changed || highlightPending) return;
+    highlightPending = true;
+    requestAnimationFrame(() => { highlightPending = false; updateDayHighlights(); });
+  });
+  highlightObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 
   panel.append(row1, row2);
   document.body.appendChild(panel);
@@ -923,6 +987,7 @@
   updateModes();
   updateNotify();
   updateRotation();
+  updateAcquireDays();
   initMonthClick();
   initCalendarStartPlus4();
 
@@ -1289,7 +1354,7 @@
             if (changed) hasChanges = true;
             lastStateMap.set(stateKey, { st, rm, priceRank });
 
-            if (filters[st] && (showAll || changed)) {
+            if (showAll || changed) {
               logRows.push([`%c${dt}%c\t%c${LABEL[st]} ${rm} ${priceRank}`, '', '', STYLE[st]]);
             }
           }
