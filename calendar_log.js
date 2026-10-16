@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🏨📅 客室指定在庫モニター
-// @version      5.35
+// @name         🏨📅 ホテルカレンダー
+// @version      5.36
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?showWay*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/calendar_log.js
@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_NAME = '🏨📅 客室指定在庫モニター';
+  const SCRIPT_NAME = '🏨📅 ホテルカレンダー';
   const SHARED_DATA_KEY = 'tdr_11am_reserve_data';
 
   const getDiscordWebhookUrl = () => {
@@ -34,7 +34,6 @@
     0: { txt: 'OFF', bg: '#333333', fg: '#ffffff', name: '手動' },
     1: { txt: '🏃‍♀️', bg: '#ff69b4', fg: '#ffffff', name: '短期' },
     2: { txt: '🚶', bg: '#007bff', fg: '#ffffff', name: '長期' },
-    3: { txt: '🎯', bg: '#dc3545', fg: '#ffffff', name: '自動取得' },
     4: { txt: '中', bg: '#ff8c00', fg: '#ffffff', name: '中期' }
   };
 
@@ -321,7 +320,7 @@
     return null;
   };
 
-  const clickReserveProceedButton = (foundVacancy) => {
+  const clickReserveProceedButton = (foundVacancy, run) => {
     if (reserveProceedStarted || reserveProceedClicked) return;
 
     reserveProceedStarted = true;
@@ -329,6 +328,8 @@
     const start = Date.now();
 
     const tryClick = () => {
+      if (run !== acquisitionRun) return;
+      if (!autoAcquireEnabled || !isClickableVacancyDate(foundVacancy.dtRaw)) { cancelAcquisition(); return; }
       if (reserveProceedClicked) return;
 
       const btn = findReserveProceedButton(foundVacancy);
@@ -346,6 +347,7 @@
       if (Date.now() - start < 1500) {
         setTimeout(tryClick, 50);
       } else {
+        cancelAcquisition();
         console.warn('予約手続きボタン未検出', {
           foundVacancy,
           buttons: [...document.querySelectorAll('button.next, button')].map(btn => ({
@@ -362,12 +364,14 @@
     setTimeout(tryClick, 200);
   };
 
-  const clickVacancyDate = (foundVacancies) => {
+  const clickVacancyDate = (foundVacancies, run) => {
     if (autoVacancyDateClicked) return;
 
     const start = Date.now();
 
     const tryClick = () => {
+      if (run !== acquisitionRun) return;
+      if (!autoAcquireEnabled || !foundVacancies.some(v => isClickableVacancyDate(v.dtRaw))) { cancelAcquisition(); return; }
       if (autoVacancyDateClicked) return;
 
       const result = findVacancyDateClickTarget(foundVacancies);
@@ -377,13 +381,14 @@
         clickElementLikeHuman(result.target);
         showPopup(`🎯 空室発見\n${result.foundVacancy.dt} 日付クリック`, 'rgba(204, 0, 0, 0.9)');
 
-        clickReserveProceedButton(result.foundVacancy);
+        clickReserveProceedButton(result.foundVacancy, run);
         return;
       }
 
       if (Date.now() - start < 5000) {
         setTimeout(tryClick, 100);
       } else {
+        cancelAcquisition();
         console.warn('空室日未検出', {
           displayedYm: getDisplayedYearMonthRaw(),
           maxClickableUseDate: getMaxClickableUseDate(),
@@ -633,7 +638,19 @@
   let fatalErrorCount = 0;
 
   let mode = load('mode', 2);
+  // 旧自動取得モードは取得ONだけを引き継ぎ、検索はOFFに分離する。
+  let autoAcquireEnabled = load('autoAcquire', mode === 3) === true;
+  if (mode === 3) mode = 0;
   if (!Object.hasOwn(MODE_CONF, mode)) mode = 2;
+  let acquisitionRun = 0;
+  let acquisitionInProgress = false;
+  const cancelAcquisition = () => {
+    acquisitionRun++;
+    acquisitionInProgress = false;
+    autoVacancyDateClicked = false;
+    reserveProceedStarted = false;
+    reserveProceedClicked = false;
+  };
   const savedAcquireDays = load('acquireDays', []);
   const acquireDays = new Set((Array.isArray(savedAcquireDays) ? savedAcquireDays : [])
     .filter(day => Number.isInteger(day) && day >= 1 && day <= 31));
@@ -686,9 +703,6 @@
     clearSearchWait();
     consecutiveErrorCount = 0;
     fatalErrorCount = 0;
-    autoVacancyDateClicked = false;
-    reserveProceedStarted = false;
-    reserveProceedClicked = false;
   };
 
   const panel = Object.assign(document.createElement('div'), {
@@ -704,12 +718,13 @@
   });
 
   const btnSearchMode = makeBtn(MODE_CONF[2].txt, MODE_CONF[2].bg, MODE_CONF[2].fg);
-  const btnAutoGet = makeBtn(MODE_CONF[3].txt, MODE_CONF[3].bg, MODE_CONF[3].fg);
+  const btnAutoGet = makeBtn('🎯', '#333333', '#ffffff');
 
   const renderRuntime = () => {
     const buttons = [btnSearchMode, btnAutoGet];
     const isSearchMode = [1, 2, 4].includes(mode);
-    const configs = [MODE_CONF[isSearchMode ? mode : 0], MODE_CONF[mode === 3 ? 3 : 0]];
+    const configs = [MODE_CONF[isSearchMode ? mode : 0],
+      { txt: '🎯', bg: autoAcquireEnabled ? '#dc3545' : '#333333', fg: '#ffffff' }];
     buttons.forEach((btn, i) => {
       btn.textContent = configs[i].txt;
       btn.style.setProperty('background-color', configs[i].bg, 'important');
@@ -720,7 +735,7 @@
     btnAutoGet.style.opacity = '1';
     btnSearchMode.style.opacity = '1';
     btnSearchMode.title = `自動読込：${isSearchMode ? MODE_CONF[mode].name : 'OFF'}（OFF→長期→中期→短期→OFF）`;
-    btnAutoGet.title = `自動取得：${mode === 3 ? 'ON' : 'OFF'}`;
+    btnAutoGet.title = `自動取得：${autoAcquireEnabled ? 'ON' : 'OFF'}（検索結果の空室を取得）`;
     if (forcedStop && mode === 0) {
       btnSearchMode.textContent = '🛑';
       btnSearchMode.style.setProperty('background-color', '#cc0000', 'important');
@@ -729,7 +744,7 @@
 
     const loading = loadingRequests.size > 0;
     if (loading || nextSearchAt !== null) {
-      const btn = mode === 3 ? btnAutoGet : btnSearchMode;
+      const btn = btnSearchMode;
       const seconds = loading
         ? Math.max(0, Math.floor((new Date().getTime() - loadingStartedAt) / 1000))
         : Math.max(0, Math.ceil((nextSearchAt - new Date().getTime()) / 1000));
@@ -805,6 +820,7 @@
   const updateModes = () => {
     renderRuntime();
     save('mode', mode);
+    save('autoAcquire', autoAcquireEnabled);
   };
 
   btnSearchMode.onclick = () => {
@@ -825,13 +841,9 @@
   };
 
   btnAutoGet.onclick = () => {
-    if (mode === 3) return;
-
-    resetModeRuntime();
-
-    mode = 3;
+    autoAcquireEnabled = !autoAcquireEnabled;
+    cancelAcquisition();
     updateModes();
-    triggerSearch();
   };
 
   row1.append(btnSearchMode, btnAutoGet);
@@ -839,8 +851,8 @@
   const btnNotify = makeBtn('🔔', '#333333', '#ffffff');
 
   const updateNotify = () => {
-    btnNotify.textContent = notifyEnabled ? '🔔' : 'OFF';
-    btnNotify.style.fontSize = notifyEnabled ? '14px' : '12px';
+    btnNotify.textContent = '🔔';
+    btnNotify.style.fontSize = '14px';
     btnNotify.style.opacity = '1';
     btnNotify.style.setProperty('background-color', notifyEnabled ? '#ffeb00' : '#333333', 'important');
     btnNotify.style.setProperty('color', notifyEnabled ? '#000000' : '#ffffff', 'important');
@@ -857,9 +869,9 @@
 
   const btnRotation = makeBtn('🔄', '#333333', '#ffffff');
   const updateRotation = () => {
-    btnRotation.textContent = rotationEnabled ? '🔄' : 'OFF';
-    btnRotation.style.fontSize = rotationEnabled ? '14px' : '12px';
-    btnRotation.style.setProperty('background-color', rotationEnabled ? '#007bff' : '#333333', 'important');
+    btnRotation.textContent = '🔄';
+    btnRotation.style.fontSize = '14px';
+    btnRotation.style.setProperty('background-color', rotationEnabled ? '#00ffff' : '#333333', 'important');
     btnRotation.title = `5ヶ月ローテーション：${rotationEnabled ? 'ON' : 'OFF'}（当月〜4ヶ月後／読込モードの間隔で巡回）`;
     save('rotation', rotationEnabled);
   };
@@ -1152,13 +1164,14 @@
             // 別の月へ手動変更した後の古い応答から、巡回や自動取得を開始しない。
             const displayedYm = getDisplayedYearMonthRaw();
             if (requestYm && displayedYm && requestYm !== displayedYm) return;
-            if (mode === 3 && foundVacancies.length > 0) {
+            if (autoAcquireEnabled && !acquisitionInProgress && foundVacancies.length > 0) {
+              acquisitionInProgress = true;
               clearSearchWait();
 
               mode = 0;
               updateModes();
 
-              clickVacancyDate(foundVacancies);
+              clickVacancyDate(foundVacancies, acquisitionRun);
               return;
             }
 
@@ -1172,8 +1185,6 @@
             } else if (mode === 4) {
               const randomInterval = Math.floor(Math.random() * (70001 - 50000)) + 50000;
               scheduleSearch(randomInterval, true);
-            } else if (mode === 3) {
-              scheduleSearch(0, true);
             }
           }).catch(error => console.error('在庫ログ処理エラー', error)).finally(finishLoading);
         };
