@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🏨📋️日付指定在庫モニター
-// @version      2.11
+// @name         🏨📋️ホテル日付指定
+// @version      2.12
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,8 +15,8 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.11';
-  const SCRIPT_NAME = '🏨📋️日付指定在庫モニター';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.12';
+  const SCRIPT_NAME = '🏨📋️ホテル日付指定';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
   const SNAPSHOT_SCHEMA = 'sp-search-scope-v1.99';
@@ -654,7 +654,7 @@
         for (const value of ['', ...ACQUIRE_PRICE_OPTIONS]) {
           const option = document.createElement('option');
           option.value = value;
-          option.textContent = value ? (Number(value) / 10000) + '万' : '--';
+          option.textContent = value ? String(Number(value) / 10000) : '--';
           select.appendChild(option);
         }
         select.addEventListener('change', () => {
@@ -669,7 +669,7 @@
       select.value = acquirePrice[bound];
       const reversed = acquirePrice.min && acquirePrice.max && Number(acquirePrice.min) > Number(acquirePrice.max);
       select.setCustomValidity(reversed ? '最小値が最大値を超えています（自動取得対象なし）' : '');
-      select.title = reversed ? '最小値が最大値を超えています（自動取得対象なし）' : labelText + '金額（-- は指定なし）';
+      select.title = reversed ? '最小値が最大値を超えています（自動取得対象なし）' : labelText + '金額（万円／-- は指定なし）';
     }
   }
   function updateRarePanel() {
@@ -2063,7 +2063,7 @@
       console.info(`対象: ${sourceName}`);
       console.info(`useDate: ${useDateText}`);
       console.info(`フィルター: ${filterLabel}`);
-      console.info('表示モード: 全室・全ステータス');
+      console.info(`表示モード: ${filterLabel}・全ステータス`);
       console.info(`DOM読込: bed=${domOrder.countCommodity} / room=${domOrder.countRoomName}`);
       if (rareFilterEnabled) {
         console.info(`レア部屋フィルターON: 対象${targetRows.length}件 / 全${allRows.length}件 / rule=${getRareRuleHash()}`);
@@ -2072,7 +2072,7 @@
       }
       const diffResult = handleNotifyDiff(targetRows, { allowEmptySnapshot });
       const changedRowKeys = diffResult.changedKeys || new Set();
-      const rows = allRows.slice();
+      const rows = targetRows.slice();
       console.info(`ログ集計: 表示${rows.length}件 / 対象${targetRows.length}件 / 全${allRows.length}件`);
       flushInternalLogs();
       console.groupEnd();
@@ -2081,7 +2081,7 @@
         ? 'background:#6a1b9a;color:#fff;font-weight:900;padding:1px 6px;border-radius:3px;line-height:1.1;'
         : 'color:inherit;font-weight:700;';
       roomGroupFn(
-        `%c${useDateText}%c / 全室 / 表示${rows.length}件`,
+        `%c${useDateText}%c / ${filterLabel} / 表示${rows.length}件`,
         dateTitleStyle,
         'color:inherit;font-weight:normal;'
       );
@@ -2142,5 +2142,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.11');
+  internalLog('official DOM-order logger ready / rare room filter / v2.12');
 })();
