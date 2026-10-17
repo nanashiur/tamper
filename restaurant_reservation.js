@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🕙️レストラン予約
-// @version      0.20
+// @version      0.21
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/*
@@ -68,16 +68,39 @@
     return date.toISOString().slice(0, 10).replace(/-/g, '');
   }
 
-  function parseStockRows(html, date) {
+  function parseStockResponse(html, nameCd) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const rows = [];
     for (const tr of doc.querySelectorAll('tr')) {
       const time = tr.querySelector('th')?.textContent.trim();
       const state = tr.querySelector('.state')?.textContent.replace(/\s+/g, ' ').trim();
       if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time || '') || !state) continue;
-      rows.push({ 利用日: date, 時刻: time, 在庫状況: state });
+      const handler = tr.querySelector('[onclick*="toOrderForDate"]')?.getAttribute('onclick') || '';
+      const call = handler.match(/toOrderForDate\s*\(\s*((?:(?:'[^']*'|"[^"]*")\s*,\s*){6}(?:'[^']*'|"[^"]*"))\s*\)/);
+      const args = call ? [...call[1].matchAll(/'([^']*)'|"([^"]*)"/g)].map(m => m[1] ?? m[2]) : [];
+      rows.push({ time, state, key: args[2] || '—', nameCd: args[4] || nameCd || '—', commodityCD: args[1] || '—' });
     }
-    return rows;
+    const notices = [...doc.querySelectorAll('.boxEmpty01.reservationTime p')]
+      .map(p => p.textContent.replace(/\s+/g, ' ').trim())
+      .filter(text => /以降.*予約開始/.test(text));
+    return { rows, notices };
+  }
+
+  function formatStockOutput(rows, notices, date, nameCd) {
+    const lines = [`利用日：${date.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1/$2/$3')}`, `nameCd: ${nameCd || '—'}`];
+    const groups = new Map();
+    for (const row of rows) {
+      const key = `${row.nameCd}|${row.commodityCD}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    }
+    for (const group of groups.values()) {
+      lines.push('', `nameCd: ${group[0].nameCd}　commodityCD: ${group[0].commodityCD}`, '時刻　 在庫状況　 KEY');
+      group.sort((a, b) => a.time.localeCompare(b.time));
+      for (const row of group) lines.push(`${row.time}　${row.state}　${row.key}`);
+    }
+    for (const notice of new Set(notices)) lines.push('', `受付開始前：${notice}`);
+    return lines.join('\n');
   }
 
   function startPanel() {
@@ -85,7 +108,7 @@
   function getTargetUseDate(timestamp = new Date().getTime()) {
     const today = new Date(timestamp + 9 * 60 * 60 * 1000);
     const year = today.getUTCFullYear();
-    const month = today.getUTCMonth() + 4;
+    const month = today.getUTCMonth() + 3;
     const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
     const target = new Date(Date.UTC(year, month, Math.min(today.getUTCDate(), lastDay)));
     return target.toISOString().slice(0, 10).replace(/-/g, '');
@@ -221,10 +244,12 @@
       const currentDate = document.getElementById('reservationOfDateHid')?.textContent.trim() ||
         new URLSearchParams(location.search).get('useDate') || '';
       const targetDate = nextStockDate(currentDate);
+      const nameCd = document.getElementById('nameCdHid')?.value || new URLSearchParams(location.search).get('nameCd') || '';
       const requests = [...stockRequests.values()].filter(request =>
         request.context === stockContext() && new URLSearchParams(request.params).get(request.dateKey) === currentDate);
       if (!requests.length) throw new Error('照会情報がありません。時間帯を一度開いてから再度押してください。');
       const allRows = [];
+      const notices = [];
       const failures = [];
       for (const request of requests) {
         const controller = new AbortController();
@@ -244,20 +269,21 @@
           }
           const response = await fetch(url.href, options);
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const rows = parseStockRows(await response.text(), targetDate);
-          if (!rows.length) throw new Error('時間帯データなし（満席とは判定しません）');
-          allRows.push(...rows);
+          const result = parseStockResponse(await response.text(), nameCd);
+          if (!result.rows.length && !result.notices.length) throw new Error('時間帯データなし（満席とは判定しません）');
+          allRows.push(...result.rows);
+          notices.push(...result.notices);
         } catch (error) {
           failures.push(error.name === 'AbortError' ? 'タイムアウト' : error.message);
         } finally { window.clearTimeout(timeout); }
       }
       const unique = [...new Map(allRows.map(row => [JSON.stringify(row), row])).values()];
-      unique.sort((a, b) => a.時刻.localeCompare(b.時刻));
-      console.group(`翌日在庫 ${targetDate}（画面で照会済みの時間帯 ${requests.length}件）`);
-      if (unique.length) console.table(unique);
+      console.group(`翌日在庫（画面で照会済みの時間帯 ${requests.length}件）`);
+      console.log(formatStockOutput(unique, notices, targetDate, nameCd));
       failures.forEach(message => console.warn(message));
       console.groupEnd();
       stockStatus.textContent = `${targetDate}：${unique.length}枠を出力` +
+        (notices.length ? `／受付開始前：${[...new Set(notices)].join(' / ')}` : '') +
         (failures.length ? `／未取得 ${failures.length}件（コンソール参照）` : '（照会済みの時間帯）');
     } catch (error) {
       stockStatus.textContent = error.message;
