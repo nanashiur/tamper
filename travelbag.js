@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧳💻️トラベルバッグPC版
-// @version      1.97
+// @version      1.98
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.97', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.98', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -209,9 +209,7 @@ function priorityMatches(p,time){
   const hour=m[1].padStart(2,'0'), minute=m[2];
   if(hour!==p.hour) return false;
   if(!p.minute) return true;
-  if(p.minute==='10') return minute==='10'||minute==='15';
-  if(p.minute==='40') return minute==='40'||minute==='45';
-  return minute===p.minute;
+  return minute===p.minute||Number(minute)===Number(p.minute)+5;
 }
 
 function priorityRank(time,ps){
