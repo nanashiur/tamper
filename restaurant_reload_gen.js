@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📋️レストラン日時指定
-// @version      5.01
+// @version      5.02
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -1673,25 +1673,66 @@
     for (const [key, value] of entries) params.set(key, String(value));
     const dates = [...params].filter(([key, value]) => /date/i.test(key) && /^\d{8}$/.test(value));
     const commodity = params.get('commodityCD') || params.get('commodityCd') || '';
+    params.delete('_');
+    params.sort();
     return {
+      requestKey: JSON.stringify([new URL(settings.url || location.href, location.href).pathname, params.toString(),
+        ...['adultNumHid', 'childNumHid', 'childAgeInformHid'].map(id => document.getElementById(id)?.value || ''),
+        new URL(location.href).searchParams.get('mealDivInform') || '']),
       date: dates.length === 1 ? dates[0][1] : specialReservationDate(),
       nameCd: params.get('nameCd') || document.getElementById('nameCdHid')?.value || new URL(location.href).searchParams.get('nameCd') || '',
       commodityCD: /^[A-Z0-9]+$/.test(commodity) ? commodity : ''
     };
   }
 
+  // ページを開き直したときは初回から出力。照会単位で比較し、別時間帯の枠を削除扱いにしない。
+  const stockConsoleSnapshots = new Map();
+
+  function stockConsoleChanges(result, context) {
+    const key = JSON.stringify([context.date, context.nameCd, context.requestKey]);
+    const previous = stockConsoleSnapshots.get(key);
+    const rows = new Map(result.rows.map(row => [JSON.stringify([row.nameCd, row.time]), row]));
+    const notices = new Set(result.notices);
+    stockConsoleSnapshots.delete(key);
+    stockConsoleSnapshots.set(key, { rows, notices });
+    if (stockConsoleSnapshots.size > 100) stockConsoleSnapshots.delete(stockConsoleSnapshots.keys().next().value);
+    if (!previous) return { initial: true, rows: result.rows, notices: result.notices };
+    const changed = [];
+    for (const [id, row] of rows) {
+      const before = previous.rows.get(id);
+      if (!before) changed.push({ ...row, state: `枠追加：${row.state}` });
+      else if (before.state !== row.state || before.key !== row.key ||
+        (before.commodityCD !== row.commodityCD && before.commodityCD !== '—' && row.commodityCD !== '—')) {
+        changed.push({ ...row, state: `${before.state} → ${row.state}`, key: before.key === row.key ? row.key : `${before.key} → ${row.key}` });
+      }
+    }
+    for (const [id, row] of previous.rows) {
+      if (!rows.has(id)) changed.push({ ...row, state: `枠削除（前回：${row.state}）` });
+    }
+    const noticeChanges = [
+      ...[...notices].filter(text => !previous.notices.has(text)).map(text => `追加：${text}`),
+      ...[...previous.notices].filter(text => !notices.has(text)).map(text => `解除：${text}`)
+    ];
+    return { initial: false, rows: changed, notices: noticeChanges };
+  }
+
   function logStockResponse(xhr, settings) {
     try {
       const context = xhr.__tdrStockLogContext || stockLogContext(settings);
-      console.group('在庫状況');
+      if (xhr.status !== 200) {
+        console.warn(`在庫取得失敗: ${context.date} ${context.nameCd} HTTP ${xhr.status}`);
+        return;
+      }
+      const result = parseStockResponse(xhr.responseText || '', context.nameCd, context.commodityCD);
+      if (!result.rows.length && !result.notices.length) {
+        console.warn(`時間帯データなし（満席とは判定しません）: ${context.date} ${context.nameCd}`);
+        return;
+      }
+      const changes = stockConsoleChanges(result, context);
+      if (!changes.initial && !changes.rows.length && !changes.notices.length) return;
+      console.group(changes.initial ? '在庫状況（初回）' : '在庫状況（差分）');
       try {
-        if (xhr.status !== 200) {
-          console.warn('在庫取得失敗: HTTP ' + xhr.status);
-          return;
-        }
-        const result = parseStockResponse(xhr.responseText || '', context.nameCd, context.commodityCD);
-        console.log(formatStockOutput(result.rows, result.notices, context.date, context.nameCd));
-        if (!result.rows.length && !result.notices.length) console.warn('時間帯データなし（満席とは判定しません）');
+        console.log(formatStockOutput(changes.rows, changes.notices, context.date, context.nameCd));
       } finally { console.groupEnd(); }
     } catch (error) {
       console.warn('在庫コンソール出力失敗:', error.message);
