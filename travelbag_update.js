@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🍴💻️PC版レストラン時間変更
-// @version      1.60
+// @name         🧳💻️レストラン時間変更PC版
+// @version      1.61
 // @match        https://reserve.tokyodisneyresort.jp/online/restaurant/update/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag_update.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag_update.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.60', INSTALLED='__tdr_restaurant_update_installed__', PANEL_ID='__tdr_restaurant_update_panel';
+const VERSION='1.61', INSTALLED='__tdr_restaurant_update_installed__', PANEL_ID='__tdr_restaurant_update_panel';
 const PRIORITY_KEY='tdr_restaurant_update_priority_times';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -75,9 +75,7 @@ function priorityMatches(p,time){
   const m=String(time||'').trim().match(/^(\d{1,2}):(\d{2})$/);
   if(!p||!m||m[1].padStart(2,'0')!==p.hour) return false;
   if(!p.minute) return true;
-  if(p.minute==='10') return m[2]==='10'||m[2]==='15';
-  if(p.minute==='40') return m[2]==='40'||m[2]==='45';
-  return m[2]===p.minute;
+  return Number(m[2])===Number(p.minute)||Number(m[2])===Number(p.minute)+5;
 }
 function priorityRank(time,ps){
   for(let i=0;i<ps.length;i++) if(priorityMatches(ps[i],time)) return i;
