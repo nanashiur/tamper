@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🏨📋️ホテル日付指定
-// @version      2.12
+// @version      2.13
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/hotel_list.js
@@ -15,7 +15,7 @@
     console.warn('[DaySearch] すでに起動済みのため停止');
     return;
   }
-  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.12';
+  win.__TDR_DATETIME_STOCK_MONITOR_RUNNING__ = '2.13';
   const SCRIPT_NAME = '🏨📋️ホテル日付指定';
   const API_URL = 'https://reserve.tokyodisneyresort.jp/sp/hotel/api/queryHotelPriceStock/';
   const ENDPOINT = /\/sp\/hotel\/api\/queryHotelPriceStock\/?/;
@@ -537,6 +537,7 @@
       gridRow: row,
       gridColumn: column,
       justifySelf: 'end',
+      pointerEvents: 'auto',
       boxSizing: 'border-box',
       minWidth: Number(column) >= 3 ? PANEL.apiWidth : PANEL.minWidth,
       width: Number(column) >= 3 ? PANEL.apiWidth : PANEL.minWidth,
@@ -601,6 +602,7 @@
       panelContainer.id = PANEL.id;
       Object.assign(panelContainer.style, {
         position: 'fixed', top: '0px', right: '1px', zIndex: '2147483647',
+        pointerEvents: 'none',
         display: 'grid', gridTemplateColumns: `repeat(2, ${PANEL.minWidth}) repeat(2, ${PANEL.apiWidth})`,
         gridTemplateRows: 'repeat(4, 26px)', gap: '1px'
       });
@@ -646,6 +648,7 @@
         select.id = '__datetime_stock_monitor_price_' + bound;
         select.setAttribute('aria-label', '自動取得の' + labelText + '金額');
         Object.assign(select.style, {
+          pointerEvents: 'auto',
           gridRow: bound === 'min' ? '3' : '4', gridColumn: '1 / 3', justifySelf: 'stretch',
           width: '100%', minWidth: '0', height: PANEL.height, padding: '0 2px', margin: '0',
           boxSizing: 'border-box', font: 'bold 11px Arial, sans-serif',
@@ -2142,5 +2145,5 @@
   startPanelTicker();
   startHotelCsvAutoSave();
   startInitialApiAuto();
-  internalLog('official DOM-order logger ready / rare room filter / v2.12');
+  internalLog('official DOM-order logger ready / rare room filter / v2.13');
 })();
