@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴🕙️レストラン予約
-// @version      0.18
+// @version      0.19
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/?nameCd=*
@@ -14,32 +14,41 @@
   const pageUseDate = new URLSearchParams(location.search).get('useDate');
   if (!pageUseDate?.trim()) return;
 
+  function getTargetUseDate(timestamp = new Date().getTime()) {
+    const today = new Date(timestamp + 9 * 60 * 60 * 1000);
+    const year = today.getUTCFullYear();
+    const month = today.getUTCMonth() + 4;
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    const target = new Date(Date.UTC(year, month, Math.min(today.getUTCDate(), lastDay)));
+    return target.toISOString().slice(0, 10).replace(/-/g, '');
+  }
+
   // 一般枠のコード。KEYは対象日の実際の予約ボタンで確認して入力する。
   // 未確認のKEYは空欄のままにし、送信を無効にする。
   const SETS = [
     // セット1
-    { useDate: '20270115', time: '0910', openNumKey: '17',
+    { get useDate() { return getTargetUseDate(); }, time: '0910', openNumKey: '17',
       commodityCD: 'XXXRBBVLZA004', nameCd: 'RBVL0', contentsCd: '03' },
     // セット2
-    { useDate: '20270115', time: '1320', openNumKey: '9',
+    { get useDate() { return getTargetUseDate(); }, time: '1320', openNumKey: '9',
       commodityCD: 'XSS03RHPL3002', nameCd: 'RHPL3', contentsCd: '03' },
     // セット3
-    { useDate: '20270115', time: '1330', openNumKey: '10',
+    { get useDate() { return getTargetUseDate(); }, time: '1330', openNumKey: '10',
       commodityCD: 'XSS03RHPL3002', nameCd: 'RHPL3', contentsCd: '03' },
     // セット4
-    { useDate: '20270115', time: '1500', openNumKey: '1',
+    { get useDate() { return getTargetUseDate(); }, time: '1500', openNumKey: '1',
       commodityCD: 'XSS03RHPL4002', nameCd: 'RHPL4', contentsCd: '03' },
     // セット5
-    { useDate: '20270115', time: '1520', openNumKey: '3',
+    { get useDate() { return getTargetUseDate(); }, time: '1520', openNumKey: '3',
       commodityCD: 'XSS03RHPL4002', nameCd: 'RHPL4', contentsCd: '03' },
     // セット6
-    { useDate: '20270115', time: '1630', openNumKey: '10',
+    { get useDate() { return getTargetUseDate(); }, time: '1630', openNumKey: '10',
       commodityCD: 'XSS03RHPL4004', nameCd: 'RHPL4', contentsCd: '03' },
     // セット7
-    { useDate: '20270115', time: '1700', openNumKey: '31',
+    { get useDate() { return getTargetUseDate(); }, time: '1700', openNumKey: '31',
       commodityCD: 'XSS03RHPL3006', nameCd: 'RHPL3', contentsCd: '03' },
     // セット8
-    { useDate: '20270115', time: '1150', openNumKey: '48',
+    { get useDate() { return getTargetUseDate(); }, time: '1150', openNumKey: '48',
       commodityCD: 'XXXRLCANZA004', nameCd: 'RCAN0', contentsCd: '03' }
   ];
   const page = unsafeWindow;
