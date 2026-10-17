@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🧳トラベルバッグ
-// @version      1.96
+// @name         🧳💻️トラベルバッグPC版
+// @version      1.97
 // @match        https://reserve.tokyodisneyresort.jp/online/travelbag/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/travelbag.js
@@ -12,7 +12,7 @@
 (() => {
 'use strict';
 
-const VERSION='1.96', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
+const VERSION='1.97', INSTALLED='__tdr_travelbag_installed__', PANEL_ID='__tdr_travelbag_option_panel';
 const PRIORITY_KEY='tdr_travelbag_priority_times', LEGACY_KEY='tdr_travelbag_priority_time';
 if(window[INSTALLED]) return;
 window[INSTALLED]=true;
@@ -21,6 +21,7 @@ let autoEnabled=false, fireTimer=null, countdownTimer=null, nextFireAt=0, autoBu
 let autoReloadSeq=0, autoReloadWatch=null;
 let vacancySelectMode=0, vacancySelectButton=null, vacancySelectToken=0;
 let autoConfirmEnabled=false, autoConfirmButton=null, autoConfirmTimer=null, lastObservedCurrentSignature='';
+let autoConfirmFlow=null;
 let notifyEnabled=false, notifyButton=null, webhookWarned=false;
 let recordButton=null, recordedLogs=[], lastLoggedRestaurantLabel='';
 let deviceId='';
@@ -278,19 +279,46 @@ function getPhoneNumber(){
   return '090';
 }
 
-function prepareReservationForm(){
-  const phone=getPhoneNumber();
-  if(window.jQuery) window.jQuery('input[name="telNum"]').val(phone);
-  else{
-    const el=document.querySelector('input[name="telNum"]');
-    if(el) el.value=phone;
-  }
-  const agree=document.getElementById('agree');
-  if(agree&&!agree.checked) agree.click();
+function activeTravelBagModal(){
+  return [...document.querySelectorAll('.js-travelBagModal')].find(isShown)||null;
 }
 
-function getSelectedTimeInfo(){
-  const li=document.querySelector('#timeSlider li.current');
+function isShown(el){
+  if(!el||!el.isConnected) return false;
+  for(let node=el;node instanceof Element;node=node.parentElement){
+    if(!visible(node)||node.hidden) return false;
+  }
+  return true;
+}
+
+function reservationKind(modal){
+  if(!modal) return '';
+  const selected=selector=>/_o\.png(?:[?#]|$)/.test(modal.querySelector(selector)?.getAttribute('src')||'');
+  if(selected('.js-showRestaurant img')) return 'show';
+  if(selected('.js-restaurant img')) return 'restaurant';
+  if([...modal.querySelectorAll('.js-showRestaurantNext,.js-showRestaurantSubmit')].some(isShown)) return 'show';
+  return '';
+}
+
+function prepareReservationForm(modal=activeTravelBagModal(),show=false){
+  if(!modal||(!show&&reservationKind(modal)==='show')) return false;
+  const phone=modal.querySelector('input[name="telNum"]');
+  const agree=modal.querySelector('#agree');
+  const seat=modal.querySelector('#seatAreaConf');
+  const allergy=modal.querySelector('#allergyAgree');
+  const available=el=>el&&!el.disabled&&isShown(el.parentElement);
+  if(!isShown(phone)||!available(agree)||(show&&(!available(seat)||!available(allergy)))) return false;
+  if(show&&!seat.checked) seat.click();
+  phone.value=getPhoneNumber();
+  phone.dispatchEvent(new Event('input',{bubbles:true}));
+  phone.dispatchEvent(new Event('change',{bubbles:true}));
+  if(show&&!allergy.checked) allergy.click();
+  if(!agree.checked) agree.click();
+  return agree.checked&&(!show||(seat.checked&&allergy.checked));
+}
+
+function getSelectedTimeInfo(modal=activeTravelBagModal()){
+  const li=modal?.querySelector('#timeSlider li.current');
   if(!li) return null;
   const time=li.querySelector('a')?.textContent?.trim()||'';
   const openNumKey=li.querySelector('input[name="openNumKey"]')?.value||'';
@@ -300,56 +328,109 @@ function getSelectedTimeInfo(){
 
 function skipAutoConfirm(stage){
   console.log(formatTimeMs(),`自動確定: purchase系通信中（${stage}）→ スキップ`);
+  cancelAutoConfirmFlow();
+}
+
+function cancelAutoConfirmFlow(){
+  clearTimeout(autoConfirmTimer);
+  autoConfirmTimer=null;
+  autoConfirmFlow=null;
+}
+
+function canClickReservationButton(btn){
+  return isShown(btn)&&!btn.disabled&&btn.getAttribute('aria-disabled')!=='true'&&
+    !btn.classList.contains('disabled');
 }
 
 function scheduleAutoConfirm(info){
   if(!autoConfirmEnabled||!info) return;
-  clearTimeout(autoConfirmTimer);
-  const sig=info.signature;
+  cancelAutoConfirmFlow();
+  const modal=activeTravelBagModal(),kind=reservationKind(modal);
+  if(!modal||!kind) return;
+  autoConfirmFlow={modal,kind,info,phase:'selected',until:Date.now()+15000};
+  autoConfirmTimer=setTimeout(advanceAutoConfirm,0);
+}
 
-  autoConfirmTimer=setTimeout(()=>{
-    if(!autoConfirmEnabled) return;
-    if(purchasePending>0) return skipAutoConfirm('フォーム準備前');
+function advanceAutoConfirm(){
+  const flow=autoConfirmFlow;
+  if(!flow) return;
+  const {modal,kind,info}=flow;
+  if(!autoConfirmEnabled||activeTravelBagModal()!==modal||reservationKind(modal)!==kind){
+    cancelAutoConfirmFlow();
+    return;
+  }
+  if(Date.now()>flow.until){
+    console.warn(formatTimeMs(),'自動確定: 画面準備待ちタイムアウト');
+    cancelAutoConfirmFlow();
+    return;
+  }
+  const current=getSelectedTimeInfo(modal);
+  if(((flow.phase==='selected'||kind==='restaurant')&&!current)||(current&&current.signature!==info.signature)){
+    cancelAutoConfirmFlow();
+    return;
+  }
+  if(purchasePending>0) return skipAutoConfirm(flow.phase==='ready'?'確定ボタン直前':'フォーム準備前');
+  const wait=()=>{autoConfirmTimer=setTimeout(advanceAutoConfirm,50);};
+  if(kind==='show'&&flow.phase==='selected'){
+    const next=modal.querySelector('.js-showRestaurantNext');
+    if(!canClickReservationButton(next)) return wait();
+    flow.phase='waiting';
+    console.log(formatTimeMs(),'ショーレストラン: 次へ');
+    next.click();
+    if(autoConfirmFlow===flow) wait();
+    return;
+  }
+  const btn=modal.querySelector(kind==='show'?'#confirmBtn.js-showRestaurantSubmit':'#confirmBtn');
+  if(!isShown(btn)) return wait();
+  if(kind==='restaurant'&&btn.classList.contains('js-showRestaurantSubmit')) return wait();
+  if(flow.phase!=='ready'){
+    if(!prepareReservationForm(modal,kind==='show')) return wait();
+    if(autoConfirmFlow!==flow) return;
+    flow.phase='ready';
+    autoConfirmTimer=setTimeout(advanceAutoConfirm,0);
+    return;
+  }
+  const agree=modal.querySelector('#agree');
+  if(!agree?.checked||(kind==='show'&&(!modal.querySelector('#seatAreaConf')?.checked||!modal.querySelector('#allergyAgree')?.checked))) return wait();
+  if(!canClickReservationButton(btn)) return wait();
 
-    const cur=getSelectedTimeInfo();
-    if(!cur||cur.signature!==sig) return;
-    prepareReservationForm();
+  autoEnabled=false;
+  clearTimeout(fireTimer);
+  fireTimer=null;
+  nextFireAt=0;
+  clearAutoReloadWatch();
+  stopCountdown();
+  updateAutoButtonBg();
+  pending.size?updatePending():updateCountdown();
+  autoConfirmEnabled=false;
+  cancelAutoConfirmFlow();
+  updateAutoConfirmButton();
 
-    setTimeout(()=>{
-      if(!autoConfirmEnabled) return;
-      if(purchasePending>0) return skipAutoConfirm('確定ボタン直前');
-
-      const now=getSelectedTimeInfo(), btn=document.getElementById('confirmBtn');
-      if(!now||now.signature!==sig) return;
-      if(!btn) return console.warn(formatTimeMs(),'自動確定: confirmBtn が見つかりません');
-
-      autoEnabled=false;
-      clearTimeout(fireTimer);
-      fireTimer=null;
-      nextFireAt=0;
-      clearAutoReloadWatch();
-      stopCountdown();
-      updateAutoButtonBg();
-      pending.size?updatePending():updateCountdown();
-      autoConfirmEnabled=false;
-      clearTimeout(autoConfirmTimer);
-      autoConfirmTimer=null;
-      updateAutoConfirmButton();
-
-      console.log(formatTimeMs(),'自動確定:',now.time,now.commodityCD,now.openNumKey);
-      try{ exportRecordedCsv(true); }catch(e){ console.warn(formatTimeMs(),'自動保存失敗',e); }
-      btn.click();
-    },0);
-  },0);
+  console.log(formatTimeMs(),'自動確定:',info.time,info.commodityCD,info.openNumKey);
+  try{ exportRecordedCsv(true); }catch(e){ console.warn(formatTimeMs(),'自動保存失敗',e); }
+  btn.click();
 }
 
 function checkAutoConfirmSelection(){
+  if(autoConfirmFlow){
+    const flow=autoConfirmFlow;
+    if(!autoConfirmEnabled||activeTravelBagModal()!==flow.modal||reservationKind(flow.modal)!==flow.kind) cancelAutoConfirmFlow();
+    else return;
+  }
   const cur=getSelectedTimeInfo();
   if(!cur){ lastObservedCurrentSignature=''; return; }
   if(cur.signature===lastObservedCurrentSignature) return;
   lastObservedCurrentSignature=cur.signature;
   if(autoConfirmEnabled) scheduleAutoConfirm(cur);
 }
+
+document.addEventListener('click',e=>{
+  if(!(e.target instanceof Element)) return;
+  if(e.target.closest('.js-choice a,.js-travelBagModal .close01,.js-travelBagModal .prev')){
+    cancelAutoConfirmFlow();
+    lastObservedCurrentSignature=getSelectedTimeInfo()?.signature||'';
+  }
+},true);
 
 function normalizeModalText(s){ return String(s||'').replace(/\s+/g,'').trim(); }
 
@@ -548,7 +629,7 @@ function installPageObserver(){
     childList:true,
     subtree:true,
     attributes:true,
-    attributeFilter:['style','class']
+    attributeFilter:['style','class','src','disabled','hidden']
   });
 
   processRestaurantModal();
@@ -942,7 +1023,7 @@ function sendStockDiffNotification(payload,groups){
       'Content-Type':'application/json'
     },
     body:JSON.stringify({
-      username:'🧳トラベルバッグ',
+      username:'🧳💻️トラベルバッグPC版',
       embeds:[{
         title:`🔔 ${name}`,
         description,
@@ -1653,9 +1734,7 @@ function createPanel(){
   autoConfirmButton=makeButton('確定 OFF','#777',()=>{
     autoConfirmEnabled=!autoConfirmEnabled;
 
-    clearTimeout(autoConfirmTimer);
-
-    autoConfirmTimer=null;
+    cancelAutoConfirmFlow();
 
     if(autoConfirmEnabled){
       const c=getSelectedTimeInfo();
@@ -1692,8 +1771,7 @@ function createPanel(){
 
     autoConfirmEnabled=true;
 
-    clearTimeout(autoConfirmTimer);
-    autoConfirmTimer=null;
+    cancelAutoConfirmFlow();
 
     const c=getSelectedTimeInfo();
 
