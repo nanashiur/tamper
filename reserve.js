@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         🏨11時予約
-// @version      2.58
+// @name         🏨🕚️ホテル予約
+// @version      2.59
 // @match        https://reserve.tokyodisneyresort.jp/sp/hotel/list/?useDate*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/reserve.js
@@ -32,6 +32,16 @@
   const CHECK_INTERVAL_STOP_MS = 1000;
   const CHECK_INTERVAL_PENDING_MS = 150;
   const CHECK_INTERVAL_READY_MS = 50;
+  const TIMER_ON_LATE_ALLOWANCE_MS = 5 * 60 * 1000;
+  const RELOAD_LATE_ALLOWANCE_MS = 10 * 60 * 1000;
+
+  // タイマーが間引かれても、予定時刻から許容時間内なら実行対象にする。
+  const isWithinTriggerWindow = (now, hour, minute, second, allowanceMs) => {
+    const target = new Date(now.getTime());
+    target.setHours(hour, minute, second, 0);
+    const delay = now.getTime() - target.getTime();
+    return delay >= 0 && delay <= allowanceMs;
+  };
 
   const CONSECUTIVE_ERROR_LIMIT = 9;
   const RESERVE_RETRY_ERROR_STATUS = 403;
@@ -103,6 +113,7 @@
   let IS_FORCED_STOP = false;
 
   let currentClickMode = 'STOP';
+  let timerOnStartedDate = '';
 
   let clickCyclePending = false;
   let clickCycleStartedAt = 0;
@@ -220,7 +231,13 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: '🏨11時予約',
+        username: typeof GM_info !== 'undefined'
+          ? GM_info.script.name
+          : '🏨🕚️ホテル予約' + (
+              TARGET_MANUAL && FIX_DATE_MANUAL && FIX_PF_MANUAL
+                ? '（' + TARGET.slice(5, 8) + '/' + FIX_DATE.slice(4) + '/' + FIX_PF + '）'
+                : ''
+            ),
         embeds: [{
           title: 'reserveエラー監視',
           color: 16776960,
@@ -272,11 +289,8 @@
     if (localStorage.getItem(STORAGE_RELOAD_DATE_KEY) === today) return;
 
     const now = new Date();
-    const h = now.getHours();
-    const m = now.getMinutes();
-    const s = now.getSeconds();
 
-    if (h === 10 && m === 30 && s >= reloadSec) {
+    if (isWithinTriggerWindow(now, 10, 30, reloadSec, RELOAD_LATE_ALLOWANCE_MS)) {
       localStorage.setItem(STORAGE_RELOAD_DATE_KEY, today);
       location.reload();
     }
@@ -833,13 +847,15 @@
 
       if (
         TIMER_ON_MODE > 0 &&
-        h === 10 &&
-        m === 59 &&
-        s >= randomTriggerSec &&
+        timerOnStartedDate !== getTodayKey() &&
+        isWithinTriggerWindow(now, 10, 59, randomTriggerSec, TIMER_ON_LATE_ALLOWANCE_MS) &&
+        (!TIMER_OFF_ENABLED || h * 3600 + m * 60 + s < 11 * 3600 + 35) &&
         currentClickMode === 'STOP' &&
         !IS_FORCED_STOP &&
         DATA_SOURCE !== 'ERROR'
       ) {
+        // 同じページでは当日一度だけ。手動停止後に遅延枠内で再開始しない。
+        timerOnStartedDate = getTodayKey();
         currentClickMode = 'FAST';
 
         localStorage.setItem(
