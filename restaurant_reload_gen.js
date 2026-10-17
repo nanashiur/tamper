@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🍴📋️レストラン日時指定
-// @version      5.00
+// @version      5.01
 // @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reload_gen.js
@@ -1631,11 +1631,79 @@
     setTimeout(() => handleConsentDialog(), 150);
   }, true);
 
+  function parseStockResponse(html, nameCd, commodityCD = '') {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const rows = [];
+    for (const tr of doc.querySelectorAll('tr')) {
+      const time = tr.querySelector('th')?.textContent.trim();
+      const state = tr.querySelector('.state')?.textContent.replace(/\s+/g, ' ').trim();
+      if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time || '') || !state) continue;
+      const handler = tr.querySelector('[onclick*="toOrderForDate"]')?.getAttribute('onclick') || '';
+      const call = handler.match(/toOrderForDate\s*\(\s*((?:(?:'[^']*'|"[^"]*")\s*,\s*){6}(?:'[^']*'|"[^"]*"))\s*\)/);
+      const args = call ? [...call[1].matchAll(/'([^']*)'|"([^"]*)"/g)].map(m => m[1] ?? m[2]) : [];
+      rows.push({ time, state, key: args[2] || '—', nameCd: args[4] || nameCd || '—', commodityCD: args[1] || commodityCD || '—' });
+    }
+    const notices = [...doc.querySelectorAll('.boxEmpty01.reservationTime p')]
+      .map(p => p.textContent.replace(/\s+/g, ' ').trim())
+      .filter(text => /以降.*予約開始/.test(text));
+    return { rows, notices };
+  }
+
+  function formatStockOutput(rows, notices, date, nameCd) {
+    const lines = [`利用日：${date.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1/$2/$3')}`, `nameCd: ${nameCd || '—'}`];
+    const groups = new Map();
+    for (const row of rows) {
+      const key = `${row.nameCd}|${row.commodityCD}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    }
+    for (const group of groups.values()) {
+      lines.push('', `nameCd: ${group[0].nameCd}　commodityCD: ${group[0].commodityCD}`, '時刻　 在庫状況　 KEY');
+      group.sort((a, b) => a.time.localeCompare(b.time));
+      for (const row of group) lines.push(`${row.time}　${row.state}　${row.key}`);
+    }
+    for (const notice of new Set(notices)) lines.push('', `受付開始前：${notice}`);
+    return lines.join('\n');
+  }
+
+  function stockLogContext(settings = {}) {
+    const params = new URLSearchParams(new URL(settings.url || location.href, location.href).search);
+    const data = settings.data;
+    const entries = typeof data === 'string' ? new URLSearchParams(data) : Object.entries(data || {});
+    for (const [key, value] of entries) params.set(key, String(value));
+    const dates = [...params].filter(([key, value]) => /date/i.test(key) && /^\d{8}$/.test(value));
+    const commodity = params.get('commodityCD') || params.get('commodityCd') || '';
+    return {
+      date: dates.length === 1 ? dates[0][1] : specialReservationDate(),
+      nameCd: params.get('nameCd') || document.getElementById('nameCdHid')?.value || new URL(location.href).searchParams.get('nameCd') || '',
+      commodityCD: /^[A-Z0-9]+$/.test(commodity) ? commodity : ''
+    };
+  }
+
+  function logStockResponse(xhr, settings) {
+    try {
+      const context = xhr.__tdrStockLogContext || stockLogContext(settings);
+      console.group('在庫状況');
+      try {
+        if (xhr.status !== 200) {
+          console.warn('在庫取得失敗: HTTP ' + xhr.status);
+          return;
+        }
+        const result = parseStockResponse(xhr.responseText || '', context.nameCd, context.commodityCD);
+        console.log(formatStockOutput(result.rows, result.notices, context.date, context.nameCd));
+        if (!result.rows.length && !result.notices.length) console.warn('時間帯データなし（満席とは判定しません）');
+      } finally { console.groupEnd(); }
+    } catch (error) {
+      console.warn('在庫コンソール出力失敗:', error.message);
+    }
+  }
+
   if (typeof $ !== 'undefined') {
     $(document).on('ajaxSend', (event, xhr, settings) => {
       if (!String(settings.url || '').includes('ajaxReservationOfDate')) return;
       if (state.errorReloadScheduled || state.freezeReloadScheduled) return;
 
+      try { xhr.__tdrStockLogContext = stockLogContext(settings); } catch {}
       refreshCommodityMealMap(document);
 
       if (state.ajaxBatchFinalizeTimer) {
@@ -1661,6 +1729,7 @@
 
     $(document).on('ajaxComplete', (event, xhr, settings) => {
       if (!String(settings.url || '').includes('ajaxReservationOfDate')) return;
+      logStockResponse(xhr, settings);
       if (state.errorReloadScheduled || state.freezeReloadScheduled) return;
 
       state.ajaxStatuses.push(xhr.status);
