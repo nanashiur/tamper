@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         ⏳️待合室タイマー
-// @version      6.09
+// @name         ⏳️待合室退出タイマー
+// @version      6.10
 // @match        https://reserve.tokyodisneyresort.jp/*
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_limit.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/waitingroom_limit.js
@@ -68,6 +68,12 @@
     max-width: 70vw;
   `;
 
+  // 最上段：このブラウザーからIP確認サービスへ接続した際のIP
+  const ipRow = document.createElement('div');
+  ipRow.textContent = 'IP：取得中';
+  ipRow.title = '起動時に取得した接続元IP（ipify）。TDR側の接続元IPを保証するものではありません。';
+  ipRow.style.cssText = 'margin-bottom: 3px; text-align: left; overflow-wrap: anywhere;';
+
   // 上段：開始
   const startRow = document.createElement('div');
   startRow.textContent = `開始 ${startStrMs}`;
@@ -129,9 +135,32 @@
   block.appendChild(meter);
   block.appendChild(timeDisplay);
 
+  container.appendChild(ipRow);
   container.appendChild(startRow);
   container.appendChild(block);
   document.body.appendChild(container);
+
+  const ipController = new AbortController();
+  const ipTimeout = setTimeout(() => ipController.abort(), 10000);
+  const loadIP = async () => {
+    try {
+      const response = await fetch('https://api64.ipify.org?format=json', {
+        signal: ipController.signal,
+        cache: 'no-store',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer'
+      });
+      if (!response.ok) throw new Error('IP lookup failed');
+      const data = await response.json();
+      if (typeof data.ip !== 'string' || !data.ip.trim()) throw new Error('Missing IP');
+      ipRow.textContent = `IP：${data.ip.trim()}`;
+    } catch {
+      ipRow.textContent = 'IP：取得失敗';
+    } finally {
+      clearTimeout(ipTimeout);
+    }
+  };
+  void loadIP();
 
   // 期限計算
   const cookieValue = decodeURIComponent(acceptedCookie.split('=')[1]);
@@ -175,6 +204,8 @@
 
   // クリックで閉じる
   container.addEventListener('click', () => {
+    ipController.abort();
+    clearTimeout(ipTimeout);
     clearInterval(timerId);
     container.remove();
   });
