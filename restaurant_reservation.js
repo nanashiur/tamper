@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         🍴🕙️レストラン予約
-// @version      0.19
+// @version      0.20
 // @updateURL    https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
 // @downloadURL  https://raw.githubusercontent.com/nanashiur/tamper/refs/heads/main/restaurant_reservation.js
-// @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/?nameCd=*
-// @run-at       document-end
+// @match        https://reserve.tokyodisneyresort.jp/sp/restaurant/check/*
+// @run-at       document-start
 // @grant        unsafeWindow
 // ==/UserScript==
 
@@ -13,6 +13,74 @@
 
   const pageUseDate = new URLSearchParams(location.search).get('useDate');
   if (!pageUseDate?.trim()) return;
+
+  const stockRequests = new Map();
+  const xhrInfo = new WeakMap();
+  const xhrProto = unsafeWindow.XMLHttpRequest.prototype;
+  const originalOpen = xhrProto.open;
+  const originalSend = xhrProto.send;
+  const originalHeader = xhrProto.setRequestHeader;
+
+  function stockContext() {
+    return ['nameCdHid', 'contentsCdHid', 'adultNumHid', 'childNumHid', 'childAgeInformHid']
+      .map(id => document.getElementById(id)?.value ?? '').join('|');
+  }
+
+  function captureStockRequest(method, address, body, contentType = '') {
+    try {
+      const url = new URL(address, location.href);
+      if (url.origin !== location.origin || !/\/ajaxReservationOfDate\/?$/.test(url.pathname)) return;
+      method = String(method).toUpperCase();
+      if (!['GET', 'POST'].includes(method)) return;
+      if (method === 'POST' && (typeof body !== 'string' || !/application\/x-www-form-urlencoded/i.test(contentType))) return;
+      const params = method === 'GET' ? new URLSearchParams(url.search) : new URLSearchParams(body);
+      const dateKeys = [...params].filter(([key, value]) => /date/i.test(key) && /^\d{8}$/.test(value)).map(([key]) => key);
+      if (dateKeys.length !== 1) return;
+      const keyParams = new URLSearchParams(params);
+      keyParams.delete(dateKeys[0]);
+      keyParams.delete('_');
+      const key = `${method}|${url.pathname}|${keyParams}`;
+      stockRequests.set(key, { method, url: url.href, params: params.toString(), dateKey: dateKeys[0], context: stockContext() });
+      if (stockRequests.size > 20) stockRequests.delete(stockRequests.keys().next().value);
+    } catch { /* 通常の通信には影響させない。 */ }
+  }
+
+  xhrProto.open = function(method, url, ...rest) {
+    xhrInfo.set(this, { method, url, contentType: '' });
+    return originalOpen.call(this, method, url, ...rest);
+  };
+  xhrProto.setRequestHeader = function(name, value) {
+    const info = xhrInfo.get(this);
+    if (info && String(name).toLowerCase() === 'content-type') info.contentType = String(value);
+    return originalHeader.call(this, name, value);
+  };
+  xhrProto.send = function(body) {
+    const info = xhrInfo.get(this);
+    if (info) captureStockRequest(info.method, info.url, body, info.contentType);
+    return originalSend.call(this, body);
+  };
+
+  function nextStockDate(raw) {
+    if (!/^\d{8}$/.test(raw)) throw new Error('表示日付を取得できません。');
+    const date = new Date(Date.UTC(+raw.slice(0, 4), +raw.slice(4, 6) - 1, +raw.slice(6, 8)));
+    if (date.toISOString().slice(0, 10).replace(/-/g, '') !== raw) throw new Error('表示日付が不正です。');
+    date.setUTCDate(date.getUTCDate() + 1);
+    return date.toISOString().slice(0, 10).replace(/-/g, '');
+  }
+
+  function parseStockRows(html, date) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const rows = [];
+    for (const tr of doc.querySelectorAll('tr')) {
+      const time = tr.querySelector('th')?.textContent.trim();
+      const state = tr.querySelector('.state')?.textContent.replace(/\s+/g, ' ').trim();
+      if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time || '') || !state) continue;
+      rows.push({ 利用日: date, 時刻: time, 在庫状況: state });
+    }
+    return rows;
+  }
+
+  function startPanel() {
 
   function getTargetUseDate(timestamp = new Date().getTime()) {
     const today = new Date(timestamp + 9 * 60 * 60 * 1000);
@@ -122,7 +190,14 @@
   const status = document.createElement('div');
   status.className = 'status';
   status.setAttribute('role', 'status');
-  actions.append(book);
+  const nextStock = document.createElement('button');
+  nextStock.type = 'button';
+  nextStock.textContent = '翌日在庫取得';
+  nextStock.title = '表示中の日付の翌日を照会し、コンソールに出力';
+  const stockStatus = document.createElement('div');
+  stockStatus.className = 'status';
+  stockStatus.setAttribute('role', 'status');
+  actions.append(book, nextStock);
   const autoRow = document.createElement('div');
   autoRow.className = 'auto-row';
   const autoEnabled = document.createElement('button');
@@ -135,8 +210,60 @@
   const autoStatus = document.createElement('div');
   autoStatus.className = 'status';
   autoRow.append(autoEnabled, autoStatus);
-  panel.append(tabs, values, autoRow, actions, status);
+  panel.append(tabs, values, autoRow, actions, status, stockStatus);
   document.body.append(panel);
+
+  nextStock.addEventListener('click', async () => {
+    if (nextStock.disabled) return;
+    nextStock.disabled = true;
+    stockStatus.textContent = '翌日の在庫を取得中…';
+    try {
+      const currentDate = document.getElementById('reservationOfDateHid')?.textContent.trim() ||
+        new URLSearchParams(location.search).get('useDate') || '';
+      const targetDate = nextStockDate(currentDate);
+      const requests = [...stockRequests.values()].filter(request =>
+        request.context === stockContext() && new URLSearchParams(request.params).get(request.dateKey) === currentDate);
+      if (!requests.length) throw new Error('照会情報がありません。時間帯を一度開いてから再度押してください。');
+      const allRows = [];
+      const failures = [];
+      for (const request of requests) {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 20000);
+        try {
+          const params = new URLSearchParams(request.params);
+          params.set(request.dateKey, targetDate);
+          params.delete('_');
+          const url = new URL(request.url);
+          const options = { method: request.method, credentials: 'same-origin', redirect: 'error',
+            cache: 'no-store', signal: controller.signal,
+            headers: { 'Accept': 'text/html, */*; q=0.01', 'X-Requested-With': 'XMLHttpRequest' } };
+          if (request.method === 'GET') url.search = params.toString();
+          else {
+            options.headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+            options.body = params.toString();
+          }
+          const response = await fetch(url.href, options);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const rows = parseStockRows(await response.text(), targetDate);
+          if (!rows.length) throw new Error('時間帯データなし（満席とは判定しません）');
+          allRows.push(...rows);
+        } catch (error) {
+          failures.push(error.name === 'AbortError' ? 'タイムアウト' : error.message);
+        } finally { window.clearTimeout(timeout); }
+      }
+      const unique = [...new Map(allRows.map(row => [JSON.stringify(row), row])).values()];
+      unique.sort((a, b) => a.時刻.localeCompare(b.時刻));
+      console.group(`翌日在庫 ${targetDate}（画面で照会済みの時間帯 ${requests.length}件）`);
+      if (unique.length) console.table(unique);
+      failures.forEach(message => console.warn(message));
+      console.groupEnd();
+      stockStatus.textContent = `${targetDate}：${unique.length}枠を出力` +
+        (failures.length ? `／未取得 ${failures.length}件（コンソール参照）` : '（照会済みの時間帯）');
+    } catch (error) {
+      stockStatus.textContent = error.message;
+      console.warn('翌日在庫取得:', error.message);
+    } finally { nextStock.disabled = false; }
+  });
 
   function ready(target) {
     return Object.values(target).every(value => typeof value === 'string' && value.trim()) &&
@@ -281,4 +408,7 @@
   render();
   checkAuto();
   window.setInterval(render, 1000);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startPanel, { once: true });
+  else startPanel();
 })();
